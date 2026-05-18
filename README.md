@@ -61,10 +61,8 @@ After optimization (MaxIO >= 0.3.2)
 ### Build from Source
 
 ```bash
-# Build frontend (required — assets are embedded into the binary)
-cd ui && bun run build && cd ..
-
-# Build binary
+# Build frontend (optional — cargo build also builds and embeds it)
+# Build binary (build.rs runs the UI build and embeds it)
 cargo build --release
 
 # Run

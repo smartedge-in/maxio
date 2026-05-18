@@ -1,3 +1,20 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::redundant_closure,
+    clippy::redundant_pattern_matching,
+    clippy::needless_borrows_for_generic_args,
+    clippy::io_other_error,
+    clippy::if_same_then_else,
+    clippy::manual_pattern_char_comparison,
+    clippy::derivable_impls,
+    clippy::items_after_test_module,
+    clippy::overly_complex_bool_expr,
+    clippy::too_many_arguments,
+    clippy::new_without_default,
+    clippy::needless_bool,
+    clippy::collapsible_else_if
+)]
+
 mod api;
 mod auth;
 mod config;
@@ -23,7 +40,7 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "maxio",
     about = "S3-compatible object storage server",
-    version = env!("MAXIO_VERSION")
+    version = env!("CARGO_PKG_VERSION")
 )]
 struct Cli {
     #[command(subcommand)]
@@ -35,6 +52,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Start the HTTP/S3 server (default when no subcommand is provided)
+    Serve,
+
     /// Check server health by sending an HTTP GET request
     Healthcheck {
         /// Healthcheck endpoint URL
@@ -82,6 +102,7 @@ fn default_healthcheck_url() -> String {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Some(Commands::Serve) | None => {}
         Some(Commands::Healthcheck { url, timeout_ms }) => {
             return run_healthcheck(&url, timeout_ms).await;
         }
@@ -91,7 +112,6 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Keyring(KeyringCmd::List { ref data_dir })) => {
             return run_keyring_list(data_dir).await;
         }
-        None => {}
     }
 
     tracing_subscriber::fmt()
@@ -155,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    tracing::info!("MaxIO v{} listening on {}", env!("MAXIO_VERSION"), addr);
+    tracing::info!("MaxIO v{} listening on {}", env!("CARGO_PKG_VERSION"), addr);
     tracing::info!("Access Key: {}", config.access_key);
     tracing::info!("Secret Key: [REDACTED]");
     tracing::info!("Data dir:   {}", config.data_dir);
@@ -213,7 +233,7 @@ async fn run_healthcheck(url: &str, timeout_ms: u64) -> anyhow::Result<()> {
         "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: maxio-healthcheck/{}\r\n\r\n",
         path_and_query,
         host,
-        env!("MAXIO_VERSION")
+        env!("CARGO_PKG_VERSION")
     );
     timeout(timeout_duration, stream.write_all(request.as_bytes()))
         .await
@@ -274,7 +294,7 @@ async fn run_keyring_list(data_dir: &str) -> anyhow::Result<()> {
     let v: serde_json::Value = serde_json::from_str(&data)?;
     let empty = Vec::new();
     let entries = v.get("keys").and_then(|k| k.as_array()).unwrap_or(&empty);
-    println!("{:<20}  {:<26}  {}", "KEY_ID", "CREATED_AT", "ACTIVE");
+    println!("{:<20}  {:<26}  ACTIVE", "KEY_ID", "CREATED_AT");
     for e in entries {
         let id = e.get("id").and_then(|x| x.as_str()).unwrap_or("?");
         let created = e.get("created_at").and_then(|x| x.as_str()).unwrap_or("?");

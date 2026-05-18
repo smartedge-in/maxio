@@ -1,3 +1,10 @@
+#![allow(
+    clippy::needless_borrows_for_generic_args,
+    clippy::useless_vec,
+    clippy::needless_range_loop,
+    clippy::manual_repeat_n
+)]
+
 use maxio::config::Config;
 use maxio::server::{self, AppState};
 use maxio::storage::filesystem::FilesystemStorage;
@@ -38,6 +45,7 @@ async fn start_server() -> (String, TempDir) {
         erasure_coding: false,
         chunk_size: 10 * 1024 * 1024,
         parity_shards: 0,
+        max_console_body_bytes: 1024 * 1024,
     };
 
     let state = AppState {
@@ -483,6 +491,59 @@ async fn test_healthz_is_public_and_returns_ok() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_readyz_is_public_and_returns_ok() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = client()
+        .get(format!("{}/readyz", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_security_headers_are_applied() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = client()
+        .get(format!("{}/healthz", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers().get("x-content-type-options").unwrap(),
+        "nosniff"
+    );
+    assert!(resp.headers().contains_key("content-security-policy"));
+    assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
+}
+
+#[tokio::test]
+async fn test_ui_deep_link_uses_spa_fallback() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = client()
+        .get(format!("{}/ui/buckets/example/settings", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert!(
+        resp.headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("text/html")
+    );
+    assert_eq!(
+        resp.headers().get("cache-control").unwrap(),
+        "no-store, must-revalidate"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("MaxIO"));
 }
 
 #[tokio::test]
@@ -2179,6 +2240,40 @@ async fn console_login(base_url: &str) -> String {
 }
 
 #[tokio::test]
+async fn test_console_mutation_allows_dev_loopback_origin_via_vite_proxy() {
+    let (base_url, _tmp) = start_server().await;
+    let session = console_login(&base_url).await;
+
+    let resp = client()
+        .post(format!("{}/api/buckets", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .header("origin", "http://127.0.0.1:5173")
+        .json(&serde_json::json!({ "name": "dev-origin-bucket" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "body: {}", resp.text().await.unwrap());
+}
+
+#[tokio::test]
+async fn test_console_mutation_rejects_cross_site_origin() {
+    let (base_url, _tmp) = start_server().await;
+    let session = console_login(&base_url).await;
+
+    let resp = client()
+        .post(format!("{}/api/buckets", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .header("origin", "http://evil.example")
+        .json(&serde_json::json!({ "name": "evil-origin-bucket" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 403);
+}
+
+#[tokio::test]
 async fn test_console_delete_object_missing_bucket_returns_404() {
     let (base_url, _tmp) = start_server().await;
     let session = console_login(&base_url).await;
@@ -2703,6 +2798,7 @@ async fn start_server_ec() -> (String, TempDir) {
         erasure_coding: true,
         chunk_size: 1024,
         parity_shards: 0,
+        max_console_body_bytes: 1024 * 1024,
     };
 
     let state = AppState {
@@ -3158,6 +3254,7 @@ async fn start_server_parity(parity_shards: u32) -> (String, TempDir) {
         erasure_coding: true,
         chunk_size: 100,
         parity_shards,
+        max_console_body_bytes: 1024 * 1024,
     };
 
     let state = AppState {
@@ -5825,6 +5922,7 @@ async fn start_server_ec_parity(chunk_size: u64, parity_shards: u32) -> (String,
         erasure_coding: true,
         chunk_size,
         parity_shards,
+        max_console_body_bytes: 1024 * 1024,
     };
 
     let state = AppState {

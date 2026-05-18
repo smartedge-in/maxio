@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "setup": "bun i",
+    "teardown": null,
+    "run": "bash scripts/dev.sh"
+  },
+  "ports": [
+    {
+      "port": 5173,
+      "label": "Frontend"
+    }
+  ]
+}

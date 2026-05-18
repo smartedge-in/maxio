@@ -71,4 +71,8 @@ pub struct Config {
     /// Number of parity shards for erasure coding (0 = no parity, requires --erasure-coding)
     #[arg(long, env = "MAXIO_PARITY_SHARDS", default_value = "0")]
     pub parity_shards: u32,
+
+    /// Max request body size for console JSON/form API routes, in bytes. Object uploads are streaming and not covered by this limit.
+    #[arg(long, env = "MAXIO_MAX_CONSOLE_BODY_BYTES", default_value = "1048576")]
+    pub max_console_body_bytes: usize,
 }

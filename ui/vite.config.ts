@@ -1,14 +1,17 @@
-import { defineConfig } from 'vite'
-import { svelte } from '@sveltejs/vite-plugin-svelte'
+import { sveltekit } from '@sveltejs/kit/vite'
 import tailwindcss from '@tailwindcss/vite'
-import path from 'path'
+import { defineConfig } from 'vite'
+
+const backendPort = process.env.PORT ?? '9000'
+const backendTarget = `http://127.0.0.1:${backendPort}`
 
 export default defineConfig({
-  plugins: [svelte(), tailwindcss()],
-  base: '/ui/',
-  resolve: {
-    alias: {
-      $lib: path.resolve('./src/lib'),
+  plugins: [sveltekit(), tailwindcss()],
+  server: {
+    proxy: {
+      '/api': backendTarget,
+      '/healthz': backendTarget,
+      '/readyz': backendTarget,
     },
   },
 })

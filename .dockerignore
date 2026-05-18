@@ -1,0 +1,13 @@
+target/
+ui/node_modules/
+ui/build/
+ui/.svelte-kit/
+ui/dist/
+node_modules/
+.git/
+data/
+.env
+.env.*
+.DS_Store
+*.pem
+*.key

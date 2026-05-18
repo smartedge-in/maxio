@@ -1,0 +1,11 @@
+{
+  "name": "maxio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "bench": "cargo build --release && bash tests/bench.sh",
+    "bench:quick": "cargo build --release && bash tests/bench.sh --duration=10s --scenarios=put-small,get-small,mixed",
+    "bench:remote": "bash tests/bench-remote.sh"
+  }
+}

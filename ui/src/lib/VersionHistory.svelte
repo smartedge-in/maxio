@@ -1,12 +1,17 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { createMutation, createQuery } from '@tanstack/svelte-query'
   import * as Table from '$lib/components/ui/table'
   import { Button } from '$lib/components/ui/button'
   import { Callout } from '$lib/components/ui/callout'
+  import { ConfirmDialog } from '$lib/components/ui/confirm-dialog'
   import Download from 'lucide-svelte/icons/download'
   import Trash2 from 'lucide-svelte/icons/trash-2'
   import Tag from 'lucide-svelte/icons/tag'
   import Loader2 from 'lucide-svelte/icons/loader-2'
+  import { versionKeys } from '$lib/api/keys'
+  import { deleteVersion as deleteVersionApi, listVersions } from '$lib/api/versions'
+  import { ApiError, encodeObjectKey } from '$lib/api/http'
+  import { queryClient } from '$lib/query/client'
 
   interface Props {
     bucket: string
@@ -16,60 +21,41 @@
   }
   let { bucket, objectKey, onClose, onVersionDeleted }: Props = $props()
 
-  interface Version {
-    versionId: string | null
-    lastModified: string
-    size: number
-    etag: string
-    isDeleteMarker: boolean
-  }
+  const versionsQuery = createQuery(() => ({
+    queryKey: versionKeys.list(bucket, objectKey),
+    queryFn: () => listVersions(bucket, objectKey),
+  }))
+  const deleteVersionMutation = createMutation(() => ({
+    mutationFn: (versionId: string) => deleteVersionApi(bucket, objectKey, versionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: versionKeys.list(bucket, objectKey) })
+      onVersionDeleted?.()
+    },
+  }))
 
-  let versions = $state<Version[]>([])
-  let loading = $state(true)
-  let error = $state<string | null>(null)
-
-  async function fetchVersions() {
-    loading = true
-    error = null
-    try {
-      const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/versions?key=${encodeURIComponent(objectKey)}`)
-      if (res.ok) {
-        const data = await res.json()
-        versions = data.versions
-      } else {
-        error = 'Failed to load versions'
-      }
-    } catch (err) {
-      console.error('fetchVersions failed:', err)
-      error = 'Failed to connect to server'
-    } finally {
-      loading = false
-    }
-  }
+  const versions = $derived(versionsQuery.data?.versions ?? [])
+  let deleteError = $state<string | null>(null)
+  let versionToDelete = $state<string | null>(null)
 
   async function deleteVersion(versionId: string) {
-    if (!confirm('Permanently delete this version? This cannot be undone.')) return
+    versionToDelete = versionId
+  }
+
+  async function confirmDeleteVersion() {
+    if (!versionToDelete) return
     try {
-      const res = await fetch(
-        `/api/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(versionId)}/objects/${encodeURIComponent(objectKey)}`,
-        { method: 'DELETE' }
-      )
-      if (res.ok) {
-        await fetchVersions()
-        onVersionDeleted?.()
-      } else {
-        const data = await res.json()
-        error = data.error || 'Failed to delete version'
-      }
+      deleteError = null
+      await deleteVersionMutation.mutateAsync(versionToDelete)
+      versionToDelete = null
     } catch (err) {
       console.error('deleteVersion failed:', err)
-      error = 'Failed to connect to server'
+      deleteError = err instanceof ApiError ? err.message : 'Failed to connect to server'
     }
   }
 
   function downloadVersion(versionId: string) {
     window.open(
-      `/api/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(versionId)}/download/${encodeURIComponent(objectKey)}`,
+      `/api/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(versionId)}/download/${encodeObjectKey(objectKey)}`,
       '_blank'
     )
   }
@@ -93,8 +79,6 @@
   function truncateId(id: string): string {
     return id.length > 16 ? id.slice(0, 16) + '...' : id
   }
-
-  onMount(fetchVersions)
 </script>
 
 <div class="rounded-sm border bg-card">
@@ -103,11 +87,11 @@
     <Button variant="ghost" size="sm" onclick={onClose}>Close</Button>
   </div>
 
-  {#if error}
-    <div class="p-4"><Callout type="danger">{error}</Callout></div>
+  {#if versionsQuery.isError || deleteError}
+    <div class="p-4"><Callout type="danger">{deleteError ?? (versionsQuery.error instanceof ApiError ? versionsQuery.error.message : 'Failed to load versions')}</Callout></div>
   {/if}
 
-  {#if loading}
+  {#if versionsQuery.isPending}
     <div class="flex items-center gap-2 px-4 py-4 text-sm text-muted-foreground">
       <Loader2 class="size-4 animate-spin" /> Loading versions...
     </div>
@@ -176,3 +160,16 @@
     </Table.Root>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={versionToDelete !== null}
+  title="Permanently delete version?"
+  description="This object version will be permanently deleted. This cannot be undone."
+  confirmLabel="Delete version"
+  confirmVariant="destructive"
+  confirmationText="delete"
+  confirmationLabel="Type delete"
+  loading={deleteVersionMutation.isPending}
+  onClose={() => (versionToDelete = null)}
+  onConfirm={confirmDeleteVersion}
+/>

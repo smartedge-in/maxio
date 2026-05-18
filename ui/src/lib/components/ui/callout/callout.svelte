@@ -4,7 +4,7 @@
 	import { type VariantProps, tv } from "tailwind-variants";
 
 	export const calloutVariants = tv({
-		base: "relative flex gap-3 p-4 rounded-lg border",
+		base: "relative flex gap-3 rounded-sm border border-neutral-200 bg-white p-3 text-sm text-black dark:border-coolgray-300 dark:bg-coolgray-100 dark:text-white",
 		variants: {
 			type: {
 				warning:
@@ -45,7 +45,6 @@
 <div
 	bind:this={ref}
 	data-slot="callout"
-	role="alert"
 	class={cn(calloutVariants({ type }), className)}
 	{...restProps}
 >

@@ -1,14 +1,21 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { createMutation, createQuery } from '@tanstack/svelte-query'
   import * as Table from '$lib/components/ui/table'
   import { Button } from '$lib/components/ui/button'
   import { Callout } from '$lib/components/ui/callout'
   import { Badge } from '$lib/components/ui/badge'
+  import { ConfirmDialog } from '$lib/components/ui/confirm-dialog'
+  import { Dialog } from '$lib/components/ui/dialog'
+  import { Input } from '$lib/components/ui/input'
   import Database from 'lucide-svelte/icons/database'
   import Plus from 'lucide-svelte/icons/plus'
   import Trash2 from 'lucide-svelte/icons/trash-2'
   import Settings from 'lucide-svelte/icons/settings'
   import { toast } from '$lib/toast'
+  import { bucketKeys } from '$lib/api/keys'
+  import { createBucket as createBucketApi, deleteBucket as deleteBucketApi, listBuckets } from '$lib/api/buckets'
+  import { ApiError } from '$lib/api/http'
+  import { queryClient } from '$lib/query/client'
 
   interface Props {
     onSelect: (bucket: string) => void
@@ -16,85 +23,66 @@
   }
   let { onSelect, onSettings }: Props = $props()
 
-  interface Bucket {
-    name: string
-    createdAt: string
-    versioning: boolean
-    encryption: boolean
-  }
-
-  let buckets = $state<Bucket[]>([])
-  let loading = $state(true)
-  let error = $state<string | null>(null)
   let showCreate = $state(false)
   let newBucketName = $state('')
-  let creating = $state(false)
+  let bucketToDelete = $state<string | null>(null)
+  let createBucketInput = $state<HTMLInputElement | null>(null)
 
-  function autofocus(node: HTMLElement) {
-    node.focus()
-  }
-
-  async function fetchBuckets() {
-    loading = true
-    error = null
-    try {
-      const res = await fetch('/api/buckets')
-      if (res.ok) {
-        const data = await res.json()
-        buckets = data.buckets
-      } else {
-        error = `Failed to load buckets (${res.status})`
-      }
-    } catch (err) {
-      console.error('fetchBuckets failed:', err)
-      error = 'Failed to connect to server'
-    } finally {
-      loading = false
+  $effect(() => {
+    if (showCreate && createBucketInput) {
+      queueMicrotask(() => createBucketInput?.focus())
     }
-  }
+  })
+
+  const bucketsQuery = createQuery(() => ({
+    queryKey: bucketKeys.list(),
+    queryFn: listBuckets,
+  }))
+
+  const createBucketMutation = createMutation(() => ({
+    mutationFn: createBucketApi,
+    onSuccess: (_data, name) => {
+      toast.success(`Bucket "${name}" created`)
+      newBucketName = ''
+      showCreate = false
+      queryClient.invalidateQueries({ queryKey: bucketKeys.list() })
+    },
+  }))
+
+  const deleteBucketMutation = createMutation(() => ({
+    mutationFn: deleteBucketApi,
+    onSuccess: (_data, name) => {
+      toast.success(`Bucket "${name}" deleted`)
+      queryClient.invalidateQueries({ queryKey: bucketKeys.list() })
+    },
+  }))
+
 
   async function createBucket() {
-    if (!newBucketName.trim()) return
-    creating = true
+    const name = newBucketName.trim()
+    if (!name) return
     try {
-      const name = newBucketName.trim()
-      const res = await fetch('/api/buckets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      })
-      if (res.ok) {
-        toast.success(`Bucket "${name}" created`)
-        newBucketName = ''
-        showCreate = false
-        await fetchBuckets()
-      } else {
-        const data = await res.json()
-        toast.error(data.error || `Failed to create bucket (${res.status})`)
-      }
+      await createBucketMutation.mutateAsync(name)
     } catch (err) {
       console.error('createBucket failed:', err)
-      toast.error('Failed to connect to server')
-    } finally {
-      creating = false
+      toast.error(err instanceof ApiError ? err.message : 'Failed to connect to server')
     }
   }
 
   async function deleteBucket(name: string, e: Event) {
     e.stopPropagation()
-    if (!confirm(`Delete bucket "${name}"? This cannot be undone.`)) return
+    bucketToDelete = name
+  }
+
+  async function confirmDeleteBucket() {
+    if (!bucketToDelete) return
+    const name = bucketToDelete
     try {
-      const res = await fetch(`/api/buckets/${encodeURIComponent(name)}`, { method: 'DELETE' })
-      if (res.ok) {
-        toast.success(`Bucket "${name}" deleted`)
-        await fetchBuckets()
-      } else {
-        const data = await res.json()
-        toast.error(data.error || `Failed to delete bucket (${res.status})`)
-      }
+      await deleteBucketMutation.mutateAsync(name)
+      bucketToDelete = null
     } catch (err) {
       console.error('deleteBucket failed:', err)
-      toast.error('Failed to connect to server')
+      toast.error(err instanceof ApiError ? err.message : 'Failed to connect to server')
     }
   }
 
@@ -105,43 +93,22 @@
       return iso
     }
   }
-
-  onMount(fetchBuckets)
 </script>
 
 <div class="flex flex-col gap-4">
-  {#if error}
-    <Callout type="danger">{error}</Callout>
+  {#if bucketsQuery.isError}
+    <Callout type="danger">{bucketsQuery.error instanceof ApiError ? bucketsQuery.error.message : 'Failed to load buckets'}</Callout>
   {/if}
 
   <div class="flex items-center gap-2">
-    {#if showCreate}
-      <form onsubmit={(e) => { e.preventDefault(); createBucket() }} class="flex items-center gap-2">
-        <input
-          use:autofocus
-          type="text"
-          bind:value={newBucketName}
-          placeholder="bucket-name"
-          class="input-cool h-8 w-48"
-          disabled={creating}
-        />
-        <Button type="submit" variant="brand" class="h-8" disabled={creating || !newBucketName.trim()}>
-          {creating ? 'Creating...' : 'Create'}
-        </Button>
-        <Button type="button" variant="ghost" class="h-8" onclick={() => { showCreate = false; newBucketName = '' }}>
-          Cancel
-        </Button>
-      </form>
-    {:else}
-      <Button variant="brand" class="h-8" onclick={() => (showCreate = true)}>
-        <Plus class="size-4 mr-1" /> Create Bucket
-      </Button>
-    {/if}
+    <Button variant="highlighted" class="h-8" onclick={() => (showCreate = true)}>
+      <Plus class="size-4 mr-1" /> Create Bucket
+    </Button>
   </div>
 
-  {#if loading && buckets.length === 0}
+  {#if bucketsQuery.isPending}
     <p class="text-sm text-muted-foreground">Loading...</p>
-  {:else if buckets.length === 0 && !error}
+  {:else if (bucketsQuery.data?.buckets ?? []).length === 0 && !bucketsQuery.isError}
     <Callout type="info">
       <span class="inline-flex items-center gap-2">
         <Database class="size-4 opacity-70" />
@@ -160,7 +127,7 @@
         </Table.Row>
       </Table.Header>
       <Table.Body>
-        {#each buckets as bucket}
+        {#each bucketsQuery.data?.buckets ?? [] as bucket}
           <Table.Row class="cursor-pointer" onclick={() => onSelect(bucket.name)}>
             <Table.Cell class="font-medium">{bucket.name}</Table.Cell>
             <Table.Cell>
@@ -202,3 +169,46 @@
     </Table.Root>
   {/if}
 </div>
+
+
+<Dialog
+  open={showCreate}
+  title="Create bucket"
+  description="Choose a unique bucket name for your objects."
+  loading={createBucketMutation.isPending}
+  onClose={() => { showCreate = false; newBucketName = '' }}
+>
+  <form id="create-bucket-form" onsubmit={(e) => { e.preventDefault(); createBucket() }} class="flex flex-col gap-1.5">
+    <label for="bucket-name" class="text-sm font-medium text-black dark:text-white">Bucket name</label>
+    <Input
+      bind:ref={createBucketInput}
+      id="bucket-name"
+      type="text"
+      bind:value={newBucketName}
+      placeholder="bucket-name"
+      class="bg-white dark:bg-base"
+      disabled={createBucketMutation.isPending}
+    />
+  </form>
+  {#snippet footer()}
+    <Button type="button" variant="default" disabled={createBucketMutation.isPending} onclick={() => { showCreate = false; newBucketName = '' }}>
+      Cancel
+    </Button>
+    <Button type="submit" form="create-bucket-form" variant="highlighted" disabled={createBucketMutation.isPending || !newBucketName.trim()}>
+      {createBucketMutation.isPending ? 'Creating…' : 'Create bucket'}
+    </Button>
+  {/snippet}
+</Dialog>
+
+<ConfirmDialog
+  open={bucketToDelete !== null}
+  title="Delete bucket?"
+  description={`This will delete bucket \"${bucketToDelete ?? ''}\". The bucket must be empty before it can be removed.`}
+  confirmLabel="Delete bucket"
+  confirmVariant="destructive"
+  confirmationText={bucketToDelete ?? undefined}
+  confirmationLabel="Bucket name"
+  loading={deleteBucketMutation.isPending}
+  onClose={() => (bucketToDelete = null)}
+  onConfirm={confirmDeleteBucket}
+/>
