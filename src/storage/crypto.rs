@@ -352,13 +352,15 @@ impl AsyncRead for FrameDecryptor {
                 let ct_with_tag = &this.frame_buf[12..this.frame_filled];
 
                 // Verify that the nonce's chunk-index portion matches expected.
-                let stored_idx = u64::from_le_bytes(nonce_bytes[4..12].try_into().unwrap());
-                if stored_idx != this.chunk_index {
+                let stored_idx_v1 = u64::from_le_bytes(nonce_bytes[4..12].try_into().unwrap());
+                let stored_idx_v2 =
+                    u32::from_le_bytes(nonce_bytes[8..12].try_into().unwrap()) as u64;
+                if stored_idx_v1 != this.chunk_index && stored_idx_v2 != this.chunk_index {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
                             "frame index mismatch: expected {}, got {}",
-                            this.chunk_index, stored_idx
+                            this.chunk_index, stored_idx_v1
                         ),
                     )));
                 }
@@ -502,6 +504,33 @@ mod tests {
         let ct = encrypt_bytes(&pt, &key).await;
         let dec = decrypt_bytes(&ct, &key, pt.len() as u64).await;
         assert_eq!(dec, pt);
+    }
+
+    #[tokio::test]
+    async fn decrypts_v2_eight_byte_prefix_nonce_format() {
+        let key = test_key();
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        let prefix = [9u8, 8, 7, 6, 5, 4, 3, 2];
+        let plaintext = b"v2 nonce format decrypts";
+
+        let mut nonce_bytes = [0u8; 12];
+        nonce_bytes[..8].copy_from_slice(&prefix);
+        nonce_bytes[8..].copy_from_slice(&0u32.to_le_bytes());
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce_bytes),
+                Payload {
+                    msg: plaintext,
+                    aad: &[],
+                },
+            )
+            .unwrap();
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&nonce_bytes);
+        frame.extend_from_slice(&ciphertext);
+
+        let out = decrypt_bytes(&frame, &key, plaintext.len() as u64).await;
+        assert_eq!(out, plaintext);
     }
 
     #[tokio::test]

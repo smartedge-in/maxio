@@ -32,7 +32,7 @@ pub struct Config {
     pub port: u16,
 
     /// Address to bind to
-    #[arg(long, env = "MAXIO_ADDRESS", default_value = "0.0.0.0")]
+    #[arg(long, env = "MAXIO_ADDRESS", default_value = "127.0.0.1")]
     pub address: String,
 
     /// Root data directory
@@ -56,6 +56,14 @@ pub struct Config {
     #[arg(long, env = "MAXIO_MASTER_KEY")]
     pub master_key: Option<String>,
 
+    /// Allow insecure development defaults (default credentials, HTTP cookies).
+    #[arg(long, env = "MAXIO_ALLOW_INSECURE_DEV", default_value = "false")]
+    pub allow_insecure_dev: bool,
+
+    /// Force Secure on console session cookies. Keep enabled for public consoles.
+    #[arg(long, env = "MAXIO_SECURE_COOKIES", default_value = "true")]
+    pub secure_cookies: bool,
+
     /// Enable erasure coding with per-chunk integrity checksums
     #[arg(long, env = "MAXIO_ERASURE_CODING", default_value = "false")]
     pub erasure_coding: bool,
@@ -72,4 +80,8 @@ pub struct Config {
     /// (MAXIO_DEFAULT_BUCKETS, MINIO_DEFAULT_BUCKETS)
     #[arg(long, env = "MAXIO_DEFAULT_BUCKETS", default_value_t = default_default_buckets().unwrap_or_default())]
     pub default_buckets: String,
+
+    /// Max request body size for console JSON/form API routes, in bytes. Object uploads are streaming and not covered by this limit.
+    #[arg(long, env = "MAXIO_MAX_CONSOLE_BODY_BYTES", default_value = "1048576")]
+    pub max_console_body_bytes: usize,
 }

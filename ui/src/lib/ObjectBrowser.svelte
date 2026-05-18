@@ -1,8 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { createMutation, createQuery } from '@tanstack/svelte-query'
   import * as Table from '$lib/components/ui/table'
   import { Button } from '$lib/components/ui/button'
   import { Callout } from '$lib/components/ui/callout'
+  import { ConfirmDialog } from '$lib/components/ui/confirm-dialog'
+  import { Dialog } from '$lib/components/ui/dialog'
+  import { Input } from '$lib/components/ui/input'
   import Folder from 'lucide-svelte/icons/folder'
   import FileIcon from 'lucide-svelte/icons/file'
   import Download from 'lucide-svelte/icons/download'
@@ -14,6 +18,11 @@
   import History from 'lucide-svelte/icons/history'
   import VersionHistory from './VersionHistory.svelte'
   import { toast } from '$lib/toast'
+  import { objectKeys, settingsKeys } from '$lib/api/keys'
+  import { createFolder as createFolderApi, deleteObject as deleteObjectApi, listObjects, presignObject, uploadObject } from '$lib/api/objects'
+  import { getVersioning } from '$lib/api/settings'
+  import { ApiError, encodeObjectKey } from '$lib/api/http'
+  import { queryClient } from '$lib/query/client'
 
   interface Props {
     bucket: string
@@ -22,33 +31,69 @@
   }
   let { bucket, onBack, onPrefixChange }: Props = $props()
 
-  interface S3File {
-    key: string
-    size: number
-    lastModified: string
-    etag: string
-  }
-
   let prefix = $state('')
-  let files = $state<S3File[]>([])
-  let prefixes = $state<string[]>([])
-  let emptyPrefixes = $state<Set<string>>(new Set())
-  let loading = $state(true)
-  let error = $state<string | null>(null)
-  let uploading = $state(false)
   let fileInput: HTMLInputElement | undefined = $state()
   let copiedKey = $state<string | null>(null)
   let shareMenuKey = $state<string | null>(null)
   let showCreateFolder = $state(false)
   let newFolderName = $state('')
-  let creatingFolder = $state(false)
-
-  function autofocus(node: HTMLElement) {
-    node.focus()
-  }
   let shareMenuPos = $state({ top: 0, left: 0 })
-  let versioningEnabled = $state(false)
   let versionKey = $state<string | null>(null)
+  let pendingDelete = $state<{ key: string; kind: 'object' | 'folder' } | null>(null)
+  let createFolderInput = $state<HTMLInputElement | null>(null)
+
+  $effect(() => {
+    if (showCreateFolder && createFolderInput) {
+      queueMicrotask(() => createFolderInput?.focus())
+    }
+  })
+
+  const objectsQuery = createQuery(() => ({
+    queryKey: objectKeys.list(bucket, prefix),
+    queryFn: () => listObjects(bucket, prefix),
+  }))
+
+  const versioningQuery = createQuery(() => ({
+    queryKey: settingsKeys.versioning(bucket),
+    queryFn: () => getVersioning(bucket),
+  }))
+
+  const uploadMutation = createMutation(() => ({
+    mutationFn: async (files: FileList) => {
+      for (const file of Array.from(files)) {
+        await uploadObject(bucket, `${prefix}${file.name}`, file)
+      }
+      return files.length
+    },
+    onSuccess: (count) => {
+      toast.success(count === 1 ? 'File uploaded' : `${count} files uploaded`)
+      if (fileInput) fileInput.value = ''
+      queryClient.invalidateQueries({ queryKey: objectKeys.list(bucket, prefix) })
+    },
+  }))
+
+  const deleteObjectMutation = createMutation(() => ({
+    mutationFn: (key: string) => deleteObjectApi(bucket, key),
+    onSuccess: (_data, key) => {
+      toast.success(`"${displayName(key)}" deleted`)
+      queryClient.invalidateQueries({ queryKey: objectKeys.list(bucket, prefix) })
+    },
+  }))
+
+  const createFolderMutation = createMutation(() => ({
+    mutationFn: (name: string) => createFolderApi(bucket, `${prefix}${name}`),
+    onSuccess: (_data, name) => {
+      toast.success(`Folder "${name}" created`)
+      newFolderName = ''
+      showCreateFolder = false
+      queryClient.invalidateQueries({ queryKey: objectKeys.list(bucket, prefix) })
+    },
+  }))
+
+  const files = $derived(objectsQuery.data?.files ?? [])
+  const prefixes = $derived(objectsQuery.data?.prefixes ?? [])
+  const emptyPrefixes = $derived(new Set(objectsQuery.data?.emptyPrefixes ?? []))
+  const versioningEnabled = $derived(!!versioningQuery.data?.enabled)
 
   const expiryOptions = [
     { label: '1 hour', seconds: 3600 },
@@ -57,27 +102,6 @@
     { label: '7 days', seconds: 604800 },
   ]
 
-  async function fetchObjects() {
-    loading = true
-    error = null
-    try {
-      const params = new URLSearchParams({ prefix, delimiter: '/' })
-      const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/objects?${params}`)
-      if (res.ok) {
-        const data = await res.json()
-        files = data.files
-        prefixes = data.prefixes
-        emptyPrefixes = new Set(data.emptyPrefixes || [])
-      } else {
-        error = `Failed to load objects (${res.status})`
-      }
-    } catch (err) {
-      console.error('fetchObjects failed:', err)
-      error = 'Failed to connect to server'
-    } finally {
-      loading = false
-    }
-  }
 
   function notifyPrefix() {
     onPrefixChange?.(prefix, breadcrumbs)
@@ -85,7 +109,6 @@
 
   export function navigateTo(newPrefix: string) {
     prefix = newPrefix
-    fetchObjects()
     notifyPrefix()
   }
 
@@ -97,7 +120,6 @@
     const trimmed = prefix.slice(0, -1)
     const lastSlash = trimmed.lastIndexOf('/')
     prefix = lastSlash >= 0 ? trimmed.slice(0, lastSlash + 1) : ''
-    fetchObjects()
     notifyPrefix()
   }
 
@@ -105,10 +127,6 @@
     const trimmed = fullPath.endsWith('/') ? fullPath.slice(0, -1) : fullPath
     const lastSlash = trimmed.lastIndexOf('/')
     return lastSlash >= 0 ? trimmed.slice(lastSlash + 1) : trimmed
-  }
-
-  function encodeObjectKey(key: string): string {
-    return key.split('/').map(encodeURIComponent).join('/')
   }
 
   function formatSize(bytes: number): string {
@@ -146,59 +164,31 @@
   async function handleUpload() {
     const inputFiles = fileInput?.files
     if (!inputFiles || inputFiles.length === 0) return
-    uploading = true
-    const toastId = toast.loading(
-      inputFiles.length === 1
-        ? `Uploading ${inputFiles[0].name}…`
-        : `Uploading ${inputFiles.length} files…`
-    )
+    const toastId = toast.loading(inputFiles.length === 1 ? `Uploading ${inputFiles[0].name}…` : `Uploading ${inputFiles.length} files…`)
     try {
-      for (const file of inputFiles) {
-        const key = `${prefix}${file.name}`
-        const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/upload/${encodeObjectKey(key)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          body: file,
-        })
-        if (!res.ok) {
-          const data = await res.json()
-          toast.error(data.error || `Failed to upload ${file.name}`, { id: toastId })
-          if (fileInput) fileInput.value = ''
-          uploading = false
-          return
-        }
-      }
-      toast.success(
-        inputFiles.length === 1
-          ? `${inputFiles[0].name} uploaded`
-          : `${inputFiles.length} files uploaded`,
-        { id: toastId }
-      )
-      if (fileInput) fileInput.value = ''
-      await fetchObjects()
+      await uploadMutation.mutateAsync(inputFiles)
+      toast.dismiss(toastId)
     } catch (err) {
       console.error('Upload failed:', err)
-      toast.error('Upload failed', { id: toastId })
-    } finally {
-      uploading = false
+      toast.error(err instanceof Error ? err.message : 'Upload failed', { id: toastId })
+      if (fileInput) fileInput.value = ''
     }
   }
 
   async function deleteObject(key: string, e: Event) {
     e.stopPropagation()
-    if (!confirm(`Delete "${displayName(key)}"?`)) return
+    pendingDelete = { key, kind: 'object' }
+  }
+
+  async function confirmPendingDelete() {
+    if (!pendingDelete) return
+    const { key, kind } = pendingDelete
     try {
-      const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/objects/${encodeObjectKey(key)}`, { method: 'DELETE' })
-      if (res.ok) {
-        toast.success(`"${displayName(key)}" deleted`)
-        await fetchObjects()
-      } else {
-        const data = await res.json()
-        toast.error(data.error || 'Failed to delete object')
-      }
+      await deleteObjectMutation.mutateAsync(key)
+      pendingDelete = null
     } catch (err) {
-      console.error('deleteObject failed:', err)
-      toast.error('Failed to connect to server')
+      console.error(kind === 'folder' ? 'deleteFolder failed:' : 'deleteObject failed:', err)
+      toast.error(err instanceof ApiError ? err.message : kind === 'folder' ? 'Failed to delete folder' : 'Failed to connect to server')
     }
   }
 
@@ -217,97 +207,46 @@
   async function shareObject(key: string, expires: number) {
     shareMenuKey = null
     try {
-      const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/presign/${encodeObjectKey(key)}?expires=${expires}`)
-      if (!res.ok) {
-        const data = await res.json()
-        console.error('Presign failed:', res.status, data)
-        toast.error(data.error || 'Failed to generate share link')
-        return
-      }
-      const data = await res.json()
+      const data = await presignObject(bucket, key, expires)
       await navigator.clipboard.writeText(data.url)
       copiedKey = key
       setTimeout(() => { copiedKey = null }, 2000)
       toast.success('Presigned URL copied to clipboard')
     } catch (err) {
       console.error('shareObject failed:', err)
-      toast.error('Failed to generate share link')
+      toast.error(err instanceof ApiError ? err.message : 'Failed to generate share link')
     }
   }
 
   async function createFolder() {
     const name = newFolderName.trim()
     if (!name) return
-    creatingFolder = true
     try {
-      const fullName = `${prefix}${name}`
-      const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/folders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: fullName }),
-      })
-      if (res.ok) {
-        toast.success(`Folder "${name}" created`)
-        newFolderName = ''
-        showCreateFolder = false
-        await fetchObjects()
-      } else {
-        const data = await res.json()
-        toast.error(data.error || 'Failed to create folder')
-      }
+      await createFolderMutation.mutateAsync(name)
     } catch (err) {
       console.error('createFolder failed:', err)
-      toast.error('Failed to create folder')
-    } finally {
-      creatingFolder = false
+      toast.error(err instanceof ApiError ? err.message : 'Failed to create folder')
     }
   }
 
   async function deleteFolder(folderPrefix: string, e: Event) {
     e.stopPropagation()
-    if (!confirm(`Delete empty folder "${displayName(folderPrefix)}"?`)) return
-    try {
-      const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/objects/${encodeObjectKey(folderPrefix)}`, { method: 'DELETE' })
-      if (res.ok) {
-        toast.success(`Folder "${displayName(folderPrefix)}" deleted`)
-        await fetchObjects()
-      } else {
-        const data = await res.json()
-        toast.error(data.error || 'Failed to delete folder')
-      }
-    } catch (err) {
-      console.error('deleteFolder failed:', err)
-      toast.error('Failed to delete folder')
-    }
+    pendingDelete = { key: folderPrefix, kind: 'folder' }
   }
 
-  async function fetchVersioning() {
-    try {
-      const res = await fetch(`/api/buckets/${encodeURIComponent(bucket)}/versioning`)
-      if (res.ok) {
-        const data = await res.json()
-        versioningEnabled = data.enabled
-      }
-    } catch (err) {
-      console.error('fetchVersioning failed:', err)
-    }
-  }
-
-  function handleClickOutside(e: MouseEvent) {
+  function handleClickOutside() {
     if (shareMenuKey) shareMenuKey = null
   }
 
   onMount(() => {
-    fetchObjects()
-    fetchVersioning()
     document.addEventListener('click', handleClickOutside)
     return () => document.removeEventListener('click', handleClickOutside)
   })
 </script>
 
 <div class="flex flex-col gap-4">
-  {#if error}
-    <Callout type="danger">{error}</Callout>
+  {#if objectsQuery.isError}
+    <Callout type="danger">{objectsQuery.error instanceof ApiError ? objectsQuery.error.message : 'Failed to load objects'}</Callout>
   {/if}
 
   <div class="flex items-center gap-2">
@@ -318,36 +257,17 @@
       class="hidden"
       onchange={handleUpload}
     />
-    <Button variant="brand" class="h-8" onclick={() => fileInput?.click()} disabled={uploading}>
-      <Upload class="size-4 mr-1" /> {uploading ? 'Uploading...' : 'Upload'}
+    <Button variant="highlighted" class="h-8" onclick={() => fileInput?.click()} disabled={uploadMutation.isPending}>
+      <Upload class="size-4 mr-1" /> {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
     </Button>
-    {#if showCreateFolder}
-      <form onsubmit={(e) => { e.preventDefault(); createFolder() }} class="flex items-center gap-2">
-        <input
-          use:autofocus
-          type="text"
-          bind:value={newFolderName}
-          placeholder="folder-name"
-          class="input-cool h-8 w-40"
-          disabled={creatingFolder}
-        />
-        <Button type="submit" variant="brand" class="h-8" disabled={creatingFolder || !newFolderName.trim()}>
-          {creatingFolder ? 'Creating...' : 'Create'}
-        </Button>
-        <Button type="button" variant="ghost" class="h-8" onclick={() => { showCreateFolder = false; newFolderName = '' }}>
-          Cancel
-        </Button>
-      </form>
-    {:else}
-      <Button variant="outline" class="h-8" onclick={() => (showCreateFolder = true)}>
-        <FolderPlus class="size-4 mr-1" /> New Folder
-      </Button>
-    {/if}
+    <Button variant="outline" class="h-8" onclick={() => (showCreateFolder = true)}>
+      <FolderPlus class="size-4 mr-1" /> New Folder
+    </Button>
   </div>
 
-  {#if loading && files.length === 0 && prefixes.length === 0}
+  {#if objectsQuery.isPending}
     <p class="text-sm text-muted-foreground">Loading...</p>
-  {:else if files.length === 0 && prefixes.length === 0 && !error}
+  {:else if files.length === 0 && prefixes.length === 0 && !objectsQuery.isError}
     <Callout type="info">
       <span class="inline-flex items-center gap-2">
         <Folder class="size-4 opacity-70" />
@@ -441,7 +361,7 @@
                     {bucket}
                     objectKey={file.key}
                     onClose={() => (versionKey = null)}
-                    onVersionDeleted={() => fetchObjects()}
+                    onVersionDeleted={() => queryClient.invalidateQueries({ queryKey: objectKeys.list(bucket, prefix) })}
                   />
                 </div>
               </Table.Cell>
@@ -453,11 +373,41 @@
   {/if}
 </div>
 
+
+<Dialog
+  open={showCreateFolder}
+  title="Create folder"
+  description="Create an empty folder marker in the current location."
+  loading={createFolderMutation.isPending}
+  onClose={() => { showCreateFolder = false; newFolderName = '' }}
+>
+  <form id="create-folder-form" onsubmit={(e) => { e.preventDefault(); createFolder() }} class="flex flex-col gap-1.5">
+    <label for="folder-name" class="text-sm font-medium text-black dark:text-white">Folder name</label>
+    <Input
+      bind:ref={createFolderInput}
+      id="folder-name"
+      type="text"
+      bind:value={newFolderName}
+      placeholder="folder-name"
+      class="bg-white dark:bg-base"
+      disabled={createFolderMutation.isPending}
+    />
+  </form>
+  {#snippet footer()}
+    <Button type="button" variant="default" disabled={createFolderMutation.isPending} onclick={() => { showCreateFolder = false; newFolderName = '' }}>
+      Cancel
+    </Button>
+    <Button type="submit" form="create-folder-form" variant="highlighted" disabled={createFolderMutation.isPending || !newFolderName.trim()}>
+      {createFolderMutation.isPending ? 'Creating…' : 'Create folder'}
+    </Button>
+  {/snippet}
+</Dialog>
+
 {#if shareMenuKey}
   <div
     class="fixed z-50 min-w-[8rem] rounded-sm border bg-popover p-1 shadow-md"
     style="top: {shareMenuPos.top}px; left: {shareMenuPos.left}px; transform: translate(-100%, -100%);"
-    onclick={(e) => e.stopPropagation()}
+    role="menu"
   >
     {#each expiryOptions as opt}
       <button
@@ -468,4 +418,19 @@
       </button>
     {/each}
   </div>
+{/if}
+
+{#if pendingDelete}
+  <ConfirmDialog
+    open
+    title={pendingDelete.kind === 'folder' ? 'Delete empty folder?' : 'Delete object?'}
+    description={pendingDelete.kind === 'folder'
+      ? `This will remove the empty folder marker \"${displayName(pendingDelete.key)}\".`
+      : `This will delete \"${displayName(pendingDelete.key)}\" from this bucket.`}
+    confirmLabel={pendingDelete.kind === 'folder' ? 'Delete folder' : 'Delete object'}
+    confirmVariant="destructive"
+    loading={deleteObjectMutation.isPending}
+    onClose={() => (pendingDelete = null)}
+    onConfirm={confirmPendingDelete}
+  />
 {/if}

@@ -169,7 +169,10 @@ impl S3Error {
     pub fn bad_checksum(algo: &str) -> Self {
         Self {
             code: S3ErrorCode::BadDigest,
-            message: format!("The {} checksum you specified did not match what we received.", algo),
+            message: format!(
+                "The {} checksum you specified did not match what we received.",
+                algo
+            ),
             resource: None,
         }
     }
@@ -193,8 +196,7 @@ impl S3Error {
     pub fn entity_too_small() -> Self {
         Self {
             code: S3ErrorCode::EntityTooSmall,
-            message:
-                "Your proposed upload is smaller than the minimum allowed object size.".into(),
+            message: "Your proposed upload is smaller than the minimum allowed object size.".into(),
             resource: None,
         }
     }
@@ -218,8 +220,9 @@ impl S3Error {
     pub fn signature_mismatch() -> Self {
         Self {
             code: S3ErrorCode::SignatureDoesNotMatch,
-            message: "The request signature we calculated does not match the signature you provided."
-                .into(),
+            message:
+                "The request signature we calculated does not match the signature you provided."
+                    .into(),
             resource: None,
         }
     }

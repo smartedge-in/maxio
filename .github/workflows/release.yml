@@ -1,9 +1,9 @@
-name: Release
+name: release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
@@ -41,13 +41,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sync version from tag
-        run: |
-          TAG="${{ github.event.inputs.version || github.ref_name }}"
-          VERSION="${TAG#v}"
-          echo "$VERSION" > VERSION
-          sed -i.bak "1,/^version = /s/^version = .*/version = \"$VERSION\"/" Cargo.toml && rm -f Cargo.toml.bak
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -62,8 +55,33 @@ jobs:
       - name: Install bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+        working-directory: ui
+
+      - name: Check tag matches Cargo version
+        run: |
+          TAG="${{ github.event.inputs.version || github.ref_name }}"
+          VERSION="$(python3 - <<'PYV'
+          import tomllib
+          with open("Cargo.toml", "rb") as f:
+              print(tomllib.load(f)["package"]["version"])
+          PYV
+          )"
+          test "${TAG#v}" = "$VERSION" || { echo "Cargo version $VERSION does not match tag $TAG"; exit 1; }
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: test
+        run: cargo test --all --all-features
+
       - name: Build frontend
-        run: cd ui && bun install && bun run build
+        run: bun run build
+        working-directory: ui
 
       - name: Configure linker (ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -75,7 +93,7 @@ jobs:
           EOF
 
       - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package
         run: |
@@ -107,13 +125,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Sync version from tag
-        run: |
-          TAG="${{ github.event.inputs.version || github.ref_name }}"
-          VERSION="${TAG#v}"
-          echo "$VERSION" > VERSION
-          sed -i.bak "1,/^version = /s/^version = .*/version = \"$VERSION\"/" Cargo.toml && rm -f Cargo.toml.bak
 
       - name: Login to ${{ env.GITHUB_REGISTRY }}
         uses: docker/login-action@v3

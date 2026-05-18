@@ -89,6 +89,7 @@ pub async fn head_bucket(
     match state.storage.head_bucket(&bucket).await {
         Ok(true) => {}
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(StorageError::InvalidKey(_)) => return Err(S3Error::no_such_bucket(&bucket)),
         Err(e) => return Err(S3Error::internal(e)),
     }
 
@@ -236,7 +237,7 @@ async fn put_bucket_cors(
                     return Err(S3Error::invalid_argument(&format!(
                         "Invalid HTTP method in CORS rule: {}",
                         method
-                    )))
+                    )));
                 }
             }
         }
@@ -266,10 +267,7 @@ async fn put_bucket_cors(
         .unwrap())
 }
 
-pub async fn get_bucket_cors(
-    state: AppState,
-    bucket: String,
-) -> Result<Response<Body>, S3Error> {
+pub async fn get_bucket_cors(state: AppState, bucket: String) -> Result<Response<Body>, S3Error> {
     let rules = state
         .storage
         .get_bucket_cors(&bucket)
@@ -302,10 +300,7 @@ pub async fn get_bucket_cors(
         .unwrap())
 }
 
-async fn delete_bucket_cors(
-    state: AppState,
-    bucket: String,
-) -> Result<Response<Body>, S3Error> {
+async fn delete_bucket_cors(state: AppState, bucket: String) -> Result<Response<Body>, S3Error> {
     match state.storage.head_bucket(&bucket).await {
         Ok(true) => {}
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
@@ -347,14 +342,12 @@ async fn put_bucket_encryption(
     //     <SSEAlgorithm>AES256</SSEAlgorithm>
     //   </ApplyServerSideEncryptionByDefault>
     // </Rule></ServerSideEncryptionConfiguration>
-    let sse_algorithm = extract_xml_tag(&body_str, "SSEAlgorithm")
-        .ok_or_else(S3Error::malformed_xml)?;
+    let sse_algorithm =
+        extract_xml_tag(&body_str, "SSEAlgorithm").ok_or_else(S3Error::malformed_xml)?;
     if sse_algorithm != "AES256" {
         return Err(S3Error::invalid_encryption_algorithm());
     }
-    let cfg = BucketEncryptionConfig {
-        sse_algorithm,
-    };
+    let cfg = BucketEncryptionConfig { sse_algorithm };
     state
         .storage
         .put_bucket_encryption(&bucket, cfg)

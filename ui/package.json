@@ -4,12 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite dev --host 127.0.0.1 --port 5173 --strictPort --clearScreen false --logLevel error",
     "build": "vite build",
-    "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json"
+    "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.48.8",
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
     "@tailwindcss/vite": "^4.1.18",
     "@tsconfig/svelte": "^5.0.6",
@@ -21,9 +23,10 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
-    "bits-ui": "^2.15.7",
     "@fontsource/geist-mono": "^5.2.5",
     "@fontsource/geist-sans": "^5.2.5",
+    "@tanstack/svelte-query": "^6.1.29",
+    "bits-ui": "^2.15.7",
     "clsx": "^2.1.1",
     "lucide-svelte": "^0.574.0",
     "svelte-sonner": "^1.0.7",

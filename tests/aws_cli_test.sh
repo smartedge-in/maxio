@@ -398,6 +398,8 @@ assert "delete nested object" $AWS s3 rm "s3://$BUCKET/folder/nested/file.txt"
 assert_file_not_exists "deleted nested object gone from disk" "$DATA_DIR/buckets/$BUCKET/folder/nested/file.txt"
 assert "delete large object" $AWS s3 rm "s3://$BUCKET/big.bin"
 assert "delete manual multipart object" $AWS s3 rm "s3://$BUCKET/manual-multipart.bin"
+assert "delete upc source object" $AWS s3 rm "s3://$BUCKET/upc-source.bin"
+assert "delete upc dest object" $AWS s3 rm "s3://$BUCKET/upc-dest.bin"
 
 # --- Erasure coding corruption detection ---
 echo "hello erasure" > "$TMPDIR/ec-test.txt"
@@ -1147,6 +1149,28 @@ assert_eq "post hard-delete: 2 versions remain" "2" "$VER_FINAL_COUNT"
 # Suspend versioning
 assert "put-bucket-versioning Suspended" $AWS s3api put-bucket-versioning \
     --bucket "$VER_BUCKET" --versioning-configuration 'Status=Suspended'
+
+VER_LIST_SUSPENDED=$($AWS s3api list-object-versions --bucket "$VER_BUCKET" 2>&1)
+VER_SUSPENDED_COUNT=$(echo "$VER_LIST_SUSPENDED" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("Versions",[])))' 2>/dev/null)
+assert_eq "suspending versioning preserves existing versions" "2" "$VER_SUSPENDED_COUNT"
+
+echo "v-null" > "$TMPDIR/v-null.txt"
+NULL_PUT=$($AWS s3api put-object --bucket "$VER_BUCKET" --key obj --body "$TMPDIR/v-null.txt" 2>&1)
+assert_eq "suspended PUT does not return a new VersionId" "false" "$(echo "$NULL_PUT" | grep -q '"VersionId"' && echo true || echo false)"
+
+VER_LIST_WITH_NULL=$($AWS s3api list-object-versions --bucket "$VER_BUCKET" 2>&1)
+NULL_COUNT=$(echo "$VER_LIST_WITH_NULL" | python3 -c 'import sys,json; print(sum(1 for v in json.load(sys.stdin).get("Versions",[]) if v.get("VersionId")=="null"))' 2>/dev/null)
+assert_eq "suspended PUT creates/updates null version" "1" "$NULL_COUNT"
+
+$AWS s3api get-object --bucket "$VER_BUCKET" --key obj --version-id null \
+    "$TMPDIR/v-null-out.txt" > /dev/null 2>&1
+if [ "$(cat "$TMPDIR/v-null-out.txt" 2>/dev/null)" = "v-null" ]; then
+    green "PASS: get-object --version-id null retrieves suspended current"
+    PASS=$((PASS + 1))
+else
+    red "FAIL: get-object --version-id null returned $(cat "$TMPDIR/v-null-out.txt" 2>/dev/null)"
+    FAIL=$((FAIL + 1))
+fi
 
 # Cleanup all remaining versions
 for vid in $(echo "$VER_LIST_FINAL" | python3 -c 'import sys,json; [print(v["VersionId"]) for v in json.load(sys.stdin).get("Versions",[])+json.load(open("/dev/stdin")).get("DeleteMarkers",[])]' 2>/dev/null || echo ""); do

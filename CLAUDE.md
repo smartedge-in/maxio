@@ -13,10 +13,8 @@ Always spell the product name **MaxIO** (capital M, capital I, capital O). Never
 ## Build & Run
 
 ```bash
-# Build frontend (required — assets are embedded into the binary)
-cd ui && bun run build && cd ..
-
-# Build binary
+# Build frontend (optional — cargo build also builds and embeds it)
+# Build binary (build.rs runs the UI build and embeds it)
 cargo build --release
 ./target/release/maxio --data-dir ./data --port 9000
 ```
@@ -31,17 +29,17 @@ The release binary is fully self-contained — the frontend UI is embedded at co
 # 1. Install frontend dependencies
 cd ui && bun install
 
-# 2. Build frontend (outputs to ui/dist/, required before cargo build)
+# 2. Build frontend (outputs to ui/build/; cargo build also does this automatically)
 bun run build && cd ..
 
 # 3. Build optimized binary
 cargo build --release
 
 # Result: single binary at ./target/release/maxio
-# Copy it anywhere — no ui/dist/ or other files needed at runtime
+# Copy it anywhere — no ui/build/ or other files needed at runtime
 ```
 
-The binary serves the web console at `/ui/` with proper MIME types, ETags, and cache headers (immutable for hashed assets, no-store for `index.html`).
+The binary serves the web console at `/ui/` with proper MIME types, ETags, and cache headers (immutable for hashed assets, no-store for `200.html` / HTML shell).
 
 Defaults: port 9000, access/secret `maxioadmin`/`maxioadmin`, region `us-east-1`
 
@@ -64,12 +62,12 @@ kill %1 && rm -rf /tmp/maxio-test
 **Hot-reload dev server** (for manual testing):
 
 ```bash
-just dev
+bun run dev
 ```
 
 This runs both processes concurrently (Ctrl+C kills both):
-- `cargo watch` — rebuilds and restarts the Rust server on changes
-- `bun run build --watch` — rebuilds `ui/dist/` on frontend changes
+- `cargo watch` — rebuilds and restarts the Rust server on backend changes
+- Vite dev server — serves the UI with HMR at `http://127.0.0.1:5173/ui/` and proxies `/api` to the Rust server
 
 ## Architecture
 
@@ -90,7 +88,7 @@ This runs both processes concurrently (Ctrl+C kills both):
 - **Storage layout**: `{data_dir}/buckets/{bucket-name}/{key-path}` for data, `{key-path}.meta.json` for metadata, `.bucket.json` for bucket metadata
 - **Path-style only**: `/{bucket}/{key}` routing. No virtual-hosted-style yet
 - **UNSIGNED-PAYLOAD accepted**: Skips body hashing for PutObject (AWS CLI default)
-- **Embedded UI assets**: Frontend is compiled into the binary via `rust-embed`. In debug builds, assets are read from disk (`ui/dist/`) for live reload. In release builds, assets are baked in — single binary, no external files needed
+- **Embedded UI assets**: Frontend is compiled into the binary via `rust-embed`. In debug builds, assets are read from the SvelteKit static build (`ui/build/`) when embedded; dev uses Vite/SvelteKit HMR. In release builds, assets are baked in — single binary, no external files needed
 - **Web console**: SPA at `/ui/`, API at `/api/`. Cookie-based auth (HMAC tokens, not SigV4). Presigned URL generation with configurable expiry (1h/6h/24h/7d picker in UI)
 
 ### Data Layout
@@ -264,9 +262,9 @@ cargo build --release
 # Against external servers (skip automatic server management)
 ./tests/bench.sh --maxio-host=server1:9000 --minio-host=server2:9000
 
-# Via justfile
-just bench          # full (30s per scenario)
-just bench-quick    # quick smoke test
+# Via root package scripts
+bun run bench        # full (30s per scenario)
+bun run bench:quick  # quick smoke test
 ```
 
 **Remote server benchmark** (single command — cross-compiles, copies binary, auto-downloads warp + minio on the server, runs, streams results):
@@ -280,7 +278,7 @@ just bench-quick    # quick smoke test
 
 The web console (`ui/`) follows the Coolify design system. The full specification is in [`ui/DESIGN_SYSTEM.md`](ui/DESIGN_SYSTEM.md). Key points:
 
-- **Stack**: Svelte 5, Vite, Tailwind CSS v4, shadcn-svelte components
+- **Stack**: SvelteKit static SPA, Svelte 5, Vite, Tailwind CSS v4, shadcn-svelte components, TanStack Query
 - **Theme**: Class-based dark mode (`.dark` on `<html>`), with light/dark CSS variable swap in `ui/src/app.css`
 - **Accent colors**: Coollabs purple `#6b16ed` (light) / warning yellow `#fcd452` (dark). Brand purple (`--color-brand`) is always `#6b16ed` regardless of theme
 - **Font**: Geist Sans + Geist Mono via `@fontsource/geist-sans` / `@fontsource/geist-mono` (Inter fallback)

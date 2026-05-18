@@ -1,10 +1,11 @@
 use super::chunk_reader::VerifiedChunkReader;
-use super::crypto::{make_nonce, AadBuilder, FrameDecryptor, FRAME_CHUNK_SIZE};
+use super::crypto::{AadBuilder, FRAME_CHUNK_SIZE, FrameDecryptor};
 use super::keys::Keyring;
 use super::{
     BucketEncryptionConfig, BucketMeta, ByteStream, ChecksumAlgorithm, ChunkInfo, ChunkKind,
     ChunkManifest, DeleteResult, EncryptionMeta, EncryptionMode, EncryptionRequest,
     MultipartUploadMeta, ObjectMeta, PartMeta, PutResult, StorageError, UploadEncryptionSpec,
+    validate_bucket_name,
 };
 use aes_gcm::{
     Aes256Gcm, Key, Nonce,
@@ -211,9 +212,10 @@ fn compute_sidecar_mac(dek: &[u8; 32], meta: &ObjectMeta) -> Result<String, Stor
 /// Verify the stored `sidecar_mac` against a freshly computed MAC. Used by the
 /// read path before any ciphertext is decrypted.
 fn verify_sidecar_mac(meta: &ObjectMeta, dek: &[u8; 32]) -> Result<(), StorageError> {
-    let enc = meta.encryption.as_ref().ok_or_else(|| {
-        StorageError::IntegrityError("object has no encryption metadata".into())
-    })?;
+    let enc = meta
+        .encryption
+        .as_ref()
+        .ok_or_else(|| StorageError::IntegrityError("object has no encryption metadata".into()))?;
     let expected = compute_sidecar_mac(dek, meta)?;
     if enc.sidecar_mac.is_empty() {
         return Err(StorageError::IntegrityError(
@@ -276,6 +278,7 @@ impl FilesystemStorage {
     // --- Bucket operations ---
 
     pub async fn create_bucket(&self, meta: &BucketMeta) -> Result<bool, StorageError> {
+        validate_bucket_name(&meta.name)?;
         let bucket_dir = self.buckets_dir.join(&meta.name);
         match fs::create_dir(&bucket_dir).await {
             Ok(()) => {
@@ -294,10 +297,12 @@ impl FilesystemStorage {
     }
 
     pub async fn head_bucket(&self, name: &str) -> Result<bool, StorageError> {
+        validate_bucket_name(name)?;
         Ok(fs::try_exists(self.buckets_dir.join(name).join(".bucket.json")).await?)
     }
 
     pub async fn delete_bucket(&self, name: &str) -> Result<bool, StorageError> {
+        validate_bucket_name(name)?;
         let bucket_dir = self.buckets_dir.join(name);
         if !fs::try_exists(&bucket_dir).await? {
             return Ok(false);
@@ -438,10 +443,6 @@ impl FilesystemStorage {
         self.buckets_dir.join(bucket).join(format!("{}.ec", key))
     }
 
-    fn chunk_path(&self, bucket: &str, key: &str, index: u32) -> PathBuf {
-        self.ec_dir(bucket, key).join(format!("{:06}", index))
-    }
-
     fn manifest_path(&self, bucket: &str, key: &str) -> PathBuf {
         self.ec_dir(bucket, key).join("manifest.json")
     }
@@ -493,6 +494,7 @@ impl FilesystemStorage {
         checksum: Option<(ChecksumAlgorithm, Option<String>)>,
         encryption: Option<EncryptionRequest>,
     ) -> Result<PutResult, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
 
         // Folder marker: zero-byte object with key ending in /
@@ -546,12 +548,10 @@ impl FilesystemStorage {
             let prefix_bytes = b64
                 .decode(&em.nonce_prefix)
                 .map_err(|_| StorageError::EncryptionError("invalid nonce_prefix".into()))?;
-            let mut prefix = [0u8; 4];
-            prefix.copy_from_slice(&prefix_bytes);
             let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&dek));
-            (Some(cipher), prefix, Some(dek))
+            (Some(cipher), prefix_bytes, Some(dek))
         } else {
-            (None, [0u8; 4], None)
+            (None, Vec::new(), None)
         };
 
         let obj_path = self.object_path(bucket, key);
@@ -559,7 +559,9 @@ impl FilesystemStorage {
             fs::create_dir_all(parent).await?;
         }
 
-        let file = fs::File::create(&obj_path).await?;
+        let tmp_obj_path = temp_sibling_path(&obj_path);
+        let mut tmp_obj_guard = TempPathGuard::file(tmp_obj_path.clone());
+        let file = fs::File::create(&tmp_obj_path).await?;
         let mut writer = BufWriter::with_capacity(IO_BUFFER_SIZE, file);
         let mut hasher = Md5::new();
         let mut checksum_hasher = checksum
@@ -625,6 +627,7 @@ impl FilesystemStorage {
             let computed = checksum_hasher.unwrap().finalize_base64();
             if let Some(expected_val) = expected {
                 if computed != expected_val {
+                    let _ = fs::remove_file(&tmp_obj_path).await;
                     return Err(StorageError::ChecksumMismatch(format!(
                         "expected {}, got {}",
                         expected_val, computed
@@ -668,7 +671,13 @@ impl FilesystemStorage {
             fs::create_dir_all(parent).await?;
         }
         let json = serde_json::to_string_pretty(&meta)?;
-        fs::write(&meta_path, json).await?;
+        let tmp_meta_path = temp_sibling_path(&meta_path);
+        let mut tmp_meta_guard = TempPathGuard::file(tmp_meta_path.clone());
+        fs::write(&tmp_meta_path, json).await?;
+        publish_temp_payload_and_meta(&tmp_obj_path, &obj_path, false, &tmp_meta_path, &meta_path)
+            .await?;
+        tmp_obj_guard.disarm();
+        tmp_meta_guard.disarm();
 
         if versioned {
             self.write_version(bucket, key, &meta, &obj_path).await?;
@@ -691,11 +700,14 @@ impl FilesystemStorage {
         mut body: ByteStream,
         checksum_algo: Option<ChecksumAlgorithm>,
     ) -> Result<PutResult, StorageError> {
+        validate_bucket_name(bucket)?;
         let ec_dir = self.ec_dir(bucket, key);
+        let tmp_ec_dir = temp_sibling_path(&ec_dir);
+        let mut tmp_ec_guard = TempPathGuard::dir(tmp_ec_dir.clone());
         if let Some(parent) = ec_dir.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::create_dir_all(&ec_dir).await?;
+        fs::create_dir_all(&tmp_ec_dir).await?;
 
         let mut md5_hasher = Md5::new();
         let mut checksum_hasher = checksum_algo.map(ChecksumHasher::new);
@@ -711,9 +723,7 @@ impl FilesystemStorage {
             if n == 0 {
                 // Flush remaining chunk_buf
                 if !chunk_buf.is_empty() {
-                    let ci = self
-                        .write_chunk(bucket, key, chunk_index, &chunk_buf)
-                        .await?;
+                    let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_buf).await?;
                     chunks.push(ci);
                 }
                 break;
@@ -728,9 +738,7 @@ impl FilesystemStorage {
 
             while chunk_buf.len() >= self.chunk_size as usize {
                 let chunk_data: Vec<u8> = chunk_buf.drain(..self.chunk_size as usize).collect();
-                let ci = self
-                    .write_chunk(bucket, key, chunk_index, &chunk_data)
-                    .await?;
+                let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_data).await?;
                 chunks.push(ci);
                 chunk_index += 1;
             }
@@ -738,7 +746,7 @@ impl FilesystemStorage {
 
         // Handle empty object (zero chunks)
         if chunks.is_empty() {
-            let ci = self.write_chunk(bucket, key, 0, &[]).await?;
+            let ci = write_chunk_to_dir(&tmp_ec_dir, 0, &[]).await?;
             chunks.push(ci);
         }
 
@@ -747,7 +755,9 @@ impl FilesystemStorage {
         // Compute and write parity shards if configured (skip for empty objects)
         let has_parity = self.parity_shards > 0 && total_size > 0;
         if has_parity {
-            let parity_infos = self.compute_and_write_parity(bucket, key, &chunks).await?;
+            let parity_infos = self
+                .compute_and_write_parity_in_dir(&tmp_ec_dir, &chunks)
+                .await?;
             chunks.extend(parity_infos);
         }
 
@@ -770,7 +780,7 @@ impl FilesystemStorage {
             plaintext_size: None,
         };
         let manifest_json = serde_json::to_string_pretty(&manifest)?;
-        fs::write(self.manifest_path(bucket, key), manifest_json).await?;
+        fs::write(tmp_ec_dir.join("manifest.json"), manifest_json).await?;
 
         let etag = hex::encode(md5_hasher.finalize());
         let etag_quoted = format!("\"{}\"", etag);
@@ -812,7 +822,13 @@ impl FilesystemStorage {
         if let Some(parent) = meta_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        let tmp_meta_path = temp_sibling_path(&meta_path);
+        let mut tmp_meta_guard = TempPathGuard::file(tmp_meta_path.clone());
+        fs::write(&tmp_meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        publish_temp_payload_and_meta(&tmp_ec_dir, &ec_dir, true, &tmp_meta_path, &meta_path)
+            .await?;
+        tmp_ec_guard.disarm();
+        tmp_meta_guard.disarm();
 
         if versioned {
             self.write_version_chunked(bucket, key, &meta).await?;
@@ -841,11 +857,14 @@ impl FilesystemStorage {
         checksum: Option<(ChecksumAlgorithm, Option<String>)>,
         encryption: EncryptionRequest,
     ) -> Result<PutResult, StorageError> {
+        validate_bucket_name(bucket)?;
         let ec_dir = self.ec_dir(bucket, key);
+        let tmp_ec_dir = temp_sibling_path(&ec_dir);
+        let mut tmp_ec_guard = TempPathGuard::dir(tmp_ec_dir.clone());
         if let Some(parent) = ec_dir.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::create_dir_all(&ec_dir).await?;
+        fs::create_dir_all(&tmp_ec_dir).await?;
 
         // Version-id upfront: AAD binds to it, so we need it before the first
         // frame is encrypted.
@@ -860,17 +879,13 @@ impl FilesystemStorage {
             .prepare_encryption(&encryption)
             .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
         let dek = self
-            .resolve_dek(
-                &enc_meta,
-                encryption.customer_key.as_ref().map(|k| **k),
-            )
+            .resolve_dek(&enc_meta, encryption.customer_key.as_ref().map(|k| **k))
             .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
         let b64 = base64::engine::general_purpose::STANDARD;
         let prefix_bytes = b64
             .decode(&enc_meta.nonce_prefix)
             .map_err(|_| StorageError::EncryptionError("invalid nonce_prefix".into()))?;
-        let mut nonce_prefix = [0u8; 4];
-        nonce_prefix.copy_from_slice(&prefix_bytes);
+        let nonce_prefix = prefix_bytes;
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&dek));
 
         let checksum_algo = checksum.as_ref().map(|(a, _)| *a);
@@ -891,8 +906,7 @@ impl FilesystemStorage {
             if n == 0 {
                 // Flush trailing partial frame.
                 if !frame_buf.is_empty() {
-                    let aad =
-                        build_frame_aad(bucket, key, version_id.as_deref(), frame_index);
+                    let aad = build_frame_aad(bucket, key, version_id.as_deref(), frame_index);
                     let ct = encrypt_frame_to_vec(
                         &cipher,
                         &nonce_prefix,
@@ -905,20 +919,15 @@ impl FilesystemStorage {
                 }
                 // Flush full chunks then any remainder.
                 while chunk_buf.len() >= self.chunk_size as usize {
-                    let chunk_data: Vec<u8> =
-                        chunk_buf.drain(..self.chunk_size as usize).collect();
+                    let chunk_data: Vec<u8> = chunk_buf.drain(..self.chunk_size as usize).collect();
                     ct_size += chunk_data.len() as u64;
-                    let ci = self
-                        .write_chunk(bucket, key, chunk_index, &chunk_data)
-                        .await?;
+                    let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_data).await?;
                     chunks.push(ci);
                     chunk_index += 1;
                 }
                 if !chunk_buf.is_empty() {
                     ct_size += chunk_buf.len() as u64;
-                    let ci = self
-                        .write_chunk(bucket, key, chunk_index, &chunk_buf)
-                        .await?;
+                    let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_buf).await?;
                     chunks.push(ci);
                     chunk_buf.clear();
                 }
@@ -933,22 +942,14 @@ impl FilesystemStorage {
             while frame_buf.len() >= FRAME_CHUNK_SIZE {
                 let frame_data: Vec<u8> = frame_buf.drain(..FRAME_CHUNK_SIZE).collect();
                 let aad = build_frame_aad(bucket, key, version_id.as_deref(), frame_index);
-                let ct = encrypt_frame_to_vec(
-                    &cipher,
-                    &nonce_prefix,
-                    frame_index,
-                    &frame_data,
-                    &aad,
-                )?;
+                let ct =
+                    encrypt_frame_to_vec(&cipher, &nonce_prefix, frame_index, &frame_data, &aad)?;
                 chunk_buf.extend_from_slice(&ct);
                 frame_index += 1;
                 while chunk_buf.len() >= self.chunk_size as usize {
-                    let chunk_data: Vec<u8> =
-                        chunk_buf.drain(..self.chunk_size as usize).collect();
+                    let chunk_data: Vec<u8> = chunk_buf.drain(..self.chunk_size as usize).collect();
                     ct_size += chunk_data.len() as u64;
-                    let ci = self
-                        .write_chunk(bucket, key, chunk_index, &chunk_data)
-                        .await?;
+                    let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_data).await?;
                     chunks.push(ci);
                     chunk_index += 1;
                 }
@@ -958,7 +959,7 @@ impl FilesystemStorage {
         // Preserve the existing EC invariant: at least one chunk on disk so the
         // manifest/chunk-reader path is consistent even for empty objects.
         if chunks.is_empty() {
-            let ci = self.write_chunk(bucket, key, 0, &[]).await?;
+            let ci = write_chunk_to_dir(&tmp_ec_dir, 0, &[]).await?;
             chunks.push(ci);
         }
 
@@ -966,7 +967,9 @@ impl FilesystemStorage {
 
         let has_parity = self.parity_shards > 0 && ct_size > 0;
         if has_parity {
-            let parity_infos = self.compute_and_write_parity(bucket, key, &chunks).await?;
+            let parity_infos = self
+                .compute_and_write_parity_in_dir(&tmp_ec_dir, &chunks)
+                .await?;
             chunks.extend(parity_infos);
         }
 
@@ -989,7 +992,7 @@ impl FilesystemStorage {
             plaintext_size: Some(plaintext_size),
         };
         fs::write(
-            self.manifest_path(bucket, key),
+            tmp_ec_dir.join("manifest.json"),
             serde_json::to_string_pretty(&manifest)?,
         )
         .await?;
@@ -1001,6 +1004,7 @@ impl FilesystemStorage {
             let computed = checksum_hasher.unwrap().finalize_base64();
             if let Some(expected) = expected_checksum {
                 if computed != expected {
+                    let _ = fs::remove_dir_all(&tmp_ec_dir).await;
                     return Err(StorageError::ChecksumMismatch(format!(
                         "expected {}, got {}",
                         expected, computed
@@ -1044,7 +1048,13 @@ impl FilesystemStorage {
         if let Some(parent) = meta_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        let tmp_meta_path = temp_sibling_path(&meta_path);
+        let mut tmp_meta_guard = TempPathGuard::file(tmp_meta_path.clone());
+        fs::write(&tmp_meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        publish_temp_payload_and_meta(&tmp_ec_dir, &ec_dir, true, &tmp_meta_path, &meta_path)
+            .await?;
+        tmp_ec_guard.disarm();
+        tmp_meta_guard.disarm();
 
         if versioned {
             self.write_version_chunked(bucket, key, &meta).await?;
@@ -1059,32 +1069,17 @@ impl FilesystemStorage {
         })
     }
 
-    async fn write_chunk(
+    async fn compute_and_write_parity_in_dir(
         &self,
-        bucket: &str,
-        key: &str,
-        index: u32,
-        data: &[u8],
-    ) -> Result<ChunkInfo, StorageError> {
-        let path = self.chunk_path(bucket, key, index);
-        let sha256 = hex::encode(Sha256::digest(data));
-        let mut file = fs::File::create(&path).await?;
-        file.write_all(data).await?;
-        file.flush().await?;
-        Ok(ChunkInfo {
-            index,
-            size: data.len() as u64,
-            sha256,
-            kind: ChunkKind::Data,
-        })
+        dir: &Path,
+        data_chunks: &[ChunkInfo],
+    ) -> Result<Vec<ChunkInfo>, StorageError> {
+        self.compute_and_write_parity_from(dir, data_chunks).await
     }
 
-    /// Compute Reed-Solomon parity shards from the data chunks already on disk,
-    /// write them as additional chunk files, and return their ChunkInfo entries.
-    async fn compute_and_write_parity(
+    async fn compute_and_write_parity_from(
         &self,
-        bucket: &str,
-        key: &str,
+        dir: &Path,
         data_chunks: &[ChunkInfo],
     ) -> Result<Vec<ChunkInfo>, StorageError> {
         use reed_solomon_erasure::galois_8::ReedSolomon;
@@ -1102,48 +1097,179 @@ impl FilesystemStorage {
         }
 
         let shard_size = self.chunk_size as usize;
-
-        // Read data chunks from disk and pad to shard_size
         let mut all_shards: Vec<Vec<u8>> = Vec::with_capacity(k + m);
         for ci in data_chunks {
-            let path = self.chunk_path(bucket, key, ci.index);
+            let path = dir.join(format!("{:06}", ci.index));
             let mut data = std::fs::read(&path).map_err(StorageError::Io)?;
             data.resize(shard_size, 0u8);
             all_shards.push(data);
         }
-
-        // Allocate empty parity shards
         for _ in 0..m {
             all_shards.push(vec![0u8; shard_size]);
         }
-
-        // Encode parity
         let rs = ReedSolomon::new(k, m)
             .map_err(|e| StorageError::InvalidKey(format!("Reed-Solomon init error: {e}")))?;
         rs.encode(&mut all_shards)
             .map_err(|e| StorageError::InvalidKey(format!("Reed-Solomon encode error: {e}")))?;
 
-        // Write parity chunks to disk
         let mut parity_infos = Vec::with_capacity(m);
         for i in 0..m {
             let parity_index = k as u32 + i as u32;
             let shard = &all_shards[k + i];
-            let sha256 = hex::encode(Sha256::digest(shard));
-            let path = self.chunk_path(bucket, key, parity_index);
-            let mut file = fs::File::create(&path).await?;
-            file.write_all(shard).await?;
-            file.flush().await?;
-            parity_infos.push(ChunkInfo {
-                index: parity_index,
-                size: shard_size as u64,
-                sha256,
-                kind: ChunkKind::Parity,
-            });
+            let path = dir.join(format!("{:06}", parity_index));
+            parity_infos.push(
+                write_chunk_file(&path, parity_index, shard)
+                    .await?
+                    .into_parity(),
+            );
         }
-
         Ok(parity_infos)
     }
+}
 
+trait ChunkInfoExt {
+    fn into_parity(self) -> ChunkInfo;
+}
+
+impl ChunkInfoExt for ChunkInfo {
+    fn into_parity(mut self) -> ChunkInfo {
+        self.kind = ChunkKind::Parity;
+        self
+    }
+}
+
+async fn write_chunk_to_dir(
+    dir: &Path,
+    index: u32,
+    data: &[u8],
+) -> Result<ChunkInfo, StorageError> {
+    write_chunk_file(&dir.join(format!("{:06}", index)), index, data).await
+}
+
+async fn write_chunk_file(path: &Path, index: u32, data: &[u8]) -> Result<ChunkInfo, StorageError> {
+    let sha256 = hex::encode(Sha256::digest(data));
+    let mut file = fs::File::create(&path).await?;
+    file.write_all(data).await?;
+    file.flush().await?;
+    Ok(ChunkInfo {
+        index,
+        size: data.len() as u64,
+        sha256,
+        kind: ChunkKind::Data,
+    })
+}
+
+fn temp_sibling_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    parent.join(format!(".maxio-tmp-{}", uuid::Uuid::new_v4()))
+}
+
+struct TempPathGuard {
+    path: PathBuf,
+    is_dir: bool,
+    armed: bool,
+}
+
+impl TempPathGuard {
+    fn file(path: PathBuf) -> Self {
+        Self {
+            path,
+            is_dir: false,
+            armed: true,
+        }
+    }
+
+    fn dir(path: PathBuf) -> Self {
+        Self {
+            path,
+            is_dir: true,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempPathGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            if self.is_dir {
+                let _ = std::fs::remove_dir_all(&self.path);
+            } else {
+                let _ = std::fs::remove_file(&self.path);
+            }
+        }
+    }
+}
+
+async fn publish_temp_payload_and_meta(
+    tmp_payload: &Path,
+    final_payload: &Path,
+    payload_is_dir: bool,
+    tmp_meta: &Path,
+    final_meta: &Path,
+) -> Result<(), StorageError> {
+    if let Some(parent) = final_payload.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+    if let Some(parent) = final_meta.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+
+    let payload_backup = backup_existing(final_payload).await?;
+    let meta_backup = backup_existing(final_meta).await?;
+
+    if let Err(e) = fs::rename(tmp_payload, final_payload).await {
+        restore_backup(final_meta, &meta_backup, false).await;
+        restore_backup(final_payload, &payload_backup, payload_is_dir).await;
+        return Err(StorageError::Io(e));
+    }
+
+    if let Err(e) = fs::rename(tmp_meta, final_meta).await {
+        remove_path_if_exists(final_payload, payload_is_dir).await;
+        restore_backup(final_meta, &meta_backup, false).await;
+        restore_backup(final_payload, &payload_backup, payload_is_dir).await;
+        return Err(StorageError::Io(e));
+    }
+
+    cleanup_backup(&payload_backup, payload_is_dir).await;
+    cleanup_backup(&meta_backup, false).await;
+    Ok(())
+}
+
+async fn backup_existing(path: &Path) -> Result<Option<PathBuf>, StorageError> {
+    if !fs::try_exists(path).await? {
+        return Ok(None);
+    }
+    let backup = temp_sibling_path(path);
+    fs::rename(path, &backup).await?;
+    Ok(Some(backup))
+}
+
+async fn restore_backup(final_path: &Path, backup: &Option<PathBuf>, is_dir: bool) {
+    if let Some(backup) = backup {
+        remove_path_if_exists(final_path, is_dir).await;
+        let _ = fs::rename(backup, final_path).await;
+    }
+}
+
+async fn cleanup_backup(backup: &Option<PathBuf>, is_dir: bool) {
+    if let Some(backup) = backup {
+        remove_path_if_exists(backup, is_dir).await;
+    }
+}
+
+async fn remove_path_if_exists(path: &Path, is_dir: bool) {
+    if is_dir {
+        let _ = fs::remove_dir_all(path).await;
+    } else {
+        let _ = fs::remove_file(path).await;
+    }
+}
+
+impl FilesystemStorage {
     async fn complete_multipart_chunked(
         &self,
         bucket: &str,
@@ -1153,10 +1279,18 @@ impl FilesystemStorage {
     ) -> Result<PutResult, StorageError> {
         let key = &upload_meta.key;
         let ec_dir = self.ec_dir(bucket, key);
+        let tmp_ec_dir = temp_sibling_path(&ec_dir);
+        let mut tmp_ec_guard = TempPathGuard::dir(tmp_ec_dir.clone());
         if let Some(parent) = ec_dir.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::create_dir_all(&ec_dir).await?;
+        fs::create_dir_all(&tmp_ec_dir).await?;
+        let versioned = self.is_versioned(bucket).await.unwrap_or(false);
+        let version_id = if versioned {
+            Some(Self::generate_version_id())
+        } else {
+            None
+        };
 
         let mut total_size = 0u64;
         let mut etag_hasher = Md5::new();
@@ -1178,9 +1312,7 @@ impl FilesystemStorage {
 
                 while chunk_buf.len() >= self.chunk_size as usize {
                     let chunk_data: Vec<u8> = chunk_buf.drain(..self.chunk_size as usize).collect();
-                    let ci = self
-                        .write_chunk(bucket, key, chunk_index, &chunk_data)
-                        .await?;
+                    let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_data).await?;
                     chunks.push(ci);
                     chunk_index += 1;
                 }
@@ -1193,14 +1325,12 @@ impl FilesystemStorage {
 
         // Flush remaining
         if !chunk_buf.is_empty() {
-            let ci = self
-                .write_chunk(bucket, key, chunk_index, &chunk_buf)
-                .await?;
+            let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_buf).await?;
             chunks.push(ci);
         }
 
         if chunks.is_empty() {
-            let ci = self.write_chunk(bucket, key, 0, &[]).await?;
+            let ci = write_chunk_to_dir(&tmp_ec_dir, 0, &[]).await?;
             chunks.push(ci);
         }
 
@@ -1209,7 +1339,9 @@ impl FilesystemStorage {
         // Compute and write parity shards if configured (skip for empty objects)
         let has_parity = self.parity_shards > 0 && total_size > 0;
         if has_parity {
-            let parity_infos = self.compute_and_write_parity(bucket, key, &chunks).await?;
+            let parity_infos = self
+                .compute_and_write_parity_in_dir(&tmp_ec_dir, &chunks)
+                .await?;
             chunks.extend(parity_infos);
         }
 
@@ -1232,7 +1364,7 @@ impl FilesystemStorage {
             plaintext_size: None,
         };
         fs::write(
-            self.manifest_path(bucket, key),
+            tmp_ec_dir.join("manifest.json"),
             serde_json::to_string_pretty(&manifest)?,
         )
         .await?;
@@ -1282,7 +1414,7 @@ impl FilesystemStorage {
             last_modified: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
-            version_id: None,
+            version_id: version_id.clone(),
             is_delete_marker: false,
             storage_format: Some(storage_format.to_string()),
             checksum_algorithm,
@@ -1296,13 +1428,23 @@ impl FilesystemStorage {
         if let Some(parent) = meta_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::write(&meta_path, serde_json::to_string_pretty(&object_meta)?).await?;
-        let _ = fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await;
+        let tmp_meta_path = temp_sibling_path(&meta_path);
+        let mut tmp_meta_guard = TempPathGuard::file(tmp_meta_path.clone());
+        fs::write(&tmp_meta_path, serde_json::to_string_pretty(&object_meta)?).await?;
+        publish_temp_payload_and_meta(&tmp_ec_dir, &ec_dir, true, &tmp_meta_path, &meta_path)
+            .await?;
+        tmp_ec_guard.disarm();
+        tmp_meta_guard.disarm();
+        if versioned {
+            self.write_version_chunked(bucket, key, &object_meta)
+                .await?;
+        }
+        fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await?;
 
         Ok(PutResult {
             size: total_size,
             etag,
-            version_id: None,
+            version_id,
             checksum_algorithm,
             checksum_value,
         })
@@ -1322,10 +1464,18 @@ impl FilesystemStorage {
     ) -> Result<PutResult, StorageError> {
         let key = upload_meta.key.as_str();
         let ec_dir = self.ec_dir(bucket, key);
+        let tmp_ec_dir = temp_sibling_path(&ec_dir);
+        let mut tmp_ec_guard = TempPathGuard::dir(tmp_ec_dir.clone());
         if let Some(parent) = ec_dir.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::create_dir_all(&ec_dir).await?;
+        fs::create_dir_all(&tmp_ec_dir).await?;
+        let versioned = self.is_versioned(bucket).await.unwrap_or(false);
+        let version_id = if versioned {
+            Some(Self::generate_version_id())
+        } else {
+            None
+        };
 
         // Upload-scoped DEK used to decrypt each part on read.
         let upload_spec = upload_meta
@@ -1356,8 +1506,7 @@ impl FilesystemStorage {
         let prefix_bytes = b64
             .decode(&enc_meta.nonce_prefix)
             .map_err(|_| StorageError::EncryptionError("invalid nonce_prefix".into()))?;
-        let mut nonce_prefix = [0u8; 4];
-        nonce_prefix.copy_from_slice(&prefix_bytes);
+        let nonce_prefix = prefix_bytes;
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&dek));
 
         let mut total_plaintext: u64 = 0;
@@ -1395,7 +1544,7 @@ impl FilesystemStorage {
                 frame_buf.extend_from_slice(&read_buf[..n]);
                 while frame_buf.len() >= FRAME_CHUNK_SIZE {
                     let frame_data: Vec<u8> = frame_buf.drain(..FRAME_CHUNK_SIZE).collect();
-                    let aad = build_frame_aad(bucket, key, None, frame_index);
+                    let aad = build_frame_aad(bucket, key, version_id.as_deref(), frame_index);
                     let ct = encrypt_frame_to_vec(
                         &cipher,
                         &nonce_prefix,
@@ -1409,9 +1558,7 @@ impl FilesystemStorage {
                         let chunk_data: Vec<u8> =
                             chunk_buf.drain(..self.chunk_size as usize).collect();
                         ct_size += chunk_data.len() as u64;
-                        let ci = self
-                            .write_chunk(bucket, key, chunk_index, &chunk_data)
-                            .await?;
+                        let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_data).await?;
                         chunks.push(ci);
                         chunk_index += 1;
                     }
@@ -1425,44 +1572,36 @@ impl FilesystemStorage {
 
         // Flush trailing partial frame + any remaining chunk_buf bytes.
         if !frame_buf.is_empty() {
-            let aad = build_frame_aad(bucket, key, None, frame_index);
-            let ct = encrypt_frame_to_vec(
-                &cipher,
-                &nonce_prefix,
-                frame_index,
-                &frame_buf,
-                &aad,
-            )?;
+            let aad = build_frame_aad(bucket, key, version_id.as_deref(), frame_index);
+            let ct = encrypt_frame_to_vec(&cipher, &nonce_prefix, frame_index, &frame_buf, &aad)?;
             chunk_buf.extend_from_slice(&ct);
             frame_buf.clear();
         }
         while chunk_buf.len() >= self.chunk_size as usize {
             let chunk_data: Vec<u8> = chunk_buf.drain(..self.chunk_size as usize).collect();
             ct_size += chunk_data.len() as u64;
-            let ci = self
-                .write_chunk(bucket, key, chunk_index, &chunk_data)
-                .await?;
+            let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_data).await?;
             chunks.push(ci);
             chunk_index += 1;
         }
         if !chunk_buf.is_empty() {
             ct_size += chunk_buf.len() as u64;
-            let ci = self
-                .write_chunk(bucket, key, chunk_index, &chunk_buf)
-                .await?;
+            let ci = write_chunk_to_dir(&tmp_ec_dir, chunk_index, &chunk_buf).await?;
             chunks.push(ci);
             chunk_buf.clear();
         }
 
         if chunks.is_empty() {
-            let ci = self.write_chunk(bucket, key, 0, &[]).await?;
+            let ci = write_chunk_to_dir(&tmp_ec_dir, 0, &[]).await?;
             chunks.push(ci);
         }
 
         let data_chunk_count = chunks.len() as u32;
         let has_parity = self.parity_shards > 0 && ct_size > 0;
         if has_parity {
-            let parity_infos = self.compute_and_write_parity(bucket, key, &chunks).await?;
+            let parity_infos = self
+                .compute_and_write_parity_in_dir(&tmp_ec_dir, &chunks)
+                .await?;
             chunks.extend(parity_infos);
         }
 
@@ -1485,7 +1624,7 @@ impl FilesystemStorage {
             plaintext_size: Some(total_plaintext),
         };
         fs::write(
-            self.manifest_path(bucket, key),
+            tmp_ec_dir.join("manifest.json"),
             serde_json::to_string_pretty(&manifest)?,
         )
         .await?;
@@ -1533,7 +1672,7 @@ impl FilesystemStorage {
             last_modified: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
-            version_id: None,
+            version_id: version_id.clone(),
             is_delete_marker: false,
             storage_format: Some(storage_format.to_string()),
             checksum_algorithm,
@@ -1550,14 +1689,23 @@ impl FilesystemStorage {
         if let Some(parent) = meta_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::write(&meta_path, serde_json::to_string_pretty(&object_meta)?).await?;
-
-        let _ = fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await;
+        let tmp_meta_path = temp_sibling_path(&meta_path);
+        let mut tmp_meta_guard = TempPathGuard::file(tmp_meta_path.clone());
+        fs::write(&tmp_meta_path, serde_json::to_string_pretty(&object_meta)?).await?;
+        publish_temp_payload_and_meta(&tmp_ec_dir, &ec_dir, true, &tmp_meta_path, &meta_path)
+            .await?;
+        tmp_ec_guard.disarm();
+        tmp_meta_guard.disarm();
+        if versioned {
+            self.write_version_chunked(bucket, key, &object_meta)
+                .await?;
+        }
+        fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await?;
 
         Ok(PutResult {
             size: total_plaintext,
             etag,
-            version_id: None,
+            version_id,
             checksum_algorithm,
             checksum_value,
         })
@@ -1613,6 +1761,7 @@ impl FilesystemStorage {
         key: &str,
         customer_key: Option<[u8; 32]>,
     ) -> Result<(ByteStream, ObjectMeta), StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
         let meta = self.read_object_meta(bucket, key).await?;
         reject_sse_c_on_plaintext(&meta, customer_key.is_some())?;
@@ -1624,8 +1773,7 @@ impl FilesystemStorage {
                 verify_sidecar_mac(&meta, &dek)?;
                 let frame_size = enc_meta.chunk_size as usize;
                 let plaintext_size = meta.size;
-                let aad_builder =
-                    object_aad_builder(bucket, key, meta.version_id.as_deref());
+                let aad_builder = object_aad_builder(bucket, key, meta.version_id.as_deref());
                 let ct_reader = VerifiedChunkReader::new(ec_dir, manifest);
                 let decryptor = FrameDecryptor::new(
                     Box::pin(ct_reader),
@@ -1692,6 +1840,7 @@ impl FilesystemStorage {
         length: u64,
         customer_key: Option<[u8; 32]>,
     ) -> Result<(ByteStream, ObjectMeta), StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
         let meta = self.read_object_meta(bucket, key).await?;
         reject_sse_c_on_plaintext(&meta, customer_key.is_some())?;
@@ -1705,8 +1854,7 @@ impl FilesystemStorage {
                 let ct_offset = FrameDecryptor::ciphertext_offset(frame_size, offset);
                 let ct_total = manifest.total_size;
                 let ct_length = ct_total.saturating_sub(ct_offset);
-                let aad_builder =
-                    object_aad_builder(bucket, key, meta.version_id.as_deref());
+                let aad_builder = object_aad_builder(bucket, key, meta.version_id.as_deref());
                 let ct_reader =
                     VerifiedChunkReader::with_range(ec_dir, manifest, ct_offset, ct_length);
                 let decryptor = FrameDecryptor::for_range(
@@ -1783,6 +1931,7 @@ impl FilesystemStorage {
     }
 
     pub async fn head_object(&self, bucket: &str, key: &str) -> Result<ObjectMeta, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
         let meta = self.read_object_meta(bucket, key).await?;
         Ok(meta)
@@ -1826,6 +1975,7 @@ impl FilesystemStorage {
         bucket: &str,
         key: &str,
     ) -> Result<DeleteResult, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
 
         let versioned = self.is_versioned(bucket).await.unwrap_or(false);
@@ -1837,9 +1987,18 @@ impl FilesystemStorage {
         let meta_path = self.meta_path(bucket, key);
         let ec_dir = self.ec_dir(bucket, key);
 
-        let _ = fs::remove_file(&obj_path).await;
-        let _ = fs::remove_file(&meta_path).await;
-        let _ = fs::remove_dir_all(&ec_dir).await;
+        if !fs::try_exists(&meta_path).await?
+            && !fs::try_exists(&obj_path).await?
+            && !fs::try_exists(&ec_dir).await?
+        {
+            return Ok(DeleteResult {
+                version_id: None,
+                is_delete_marker: false,
+            });
+        }
+        remove_file_if_exists(&obj_path).await?;
+        remove_file_if_exists(&meta_path).await?;
+        remove_dir_all_if_exists(&ec_dir).await?;
 
         // Clean up empty parent directories (but not the bucket dir itself)
         let bucket_dir = self.buckets_dir.join(bucket);
@@ -1866,6 +2025,7 @@ impl FilesystemStorage {
         bucket: &str,
         prefix: &str,
     ) -> Result<Vec<ObjectMeta>, StorageError> {
+        validate_bucket_name(bucket)?;
         let bucket_dir = self.buckets_dir.join(bucket);
         let mut results = Vec::new();
         self.walk_dir(&bucket_dir, &bucket_dir, prefix, &mut results)
@@ -1882,6 +2042,7 @@ impl FilesystemStorage {
         checksum_algorithm: Option<ChecksumAlgorithm>,
         encryption_spec: Option<UploadEncryptionSpec>,
     ) -> Result<MultipartUploadMeta, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
         let upload_id = uuid::Uuid::new_v4().to_string();
         let upload_dir = self.upload_dir(bucket, &upload_id);
@@ -1893,7 +2054,7 @@ impl FilesystemStorage {
         // the active master.
         let encryption_spec = if let Some(mut spec) = encryption_spec {
             let b64 = base64::engine::general_purpose::STANDARD;
-            let prefix = Keyring::generate_nonce_prefix();
+            let prefix = Keyring::generate_nonce_prefix8();
             spec.upload_nonce_prefix = b64.encode(prefix);
             if matches!(spec.mode, EncryptionMode::SseS3) {
                 let dek = Keyring::generate_dek();
@@ -1937,6 +2098,7 @@ impl FilesystemStorage {
         checksum: Option<(ChecksumAlgorithm, Option<String>)>,
         customer_key: Option<[u8; 32]>,
     ) -> Result<PartMeta, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_upload_id(upload_id)?;
         if part_number == 0 || part_number > 10_000 {
             return Err(StorageError::InvalidKey(
@@ -1955,17 +2117,15 @@ impl FilesystemStorage {
             let prefix_bytes = b64
                 .decode(&spec.upload_nonce_prefix)
                 .map_err(|_| StorageError::EncryptionError("invalid upload_nonce_prefix".into()))?;
-            if prefix_bytes.len() != 4 {
+            if prefix_bytes.len() != 4 && prefix_bytes.len() != 8 {
                 return Err(StorageError::EncryptionError(
-                    "upload_nonce_prefix must be 4 bytes".into(),
+                    "upload_nonce_prefix must be 4 or 8 bytes".into(),
                 ));
             }
-            let mut prefix = [0u8; 4];
-            prefix.copy_from_slice(&prefix_bytes);
             let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&dek));
-            (Some(cipher), prefix)
+            (Some(cipher), prefix_bytes)
         } else {
-            (None, [0u8; 4])
+            (None, Vec::new())
         };
 
         let part_path = self.part_path(bucket, upload_id, part_number);
@@ -2083,6 +2243,7 @@ impl FilesystemStorage {
         parts: &[(u32, String)],
         customer_key: Option<[u8; 32]>,
     ) -> Result<PutResult, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_upload_id(upload_id)?;
         if parts.is_empty() {
             return Err(StorageError::InvalidKey(
@@ -2192,34 +2353,33 @@ impl FilesystemStorage {
         }
 
         // Upload-scoped DEK used to decrypt every encrypted part on the way in.
-        let upload_dek_opt: Option<[u8; 32]> =
-            if let Some(ref spec) = upload_meta.encryption_spec {
-                Some(self.resolve_upload_dek(spec, customer_key)?)
-            } else {
-                None
-            };
-
-        // Final object encryption (fresh DEK, distinct from the upload DEK).
-        let enc_meta_opt: Option<EncryptionMeta> = if let Some(ref spec) = upload_meta.encryption_spec
-        {
-            let req = match spec.mode {
-                EncryptionMode::SseS3 => EncryptionRequest::sse_s3(),
-                EncryptionMode::SseC => {
-                    let ck = customer_key.ok_or_else(|| {
-                        StorageError::EncryptionError(
-                            "SSE-C requires customer key on CompleteMultipartUpload".into(),
-                        )
-                    })?;
-                    EncryptionRequest::sse_c(ck)
-                }
-            };
-            Some(
-                self.prepare_encryption(&req)
-                    .map_err(|e| StorageError::EncryptionError(e.to_string()))?,
-            )
+        let upload_dek_opt: Option<[u8; 32]> = if let Some(ref spec) = upload_meta.encryption_spec {
+            Some(self.resolve_upload_dek(spec, customer_key)?)
         } else {
             None
         };
+
+        // Final object encryption (fresh DEK, distinct from the upload DEK).
+        let enc_meta_opt: Option<EncryptionMeta> =
+            if let Some(ref spec) = upload_meta.encryption_spec {
+                let req = match spec.mode {
+                    EncryptionMode::SseS3 => EncryptionRequest::sse_s3(),
+                    EncryptionMode::SseC => {
+                        let ck = customer_key.ok_or_else(|| {
+                            StorageError::EncryptionError(
+                                "SSE-C requires customer key on CompleteMultipartUpload".into(),
+                            )
+                        })?;
+                        EncryptionRequest::sse_c(ck)
+                    }
+                };
+                Some(
+                    self.prepare_encryption(&req)
+                        .map_err(|e| StorageError::EncryptionError(e.to_string()))?,
+                )
+            } else {
+                None
+            };
 
         let (cipher_opt, nonce_prefix, dek_opt) = if let Some(ref em) = enc_meta_opt {
             let dek = self.resolve_dek(em, customer_key)?;
@@ -2227,19 +2387,26 @@ impl FilesystemStorage {
             let prefix_bytes = b64
                 .decode(&em.nonce_prefix)
                 .map_err(|_| StorageError::EncryptionError("invalid nonce_prefix".into()))?;
-            let mut prefix = [0u8; 4];
-            prefix.copy_from_slice(&prefix_bytes);
             let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&dek));
-            (Some(cipher), prefix, Some(dek))
+            (Some(cipher), prefix_bytes, Some(dek))
         } else {
-            (None, [0u8; 4], None)
+            (None, Vec::new(), None)
+        };
+
+        let versioned = self.is_versioned(bucket).await.unwrap_or(false);
+        let version_id = if versioned {
+            Some(Self::generate_version_id())
+        } else {
+            None
         };
 
         let obj_path = self.object_path(bucket, &upload_meta.key);
         if let Some(parent) = obj_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        let out = fs::File::create(&obj_path).await?;
+        let tmp_obj_path = temp_sibling_path(&obj_path);
+        let mut tmp_obj_guard = TempPathGuard::file(tmp_obj_path.clone());
+        let out = fs::File::create(&tmp_obj_path).await?;
         let mut writer = BufWriter::with_capacity(IO_BUFFER_SIZE, out);
         let mut total_size = 0u64;
         let mut etag_hasher = Md5::new();
@@ -2278,9 +2445,13 @@ impl FilesystemStorage {
                 if let Some(ref cipher) = cipher_opt {
                     frame_buf.extend_from_slice(&buf[..n]);
                     while frame_buf.len() >= FRAME_CHUNK_SIZE {
-                        let frame_data: Vec<u8> =
-                            frame_buf.drain(..FRAME_CHUNK_SIZE).collect();
-                        let aad = build_frame_aad(bucket_for_aad, key_for_aad, None, chunk_index);
+                        let frame_data: Vec<u8> = frame_buf.drain(..FRAME_CHUNK_SIZE).collect();
+                        let aad = build_frame_aad(
+                            bucket_for_aad,
+                            key_for_aad,
+                            version_id.as_deref(),
+                            chunk_index,
+                        );
                         write_encrypted_frame(
                             &mut writer,
                             cipher,
@@ -2304,7 +2475,12 @@ impl FilesystemStorage {
         // Flush trailing partial frame
         if let Some(ref cipher) = cipher_opt {
             if !frame_buf.is_empty() {
-                let aad = build_frame_aad(bucket_for_aad, key_for_aad, None, chunk_index);
+                let aad = build_frame_aad(
+                    bucket_for_aad,
+                    key_for_aad,
+                    version_id.as_deref(),
+                    chunk_index,
+                );
                 write_encrypted_frame(
                     &mut writer,
                     cipher,
@@ -2358,7 +2534,7 @@ impl FilesystemStorage {
             last_modified: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
-            version_id: None,
+            version_id: version_id.clone(),
             is_delete_marker: false,
             storage_format: None,
             checksum_algorithm,
@@ -2376,13 +2552,23 @@ impl FilesystemStorage {
         if let Some(parent) = meta_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        fs::write(meta_path, serde_json::to_string_pretty(&object_meta)?).await?;
-        let _ = fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await;
+        let tmp_meta_path = temp_sibling_path(&meta_path);
+        let mut tmp_meta_guard = TempPathGuard::file(tmp_meta_path.clone());
+        fs::write(&tmp_meta_path, serde_json::to_string_pretty(&object_meta)?).await?;
+        publish_temp_payload_and_meta(&tmp_obj_path, &obj_path, false, &tmp_meta_path, &meta_path)
+            .await?;
+        tmp_obj_guard.disarm();
+        tmp_meta_guard.disarm();
+        if versioned {
+            self.write_version(bucket, &upload_meta.key, &object_meta, &obj_path)
+                .await?;
+        }
+        fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await?;
 
         Ok(PutResult {
             size: total_size,
             etag,
-            version_id: None,
+            version_id,
             checksum_algorithm,
             checksum_value,
         })
@@ -2393,6 +2579,7 @@ impl FilesystemStorage {
         bucket: &str,
         upload_id: &str,
     ) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         validate_upload_id(upload_id)?;
         let upload_dir = self.upload_dir(bucket, upload_id);
         if !fs::try_exists(&upload_dir).await? {
@@ -2407,6 +2594,7 @@ impl FilesystemStorage {
         bucket: &str,
         upload_id: &str,
     ) -> Result<(MultipartUploadMeta, Vec<PartMeta>), StorageError> {
+        validate_bucket_name(bucket)?;
         validate_upload_id(upload_id)?;
         let meta = self.read_upload_meta(bucket, upload_id).await?;
         let upload_dir = self.upload_dir(bucket, upload_id);
@@ -2430,6 +2618,7 @@ impl FilesystemStorage {
         &self,
         bucket: &str,
     ) -> Result<Vec<MultipartUploadMeta>, StorageError> {
+        validate_bucket_name(bucket)?;
         let uploads_dir = self.uploads_dir(bucket);
         if !fs::try_exists(&uploads_dir).await? {
             return Ok(Vec::new());
@@ -2608,6 +2797,7 @@ impl FilesystemStorage {
     }
 
     pub async fn is_versioned(&self, bucket: &str) -> Result<bool, StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2621,6 +2811,7 @@ impl FilesystemStorage {
     }
 
     pub async fn set_versioning(&self, bucket: &str, enabled: bool) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2634,14 +2825,14 @@ impl FilesystemStorage {
         meta.versioning = enabled;
         fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
 
-        // If disabling versioning, clean up old versions
-        if was_enabled && !enabled {
-            self.cleanup_versions(bucket).await?;
-        }
+        // S3-compatible suspension preserves historical versions. It only
+        // changes how future writes/deletes are versioned.
+        let _ = was_enabled;
         Ok(())
     }
 
     pub async fn get_bucket_public(&self, bucket: &str) -> Result<(bool, bool), StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2660,6 +2851,7 @@ impl FilesystemStorage {
         read: bool,
         list: bool,
     ) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2680,6 +2872,7 @@ impl FilesystemStorage {
         bucket: &str,
         rules: Vec<crate::storage::CorsRule>,
     ) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2698,6 +2891,7 @@ impl FilesystemStorage {
         &self,
         bucket: &str,
     ) -> Result<Option<Vec<crate::storage::CorsRule>>, StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2711,6 +2905,7 @@ impl FilesystemStorage {
     }
 
     pub async fn delete_bucket_cors(&self, bucket: &str) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2732,6 +2927,7 @@ impl FilesystemStorage {
         bucket: &str,
         config: BucketEncryptionConfig,
     ) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2750,6 +2946,7 @@ impl FilesystemStorage {
         &self,
         bucket: &str,
     ) -> Result<Option<BucketEncryptionConfig>, StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2763,6 +2960,7 @@ impl FilesystemStorage {
     }
 
     pub async fn delete_bucket_encryption(&self, bucket: &str) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -2779,15 +2977,12 @@ impl FilesystemStorage {
 
     // --- Encryption helpers ---
 
-    fn prepare_encryption(
-        &self,
-        req: &EncryptionRequest,
-    ) -> Result<EncryptionMeta, StorageError> {
+    fn prepare_encryption(&self, req: &EncryptionRequest) -> Result<EncryptionMeta, StorageError> {
         let b64 = base64::engine::general_purpose::STANDARD;
         match req.mode {
             EncryptionMode::SseS3 => {
                 let dek = Keyring::generate_dek();
-                let nonce_prefix = Keyring::generate_nonce_prefix();
+                let nonce_prefix = Keyring::generate_nonce_prefix8();
                 let key_id = self.keyring.active_id().to_string();
                 let (wrapped_dek, wrap_nonce) = self
                     .keyring
@@ -2809,16 +3004,23 @@ impl FilesystemStorage {
                 let customer_key = req.customer_key.as_ref().ok_or_else(|| {
                     StorageError::EncryptionError("SSE-C requires customer key".into())
                 })?;
-                let nonce_prefix = Keyring::generate_nonce_prefix();
+                let dek = Keyring::generate_dek();
+                let nonce_prefix = Keyring::generate_nonce_prefix8();
                 let md5 = Md5::digest(&**customer_key);
-                // For SSE-C the "DEK" used per frame is the customer key itself;
-                // no DEK is persisted. We still record nonce_prefix + key md5.
+                let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&**customer_key));
+                let mut wrap_nonce = [0u8; 12];
+                rand::rng().fill(&mut wrap_nonce[..]);
+                let wrapped_dek = cipher
+                    .encrypt(Nonce::from_slice(&wrap_nonce), dek.as_slice())
+                    .map_err(|_| {
+                        StorageError::EncryptionError("SSE-C DEK wrapping failed".into())
+                    })?;
                 Ok(EncryptionMeta {
                     algorithm: "AES256".to_string(),
                     mode: EncryptionMode::SseC,
                     key_id: None,
-                    wrapped_dek: None,
-                    wrap_nonce: None,
+                    wrapped_dek: Some(b64.encode(&wrapped_dek)),
+                    wrap_nonce: Some(b64.encode(wrap_nonce)),
                     customer_key_md5: Some(b64.encode(md5)),
                     nonce_prefix: b64.encode(nonce_prefix),
                     chunk_size: FRAME_CHUNK_SIZE as u32,
@@ -2842,9 +3044,7 @@ impl FilesystemStorage {
         match spec.mode {
             EncryptionMode::SseC => {
                 let ck = customer_key.ok_or_else(|| {
-                    StorageError::EncryptionError(
-                        "SSE-C multipart: customer key required".into(),
-                    )
+                    StorageError::EncryptionError("SSE-C multipart: customer key required".into())
                 })?;
                 if let Some(ref stored) = spec.customer_key_md5 {
                     let provided_md5 = Md5::digest(ck);
@@ -2907,19 +3107,49 @@ impl FilesystemStorage {
                         ));
                     }
                 }
-                Ok(ck)
+                let (Some(wrapped), Some(wrap_nonce)) =
+                    (enc_meta.wrapped_dek.as_ref(), enc_meta.wrap_nonce.as_ref())
+                else {
+                    // Legacy MaxIO SSE-C objects used the customer key directly.
+                    return Ok(ck);
+                };
+                let wrapped_bytes = b64
+                    .decode(wrapped)
+                    .map_err(|_| StorageError::DecryptionError("bad wrapped_dek base64".into()))?;
+                let nonce_bytes = b64
+                    .decode(wrap_nonce)
+                    .map_err(|_| StorageError::DecryptionError("bad wrap_nonce base64".into()))?;
+                if nonce_bytes.len() != 12 {
+                    return Err(StorageError::DecryptionError(
+                        "wrap_nonce must be 12 bytes".into(),
+                    ));
+                }
+                let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&ck));
+                let plaintext = cipher
+                    .decrypt(Nonce::from_slice(&nonce_bytes), wrapped_bytes.as_slice())
+                    .map_err(|_| StorageError::DecryptionError("SSE-C DEK unwrap failed".into()))?;
+                if plaintext.len() != 32 {
+                    return Err(StorageError::DecryptionError(
+                        "SSE-C DEK length invalid".into(),
+                    ));
+                }
+                let mut dek = [0u8; 32];
+                dek.copy_from_slice(&plaintext);
+                Ok(dek)
             }
             EncryptionMode::SseS3 => {
                 let key_id = enc_meta
                     .key_id
                     .as_ref()
                     .ok_or_else(|| StorageError::DecryptionError("missing key_id".into()))?;
-                let wrapped = enc_meta.wrapped_dek.as_ref().ok_or_else(|| {
-                    StorageError::DecryptionError("missing wrapped_dek".into())
-                })?;
-                let wrap_nonce = enc_meta.wrap_nonce.as_ref().ok_or_else(|| {
-                    StorageError::DecryptionError("missing wrap_nonce".into())
-                })?;
+                let wrapped = enc_meta
+                    .wrapped_dek
+                    .as_ref()
+                    .ok_or_else(|| StorageError::DecryptionError("missing wrapped_dek".into()))?;
+                let wrap_nonce = enc_meta
+                    .wrap_nonce
+                    .as_ref()
+                    .ok_or_else(|| StorageError::DecryptionError("missing wrap_nonce".into()))?;
                 let wrapped_bytes = b64
                     .decode(wrapped)
                     .map_err(|_| StorageError::DecryptionError("bad wrapped_dek base64".into()))?;
@@ -2938,38 +3168,6 @@ impl FilesystemStorage {
                     .map_err(|e| StorageError::DecryptionError(e.to_string()))
             }
         }
-    }
-
-    /// Remove all `.versions/` directories in the bucket, keeping only current (top-level) files.
-    /// Also remove any objects whose latest version was a delete marker (restore nothing).
-    async fn cleanup_versions(&self, bucket: &str) -> Result<(), StorageError> {
-        let bucket_dir = self.buckets_dir.join(bucket);
-        self.cleanup_versions_recursive(&bucket_dir).await
-    }
-
-    fn cleanup_versions_recursive<'a>(
-        &'a self,
-        dir: &'a Path,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), StorageError>> + Send + 'a>>
-    {
-        Box::pin(async move {
-            let mut entries = match fs::read_dir(dir).await {
-                Ok(e) => e,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-                Err(e) => return Err(e.into()),
-            };
-            while let Some(entry) = entries.next_entry().await? {
-                let fname = entry.file_name().to_string_lossy().to_string();
-                if entry.file_type().await?.is_dir() {
-                    if fname == ".versions" {
-                        fs::remove_dir_all(entry.path()).await?;
-                    } else if fname != ".uploads" {
-                        self.cleanup_versions_recursive(&entry.path()).await?;
-                    }
-                }
-            }
-            Ok(())
-        })
     }
 
     /// Write a new version to the `.versions/` directory and update the current (top-level) files.
@@ -3139,7 +3337,11 @@ impl FilesystemStorage {
         version_id: &str,
         customer_key: Option<[u8; 32]>,
     ) -> Result<(ByteStream, ObjectMeta), StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
+        if version_id == "null" {
+            return self.get_object(bucket, key, customer_key).await;
+        }
         let ver_meta_path = self.version_meta_path(bucket, key, version_id);
         let data = fs::read_to_string(&ver_meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -3174,8 +3376,7 @@ impl FilesystemStorage {
                 verify_sidecar_mac(&meta, &dek)?;
                 let frame_size = enc_meta.chunk_size as usize;
                 let plaintext_size = meta.size;
-                let aad_builder =
-                    object_aad_builder(bucket, key, meta.version_id.as_deref());
+                let aad_builder = object_aad_builder(bucket, key, meta.version_id.as_deref());
                 let ct_reader = VerifiedChunkReader::new(ver_ec_dir, manifest);
                 let decryptor = FrameDecryptor::new(
                     Box::pin(ct_reader),
@@ -3237,7 +3438,11 @@ impl FilesystemStorage {
         key: &str,
         version_id: &str,
     ) -> Result<ObjectMeta, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
+        if version_id == "null" {
+            return self.head_object(bucket, key).await;
+        }
         let ver_meta_path = self.version_meta_path(bucket, key, version_id);
         let data = fs::read_to_string(&ver_meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -3259,7 +3464,16 @@ impl FilesystemStorage {
         key: &str,
         version_id: &str,
     ) -> Result<ObjectMeta, StorageError> {
+        validate_bucket_name(bucket)?;
         validate_key(key)?;
+        if version_id == "null" {
+            let meta = self.read_object_meta(bucket, key).await?;
+            remove_file_if_exists(&self.object_path(bucket, key)).await?;
+            remove_file_if_exists(&self.meta_path(bucket, key)).await?;
+            remove_dir_all_if_exists(&self.ec_dir(bucket, key)).await?;
+            self.update_current_version(bucket, key).await?;
+            return Ok(meta);
+        }
         let ver_meta_path = self.version_meta_path(bucket, key, version_id);
         let data = fs::read_to_string(&ver_meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -3294,10 +3508,18 @@ impl FilesystemStorage {
         bucket: &str,
         prefix: &str,
     ) -> Result<Vec<ObjectMeta>, StorageError> {
+        validate_bucket_name(bucket)?;
         let bucket_dir = self.buckets_dir.join(bucket);
         let mut results = Vec::new();
         self.walk_versions(&bucket_dir, &bucket_dir, prefix, &mut results)
             .await?;
+        // S3's suspended state can have a current "null" version outside
+        // .versions. Include it in version listings when present.
+        for obj in self.list_objects(bucket, prefix).await? {
+            if obj.version_id.is_none() {
+                results.push(obj);
+            }
+        }
         // Sort by key, then by version_id descending (newest first per key)
         results.sort_by(|a, b| {
             a.key.cmp(&b.key).then_with(|| {
@@ -3384,12 +3606,12 @@ impl FilesystemStorage {
 async fn write_encrypted_frame(
     writer: &mut BufWriter<fs::File>,
     cipher: &Aes256Gcm,
-    nonce_prefix: &[u8; 4],
+    nonce_prefix: &[u8],
     chunk_index: u64,
     plaintext: &[u8],
     aad: &[u8],
 ) -> Result<(), StorageError> {
-    let nonce_bytes = make_nonce(nonce_prefix, chunk_index);
+    let nonce_bytes = make_frame_nonce(nonce_prefix, chunk_index)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(
@@ -3410,12 +3632,12 @@ async fn write_encrypted_frame(
 /// flushing chunk-sized slices to disk.
 fn encrypt_frame_to_vec(
     cipher: &Aes256Gcm,
-    nonce_prefix: &[u8; 4],
+    nonce_prefix: &[u8],
     chunk_index: u64,
     plaintext: &[u8],
     aad: &[u8],
 ) -> Result<Vec<u8>, StorageError> {
-    let nonce_bytes = make_nonce(nonce_prefix, chunk_index);
+    let nonce_bytes = make_frame_nonce(nonce_prefix, chunk_index)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(
@@ -3430,4 +3652,45 @@ fn encrypt_frame_to_vec(
     out.extend_from_slice(&nonce_bytes);
     out.extend_from_slice(&ciphertext);
     Ok(out)
+}
+
+fn make_frame_nonce(prefix: &[u8], chunk_index: u64) -> Result<[u8; 12], StorageError> {
+    let mut nonce = [0u8; 12];
+    match prefix.len() {
+        4 => {
+            nonce[..4].copy_from_slice(prefix);
+            nonce[4..].copy_from_slice(&chunk_index.to_le_bytes());
+        }
+        8 => {
+            if chunk_index > u32::MAX as u64 {
+                return Err(StorageError::EncryptionError(
+                    "object has too many encrypted frames for nonce format".into(),
+                ));
+            }
+            nonce[..8].copy_from_slice(prefix);
+            nonce[8..].copy_from_slice(&(chunk_index as u32).to_le_bytes());
+        }
+        _ => {
+            return Err(StorageError::EncryptionError(
+                "nonce_prefix must be 4 or 8 bytes".into(),
+            ));
+        }
+    }
+    Ok(nonce)
+}
+
+async fn remove_file_if_exists(path: &Path) -> Result<(), StorageError> {
+    match fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(StorageError::Io(e)),
+    }
+}
+
+async fn remove_dir_all_if_exists(path: &Path) -> Result<(), StorageError> {
+    match fs::remove_dir_all(path).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(StorageError::Io(e)),
+    }
 }
