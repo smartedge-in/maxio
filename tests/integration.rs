@@ -297,20 +297,16 @@ async fn test_default_buckets_skip_existing() {
 
 #[tokio::test]
 async fn test_default_buckets_skips_invalid_names() {
-    // "INVALID" has uppercase letters, "b..a" has consecutive dots — both invalid S3 names
-    let (base_url, _tmp) = start_server_with_default_buckets("INVALID,valid,b..a").await;
+    let (base_url, _tmp) =
+        start_server_with_default_buckets("INVALID,valid,b..a,a.-b,a-.b,192.168.0.1").await;
 
-    // "INVALID" has uppercase → skipped, bucket does not exist
-    let resp = s3_request("HEAD", &format!("{}/INVALID", base_url), vec![]).await;
-    assert_eq!(resp.status(), 404);
+    for bucket in ["INVALID", "b..a", "a.-b", "a-.b", "192.168.0.1"] {
+        let resp = s3_request("HEAD", &format!("{}/{}", base_url, bucket), vec![]).await;
+        assert_eq!(resp.status(), 404, "{bucket} should be skipped");
+    }
 
-    // "valid" should exist
     let resp = s3_request("HEAD", &format!("{}/valid", base_url), vec![]).await;
     assert_eq!(resp.status(), 200);
-
-    // "b..a" has consecutive dots → skipped, bucket does not exist
-    let resp = s3_request("HEAD", &format!("{}/b..a", base_url), vec![]).await;
-    assert_eq!(resp.status(), 404);
 }
 
 #[tokio::test]
@@ -331,7 +327,6 @@ async fn test_default_buckets_single() {
     let resp = s3_request("HEAD", &format!("{}/only-one", base_url), vec![]).await;
     assert_eq!(resp.status(), 200);
 }
-
 
 fn client() -> reqwest::Client {
     reqwest::Client::new()
@@ -750,6 +745,21 @@ async fn test_create_bucket() {
     // Head bucket should succeed
     let resp = s3_request("HEAD", &format!("{}/test-bucket", base_url), vec![]).await;
     assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_create_bucket_rejects_canonical_invalid_names() {
+    let (base_url, _tmp) = start_server().await;
+
+    for bucket in ["a.-b", "a-.b", "192.168.0.1"] {
+        let resp = s3_request("PUT", &format!("{}/{}", base_url, bucket), vec![]).await;
+        assert_eq!(resp.status(), 400, "{bucket} should be rejected");
+        let body = resp.text().await.unwrap();
+        assert!(
+            body.contains("<Code>InvalidBucketName</Code>"),
+            "{bucket} should return InvalidBucketName, got {body}"
+        );
+    }
 }
 
 #[tokio::test]

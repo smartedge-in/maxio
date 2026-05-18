@@ -11,30 +11,13 @@ use tokio::io::AsyncRead;
 pub type ByteStream = Pin<Box<dyn AsyncRead + Send>>;
 
 pub fn validate_bucket_name(name: &str) -> Result<(), StorageError> {
-    if name.len() < 3 || name.len() > 63 {
-        return Err(StorageError::InvalidKey(format!(
+    if is_valid_bucket_name(name) {
+        Ok(())
+    } else {
+        Err(StorageError::InvalidKey(format!(
             "invalid bucket name: {name}"
-        )));
+        )))
     }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
-    {
-        return Err(StorageError::InvalidKey(format!(
-            "invalid bucket name: {name}"
-        )));
-    }
-    if !name.as_bytes()[0].is_ascii_alphanumeric()
-        || !name.as_bytes()[name.len() - 1].is_ascii_alphanumeric()
-        || name.contains("..")
-        || name.contains(".-")
-        || name.contains("-.")
-    {
-        return Err(StorageError::InvalidKey(format!(
-            "invalid bucket name: {name}"
-        )));
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -312,21 +295,28 @@ pub fn is_valid_bucket_name(name: &str) -> bool {
     if name.len() < 3 || name.len() > 63 {
         return false;
     }
-    if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
+    {
         return false;
     }
+
     let first = name.chars().next().unwrap();
     let last = name.chars().last().unwrap();
     if !first.is_ascii_alphanumeric() || !last.is_ascii_alphanumeric() {
         return false;
     }
-    if name.contains("..") {
+
+    if name.contains("..") || name.contains(".-") || name.contains("-.") {
         return false;
     }
+
     let parts: Vec<&str> = name.split('.').collect();
     if parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok()) {
         return false;
     }
+
     true
 }
 
@@ -401,7 +391,16 @@ mod validation_tests {
 
     #[test]
     fn rejects_path_like_bucket_names() {
-        for name in ["../evil", "a/b", "ab", "evil..bucket", "Uppercase"] {
+        for name in [
+            "../evil",
+            "a/b",
+            "ab",
+            "evil..bucket",
+            "Uppercase",
+            "a.-b",
+            "a-.b",
+            "192.168.0.1",
+        ] {
             assert!(
                 validate_bucket_name(name).is_err(),
                 "{name} should be invalid"

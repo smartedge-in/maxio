@@ -9,7 +9,9 @@ use axum::{
 
 use crate::error::S3Error;
 use crate::server::AppState;
-use crate::storage::{is_valid_bucket_name, BucketEncryptionConfig, BucketMeta, CorsRule, StorageError};
+use crate::storage::{
+    BucketEncryptionConfig, BucketMeta, CorsRule, StorageError, is_valid_bucket_name,
+};
 use crate::xml::{response::to_xml, types::*};
 
 pub async fn list_buckets(State(state): State<AppState>) -> Result<Response<Body>, S3Error> {
