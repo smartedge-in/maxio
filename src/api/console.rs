@@ -75,12 +75,10 @@ impl LoginRateLimiter {
 }
 
 fn extract_client_ip(headers: &HeaderMap, addr: &SocketAddr) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| addr.ip().to_string())
+    let _ = headers;
+    // Public console: do not trust spoofable X-Forwarded-For unless/until a
+    // trusted-proxy allowlist is configured. Use the connected peer IP.
+    addr.ip().to_string()
 }
 
 fn generate_token(access_key: &str, secret_key: &str, issued_at: i64) -> String {
@@ -138,14 +136,8 @@ fn extract_cookie(headers: &HeaderMap) -> Option<String> {
         })
 }
 
-fn make_cookie(value: &str, max_age: i64, request_headers: &HeaderMap) -> String {
-    let is_secure = request_headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v == "https")
-        .unwrap_or(false);
-
-    let secure_flag = if is_secure { "; Secure" } else { "" };
+fn make_cookie(value: &str, max_age: i64, secure: bool) -> String {
+    let secure_flag = if secure { "; Secure" } else { "" };
 
     format!(
         "{}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}",
@@ -215,7 +207,11 @@ pub async fn login(
 
     let now = chrono::Utc::now().timestamp();
     let token = generate_token(&state.config.access_key, &state.config.secret_key, now);
-    let cookie = make_cookie(&token, TOKEN_MAX_AGE_SECS, &headers);
+    let cookie = make_cookie(
+        &token,
+        TOKEN_MAX_AGE_SECS,
+        state.config.secure_cookies && !state.config.allow_insecure_dev,
+    );
 
     let mut resp_headers = HeaderMap::new();
     resp_headers.insert("Set-Cookie", cookie.parse().unwrap());
@@ -243,8 +239,12 @@ pub async fn check(State(state): State<AppState>, headers: HeaderMap) -> impl In
     }
 }
 
-pub async fn logout(headers: HeaderMap) -> impl IntoResponse {
-    let cookie = make_cookie("", 0, &headers);
+pub async fn logout(State(state): State<AppState>) -> impl IntoResponse {
+    let cookie = make_cookie(
+        "",
+        0,
+        state.config.secure_cookies && !state.config.allow_insecure_dev,
+    );
     let mut resp_headers = HeaderMap::new();
     resp_headers.insert("Set-Cookie", cookie.parse().unwrap());
     (
@@ -254,17 +254,69 @@ pub async fn logout(headers: HeaderMap) -> impl IntoResponse {
     )
 }
 
+async fn console_csrf_middleware(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let mutating = matches!(
+        method,
+        axum::http::Method::POST
+            | axum::http::Method::PUT
+            | axum::http::Method::PATCH
+            | axum::http::Method::DELETE
+    );
+    if mutating {
+        let headers = request.headers();
+        let host = headers
+            .get("host")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let origin = headers
+            .get("origin")
+            .and_then(|v| v.to_str().ok())
+            .or_else(|| headers.get("referer").and_then(|v| v.to_str().ok()));
+        if let Some(origin) = origin {
+            if !same_origin_host(origin, host) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({"error": "CSRF origin check failed"})),
+                )
+                    .into_response();
+            }
+        }
+    }
+    let mut response = next.run(request).await;
+    apply_security_headers(response.headers_mut());
+    response
+}
+
+fn same_origin_host(origin_or_referer: &str, host: &str) -> bool {
+    origin_or_referer
+        .strip_prefix("https://")
+        .or_else(|| origin_or_referer.strip_prefix("http://"))
+        .and_then(|rest| rest.split('/').next())
+        .map(|h| h.eq_ignore_ascii_case(host))
+        .unwrap_or(false)
+}
+
+fn apply_security_headers(headers: &mut HeaderMap) {
+    headers.insert("x-content-type-options", "nosniff".parse().unwrap());
+    headers.insert("referrer-policy", "same-origin".parse().unwrap());
+    headers.insert("x-frame-options", "DENY".parse().unwrap());
+}
+
 pub async fn list_buckets(State(state): State<AppState>) -> impl IntoResponse {
     match state.storage.list_buckets().await {
         Ok(buckets) => {
-            let list: Vec<serde_json::Value> = buckets.into_iter().map(|b| {
-                serde_json::json!({
-                    "name": b.name,
-                    "createdAt": b.created_at,
-                    "versioning": b.versioning,
-                    "encryption": b.encryption_config.is_some(),
+            let list: Vec<serde_json::Value> = buckets
+                .into_iter()
+                .map(|b| {
+                    serde_json::json!({
+                        "name": b.name,
+                        "createdAt": b.created_at,
+                        "versioning": b.versioning,
+                        "encryption": b.encryption_config.is_some(),
+                    })
                 })
-            }).collect();
+                .collect();
             (StatusCode::OK, Json(serde_json::json!({ "buckets": list }))).into_response()
         }
         Err(e) => (
@@ -284,6 +336,13 @@ pub async fn create_bucket(
     State(state): State<AppState>,
     Json(body): Json<CreateBucketRequest>,
 ) -> impl IntoResponse {
+    if crate::storage::validate_bucket_name(&body.name).is_err() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid bucket name"})),
+        )
+            .into_response();
+    }
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
@@ -472,7 +531,14 @@ pub async fn upload_object(
 
     match state
         .storage
-        .put_object(&bucket, &key, content_type, Box::pin(reader), None, encryption)
+        .put_object(
+            &bucket,
+            &key,
+            content_type,
+            Box::pin(reader),
+            None,
+            encryption,
+        )
         .await
     {
         Ok(result) => (
@@ -1012,6 +1078,7 @@ pub fn console_router(state: AppState) -> Router<AppState> {
             "/buckets/{bucket}/versions/{version_id}/download/{*key}",
             get(download_version),
         )
+        .layer(axum::middleware::from_fn(console_csrf_middleware))
         .layer(axum::middleware::from_fn_with_state(
             state,
             console_auth_middleware,

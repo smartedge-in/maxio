@@ -102,6 +102,15 @@ async fn main() -> anyhow::Result<()> {
 
     let config = cli.config;
 
+    if config.access_key == "maxioadmin"
+        && config.secret_key == "maxioadmin"
+        && !config.allow_insecure_dev
+    {
+        anyhow::bail!(
+            "refusing to start with default credentials in production; set MAXIO_ACCESS_KEY/MAXIO_SECRET_KEY or use --allow-insecure-dev for local development"
+        );
+    }
+
     tokio::fs::create_dir_all(&config.data_dir).await?;
 
     // Build the SSE-S3 keyring (bootstrap a random master key on first run).
@@ -127,7 +136,8 @@ async fn main() -> anyhow::Result<()> {
         config.chunk_size,
         config.parity_shards,
         keyring.clone(),
-    ).await?;
+    )
+    .await?;
 
     let state = server::AppState {
         storage: Arc::new(storage),
@@ -141,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     if config.access_key == "maxioadmin" && config.secret_key == "maxioadmin" {
         tracing::warn!(
-            "WARNING: Using default credentials. Set MAXIO_ACCESS_KEY/MAXIO_SECRET_KEY (or MINIO_ROOT_USER/MINIO_ROOT_PASSWORD) for production use."
+            "WARNING: Using default credentials because insecure development mode is enabled."
         );
     }
 
@@ -151,19 +161,33 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Data dir:   {}", config.data_dir);
     tracing::info!("Region:     {}", config.region);
     if config.erasure_coding {
-        tracing::info!("Erasure coding: enabled (chunk size: {}MB)", config.chunk_size / (1024 * 1024));
+        tracing::info!(
+            "Erasure coding: enabled (chunk size: {}MB)",
+            config.chunk_size / (1024 * 1024)
+        );
         if config.parity_shards > 0 {
-            tracing::info!("Parity shards: {} (can tolerate {} lost/corrupt chunks per object)", config.parity_shards, config.parity_shards);
+            tracing::info!(
+                "Parity shards: {} (can tolerate {} lost/corrupt chunks per object)",
+                config.parity_shards,
+                config.parity_shards
+            );
         }
     } else if config.parity_shards > 0 {
         tracing::warn!("--parity-shards ignored: requires --erasure-coding to be enabled");
     }
-    let display_host = if config.address == "0.0.0.0" { "localhost" } else { &config.address };
+    let display_host = if config.address == "0.0.0.0" {
+        "localhost"
+    } else {
+        &config.address
+    };
     tracing::info!("Web UI:     http://{}:{}/ui/", display_host, config.port);
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     Ok(())
 }
@@ -178,10 +202,7 @@ async fn run_healthcheck(url: &str, timeout_ms: u64) -> anyhow::Result<()> {
         .host()
         .ok_or_else(|| anyhow::anyhow!("healthcheck URL is missing host"))?;
     let port = uri.port_u16().unwrap_or(80);
-    let path_and_query = uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or("/");
+    let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
     let timeout_duration = Duration::from_millis(timeout_ms);
 
     let mut stream: TcpStream = timeout(timeout_duration, TcpStream::connect((host, port)))
@@ -227,7 +248,10 @@ async fn run_keyring_rotate(data_dir: &str) -> anyhow::Result<()> {
     println!("✓ keyring rotated at {}/.maxio-keys.json", data_dir);
     println!("  new active key id: {}", result.new_active_id);
     match result.previous_active_id {
-        Some(prev) => println!("  previous active:   {} (retained for old-object decryption)", prev),
+        Some(prev) => println!(
+            "  previous active:   {} (retained for old-object decryption)",
+            prev
+        ),
         None => println!("  previous active:   <none> (first key in ring)"),
     }
     println!("  total keys in ring: {}", result.total_keys);
@@ -249,10 +273,7 @@ async fn run_keyring_list(data_dir: &str) -> anyhow::Result<()> {
     // Minimal pretty-print: parse, strip key_b64 fields, show id/created/active.
     let v: serde_json::Value = serde_json::from_str(&data)?;
     let empty = Vec::new();
-    let entries = v
-        .get("keys")
-        .and_then(|k| k.as_array())
-        .unwrap_or(&empty);
+    let entries = v.get("keys").and_then(|k| k.as_array()).unwrap_or(&empty);
     println!("{:<20}  {:<26}  {}", "KEY_ID", "CREATED_AT", "ACTIVE");
     for e in entries {
         let id = e.get("id").and_then(|x| x.as_str()).unwrap_or("?");

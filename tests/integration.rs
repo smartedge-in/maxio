@@ -33,6 +33,8 @@ async fn start_server() -> (String, TempDir) {
         secret_key: SECRET_KEY.to_string(),
         region: REGION.to_string(),
         master_key: None,
+        allow_insecure_dev: true,
+        secure_cookies: false,
         erasure_coding: false,
         chunk_size: 10 * 1024 * 1024,
         parity_shards: 0,
@@ -578,13 +580,22 @@ async fn test_delete_bucket_after_object_lifecycle() {
     let (base_url, _tmp) = start_server().await;
 
     s3_request("PUT", &format!("{}/bucket-one", base_url), vec![]).await;
-    let r = s3_request("PUT", &format!("{}/bucket-one/f.txt", base_url), b"x".to_vec()).await;
+    let r = s3_request(
+        "PUT",
+        &format!("{}/bucket-one/f.txt", base_url),
+        b"x".to_vec(),
+    )
+    .await;
     assert_eq!(r.status(), 200);
     let r = s3_request("DELETE", &format!("{}/bucket-one/f.txt", base_url), vec![]).await;
     assert_eq!(r.status(), 204);
 
     let r = s3_request("DELETE", &format!("{}/bucket-one", base_url), vec![]).await;
-    assert_eq!(r.status(), 204, "bucket delete should succeed after object removed");
+    assert_eq!(
+        r.status(),
+        204,
+        "bucket delete should succeed after object removed"
+    );
 
     let r = s3_request("HEAD", &format!("{}/bucket-one", base_url), vec![]).await;
     assert_eq!(r.status(), 404);
@@ -604,11 +615,20 @@ async fn test_delete_bucket_with_nested_path() {
     )
     .await;
     assert_eq!(r.status(), 200);
-    let r = s3_request("DELETE", &format!("{}/bucket-two/a/b/c/d.txt", base_url), vec![]).await;
+    let r = s3_request(
+        "DELETE",
+        &format!("{}/bucket-two/a/b/c/d.txt", base_url),
+        vec![],
+    )
+    .await;
     assert_eq!(r.status(), 204);
 
     let r = s3_request("DELETE", &format!("{}/bucket-two", base_url), vec![]).await;
-    assert_eq!(r.status(), 204, "bucket delete should sweep empty nested dirs");
+    assert_eq!(
+        r.status(),
+        204,
+        "bucket delete should sweep empty nested dirs"
+    );
 }
 
 // Ensure we did not weaken the real emptiness check.
@@ -617,7 +637,12 @@ async fn test_delete_bucket_rejects_real_object() {
     let (base_url, _tmp) = start_server().await;
 
     s3_request("PUT", &format!("{}/bucket-three", base_url), vec![]).await;
-    s3_request("PUT", &format!("{}/bucket-three/stay.txt", base_url), b"z".to_vec()).await;
+    s3_request(
+        "PUT",
+        &format!("{}/bucket-three/stay.txt", base_url),
+        b"z".to_vec(),
+    )
+    .await;
 
     let r = s3_request("DELETE", &format!("{}/bucket-three", base_url), vec![]).await;
     assert_eq!(r.status(), 409);
@@ -663,7 +688,10 @@ async fn test_delete_bucket_sweeps_nested_versions() {
         .unwrap();
 
     let deleted = storage.delete_bucket("leftover").await.unwrap();
-    assert!(deleted, "delete_bucket should succeed on sweepable artifacts");
+    assert!(
+        deleted,
+        "delete_bucket should succeed on sweepable artifacts"
+    );
     assert!(!tokio::fs::try_exists(&bucket_root).await.unwrap());
 }
 
@@ -2670,6 +2698,8 @@ async fn start_server_ec() -> (String, TempDir) {
         secret_key: SECRET_KEY.to_string(),
         region: REGION.to_string(),
         master_key: None,
+        allow_insecure_dev: true,
+        secure_cookies: false,
         erasure_coding: true,
         chunk_size: 1024,
         parity_shards: 0,
@@ -3123,6 +3153,8 @@ async fn start_server_parity(parity_shards: u32) -> (String, TempDir) {
         secret_key: SECRET_KEY.to_string(),
         region: REGION.to_string(),
         master_key: None,
+        allow_insecure_dev: true,
+        secure_cookies: false,
         erasure_coding: true,
         chunk_size: 100,
         parity_shards,
@@ -3989,7 +4021,12 @@ async fn test_sse_s3_put_get_roundtrip() {
     );
 
     // HEAD echoes the header
-    let head = s3_request("HEAD", &format!("{}/sse-s3-bucket/foo.txt", base_url), vec![]).await;
+    let head = s3_request(
+        "HEAD",
+        &format!("{}/sse-s3-bucket/foo.txt", base_url),
+        vec![],
+    )
+    .await;
     assert_eq!(head.status(), 200);
     assert_eq!(
         head.headers()
@@ -4003,14 +4040,22 @@ async fn test_sse_s3_put_get_roundtrip() {
     );
 
     // GET round-trips
-    let get = s3_request("GET", &format!("{}/sse-s3-bucket/foo.txt", base_url), vec![]).await;
+    let get = s3_request(
+        "GET",
+        &format!("{}/sse-s3-bucket/foo.txt", base_url),
+        vec![],
+    )
+    .await;
     assert_eq!(get.status(), 200);
     let body = get.bytes().await.unwrap();
     assert_eq!(body.as_ref(), plaintext.as_slice());
 
     // On-disk bytes must not be plaintext
     let on_disk = std::fs::read(tmp.path().join("buckets/sse-s3-bucket/foo.txt")).unwrap();
-    assert_ne!(on_disk, plaintext, "on-disk must be ciphertext, not plaintext");
+    assert_ne!(
+        on_disk, plaintext,
+        "on-disk must be ciphertext, not plaintext"
+    );
     assert!(
         on_disk.len() >= plaintext.len() + 12 + 16,
         "ciphertext must include 12B nonce + 16B tag overhead"
@@ -4023,6 +4068,51 @@ async fn test_sse_s3_put_get_roundtrip() {
     assert!(meta_json.contains("\"mode\": \"sse_s3\""));
     assert!(meta_json.contains("\"algorithm\": \"AES256\""));
     assert!(meta_json.contains("\"wrapped_dek\""));
+}
+
+/// SSE-S3 overwrite: replacing an encrypted object must publish data and
+/// metadata consistently, use a fresh DEK, and leave the latest object readable.
+#[tokio::test]
+async fn test_sse_s3_encrypted_overwrite_rekeys_and_reads_latest() {
+    let (base_url, tmp) = start_server().await;
+    s3_request("PUT", &format!("{}/sse-overwrite", base_url), vec![]).await;
+
+    let first = b"first encrypted body".to_vec();
+    let put1 = s3_request_with_headers(
+        "PUT",
+        &format!("{}/sse-overwrite/o.bin", base_url),
+        first,
+        vec![("x-amz-server-side-encryption", "AES256")],
+    )
+    .await;
+    assert_eq!(put1.status(), 200);
+
+    let meta_path = tmp.path().join("buckets/sse-overwrite/o.bin.meta.json");
+    let meta1: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    let wrapped1 = meta1["encryption"]["wrapped_dek"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let second = b"second encrypted body is the current value".to_vec();
+    let put2 = s3_request_with_headers(
+        "PUT",
+        &format!("{}/sse-overwrite/o.bin", base_url),
+        second.clone(),
+        vec![("x-amz-server-side-encryption", "AES256")],
+    )
+    .await;
+    assert_eq!(put2.status(), 200);
+
+    let meta2: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    let wrapped2 = meta2["encryption"]["wrapped_dek"].as_str().unwrap();
+    assert_ne!(wrapped1, wrapped2, "overwrite must use a fresh object DEK");
+
+    let get = s3_request("GET", &format!("{}/sse-overwrite/o.bin", base_url), vec![]).await;
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.bytes().await.unwrap().as_ref(), second.as_slice());
 }
 
 /// SSE-S3: Range GET across frame boundary translates plaintext offset → ciphertext frame.
@@ -4128,8 +4218,7 @@ async fn test_sse_c_requires_matching_key() {
     );
 
     // GET without customer key headers → error (bytes ≠ plaintext since not decrypted)
-    let get_no_key =
-        s3_request("GET", &format!("{}/sse-c-bucket/obj", base_url), vec![]).await;
+    let get_no_key = s3_request("GET", &format!("{}/sse-c-bucket/obj", base_url), vec![]).await;
     assert_ne!(
         get_no_key.status(),
         200,
@@ -4215,7 +4304,12 @@ async fn test_bucket_default_encryption_inherits() {
     assert!(meta_json.contains("\"mode\": \"sse_s3\""));
 
     // delete-bucket-encryption
-    let del = s3_request("DELETE", &format!("{}/def-enc?encryption", base_url), vec![]).await;
+    let del = s3_request(
+        "DELETE",
+        &format!("{}/def-enc?encryption", base_url),
+        vec![],
+    )
+    .await;
     assert_eq!(del.status(), 204);
 
     // get-bucket-encryption → 404 after delete
@@ -4238,7 +4332,11 @@ async fn test_sse_kms_rejected() {
     .await;
     assert_eq!(put.status(), 400);
     let body = put.text().await.unwrap();
-    assert!(body.contains("InvalidEncryptionAlgorithmError"), "body: {}", body);
+    assert!(
+        body.contains("InvalidEncryptionAlgorithmError"),
+        "body: {}",
+        body
+    );
     assert!(body.contains("AES256"), "body: {}", body);
 }
 
@@ -4255,15 +4353,14 @@ async fn test_put_bucket_encryption_kms_rejected() {
         </ApplyServerSideEncryptionByDefault></Rule>\
         </ServerSideEncryptionConfiguration>"
         .to_vec();
-    let resp = s3_request(
-        "PUT",
-        &format!("{}/kms-def?encryption", base_url),
-        xml_body,
-    )
-    .await;
+    let resp = s3_request("PUT", &format!("{}/kms-def?encryption", base_url), xml_body).await;
     assert_eq!(resp.status(), 400);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("InvalidEncryptionAlgorithmError"), "body: {}", body);
+    assert!(
+        body.contains("InvalidEncryptionAlgorithmError"),
+        "body: {}",
+        body
+    );
 }
 
 /// Keyring rotate: old objects stay decryptable, new objects use the new key.
@@ -4322,7 +4419,10 @@ async fn test_keyring_rotate_preserves_old_objects() {
     )
     .await;
     assert_eq!(get_old.status(), 200);
-    assert_eq!(get_old.bytes().await.unwrap().as_ref(), old_plaintext.as_slice());
+    assert_eq!(
+        get_old.bytes().await.unwrap().as_ref(),
+        old_plaintext.as_slice()
+    );
 
     // Reload keyring from disk — simulates a server restart after rotation.
     let reloaded = keys::Keyring::load(&data_dir, None).await.unwrap();
@@ -4355,7 +4455,10 @@ async fn test_keyring_rotate_preserves_old_objects() {
 
     // Rotating a second time bumps count to 3 and demotes the current active.
     let r2 = keys::rotate(&data_dir).await.unwrap();
-    assert_eq!(r2.previous_active_id.as_deref(), Some(result.new_active_id.as_str()));
+    assert_eq!(
+        r2.previous_active_id.as_deref(),
+        Some(result.new_active_id.as_str())
+    );
     assert_eq!(r2.total_keys, 3);
 }
 
@@ -4374,7 +4477,11 @@ async fn test_invalid_sse_algorithm_rejected() {
     .await;
     assert_ne!(put.status(), 200);
     let body = put.text().await.unwrap();
-    assert!(body.contains("InvalidEncryptionAlgorithm"), "body: {}", body);
+    assert!(
+        body.contains("InvalidEncryptionAlgorithm"),
+        "body: {}",
+        body
+    );
 }
 
 /// If bucket encryption config cannot be read (corrupted .bucket.json),
@@ -4452,9 +4559,16 @@ async fn test_console_upload_fails_when_bucket_encryption_unreadable() {
 #[tokio::test]
 async fn test_console_create_folder_fails_when_bucket_encryption_unreadable() {
     let (base_url, tmp) = start_server().await;
-    s3_request("PUT", &format!("{}/console-corrupt-folder", base_url), vec![]).await;
+    s3_request(
+        "PUT",
+        &format!("{}/console-corrupt-folder", base_url),
+        vec![],
+    )
+    .await;
 
-    let meta_path = tmp.path().join("buckets/console-corrupt-folder/.bucket.json");
+    let meta_path = tmp
+        .path()
+        .join("buckets/console-corrupt-folder/.bucket.json");
     std::fs::write(&meta_path, b"not { valid json").unwrap();
 
     let session = console_login(&base_url).await;
@@ -4533,8 +4647,7 @@ async fn test_console_bucket_encryption_endpoint_roundtrip() {
     assert!(body["kmsMasterKeyId"].is_null());
 
     // On-disk persistence
-    let meta =
-        std::fs::read_to_string(tmp.path().join("buckets/cenc-1/.bucket.json")).unwrap();
+    let meta = std::fs::read_to_string(tmp.path().join("buckets/cenc-1/.bucket.json")).unwrap();
     assert!(
         meta.contains("\"sse_algorithm\": \"AES256\""),
         "bucket meta missing sse_algorithm: {}",
@@ -4562,8 +4675,7 @@ async fn test_console_bucket_encryption_endpoint_roundtrip() {
     assert_eq!(body["enabled"], false);
 
     // encryption_config removed from bucket meta
-    let meta =
-        std::fs::read_to_string(tmp.path().join("buckets/cenc-1/.bucket.json")).unwrap();
+    let meta = std::fs::read_to_string(tmp.path().join("buckets/cenc-1/.bucket.json")).unwrap();
     assert!(
         !meta.contains("encryption_config"),
         "encryption_config should be removed after disable: {}",
@@ -4607,7 +4719,9 @@ async fn test_console_upload_honors_bucket_default_encryption() {
     // Raw on-disk bytes must NOT contain the plaintext marker
     let on_disk = std::fs::read(tmp.path().join("buckets/cenc-up/hello.txt")).unwrap();
     assert!(
-        on_disk.windows(marker.len()).all(|w| w != marker.as_slice()),
+        on_disk
+            .windows(marker.len())
+            .all(|w| w != marker.as_slice()),
         "on-disk bytes should be ciphertext, found plaintext marker"
     );
 
@@ -4758,7 +4872,12 @@ async fn test_public_bucket_list_toggle() {
 
     let resp = s3_request("PUT", &format!("{}/pub-list", base_url), vec![]).await;
     assert_eq!(resp.status(), 200);
-    let resp = s3_request("PUT", &format!("{}/pub-list/a.txt", base_url), b"a".to_vec()).await;
+    let resp = s3_request(
+        "PUT",
+        &format!("{}/pub-list/a.txt", base_url),
+        b"a".to_vec(),
+    )
+    .await;
     assert_eq!(resp.status(), 200);
 
     // public_list off → anonymous list rejected.
@@ -4886,7 +5005,11 @@ async fn test_sse_s3_sidecar_mac_catches_wrapped_dek_swap() {
     std::fs::write(&meta_a_path, serde_json::to_string_pretty(&meta_a).unwrap()).unwrap();
 
     let get = s3_request("GET", &format!("{}/swap-bucket/a.txt", base_url), vec![]).await;
-    assert_eq!(get.status(), 400, "wrapped_dek swap must be rejected by MAC");
+    assert_eq!(
+        get.status(),
+        400,
+        "wrapped_dek swap must be rejected by MAC"
+    );
 }
 
 /// AAD binds to bucket/key: copying the ciphertext file of object A onto the
@@ -5087,6 +5210,104 @@ async fn test_multipart_sse_c_key_change_rejected() {
         "body: {}",
         body
     );
+
+    // Failed CompleteMultipartUpload must preserve the upload for retry/abort.
+    let list_parts = s3_request(
+        "GET",
+        &format!("{}/mp-ssec/o.bin?uploadId={}", base_url, upload_id),
+        vec![],
+    )
+    .await;
+    assert_eq!(list_parts.status(), 200);
+}
+
+/// Multipart SSE-C positive path: same customer key on Create, UploadPart,
+/// Complete, and GET must round-trip. Missing key on GET must fail.
+#[tokio::test]
+async fn test_multipart_sse_c_roundtrip_with_matching_key() {
+    use base64::Engine;
+    use md5::Digest;
+
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{}/mp-ssec-ok", base_url), vec![]).await;
+
+    let key = [0x5Au8; 32];
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let key_b64 = b64.encode(key);
+    let key_md5 = b64.encode(md5::Md5::digest(key));
+    let headers = vec![
+        ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
+        (
+            "x-amz-server-side-encryption-customer-key",
+            key_b64.as_str(),
+        ),
+        (
+            "x-amz-server-side-encryption-customer-key-md5",
+            key_md5.as_str(),
+        ),
+    ];
+
+    let init = s3_request_with_headers(
+        "POST",
+        &format!("{}/mp-ssec-ok/o.bin?uploads", base_url),
+        vec![],
+        headers.clone(),
+    )
+    .await;
+    assert_eq!(init.status(), 200);
+    let init_body = init.text().await.unwrap();
+    let upload_id = init_body
+        .split("<UploadId>")
+        .nth(1)
+        .and_then(|s| s.split("</UploadId>").next())
+        .expect("UploadId")
+        .to_string();
+
+    let plaintext: Vec<u8> = (0..256_000u32).map(|i| (i % 251) as u8).collect();
+    let put_part = s3_request_with_headers(
+        "PUT",
+        &format!(
+            "{}/mp-ssec-ok/o.bin?partNumber=1&uploadId={}",
+            base_url, upload_id
+        ),
+        plaintext.clone(),
+        headers.clone(),
+    )
+    .await;
+    assert_eq!(put_part.status(), 200);
+    let etag = put_part
+        .headers()
+        .get("etag")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    let complete_body = format!(
+        "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{}</ETag></Part></CompleteMultipartUpload>",
+        etag
+    );
+    let complete = s3_request_with_headers(
+        "POST",
+        &format!("{}/mp-ssec-ok/o.bin?uploadId={}", base_url, upload_id),
+        complete_body.into_bytes(),
+        headers.clone(),
+    )
+    .await;
+    assert_eq!(complete.status(), 200);
+
+    let missing_key = s3_request("GET", &format!("{}/mp-ssec-ok/o.bin", base_url), vec![]).await;
+    assert_ne!(missing_key.status(), 200);
+
+    let get = s3_request_with_headers(
+        "GET",
+        &format!("{}/mp-ssec-ok/o.bin", base_url),
+        vec![],
+        headers,
+    )
+    .await;
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.bytes().await.unwrap().to_vec(), plaintext);
 }
 
 /// SSE-C headers on a non-SSE object → 400 InvalidArgument (matches AWS).
@@ -5124,11 +5345,7 @@ async fn test_sse_c_headers_on_plaintext_rejected() {
     .await;
     assert_eq!(get.status(), 400);
     let body = get.text().await.unwrap();
-    assert!(
-        body.contains("SSE-C headers supplied"),
-        "body: {}",
-        body
-    );
+    assert!(body.contains("SSE-C headers supplied"), "body: {}", body);
 }
 
 /// Multipart `part.encrypted` flag flipped in on-disk meta is caught at
@@ -5175,9 +5392,10 @@ async fn test_multipart_part_encrypted_flag_tamper_rejected() {
         .to_string();
 
     // Flip `encrypted: true` → `false` in part meta.
-    let part_meta_path = tmp
-        .path()
-        .join(format!("buckets/part-flip/.uploads/{}/1.meta.json", upload_id));
+    let part_meta_path = tmp.path().join(format!(
+        "buckets/part-flip/.uploads/{}/1.meta.json",
+        upload_id
+    ));
     let pm_str = std::fs::read_to_string(&part_meta_path).unwrap();
     let mut pm: serde_json::Value = serde_json::from_str(&pm_str).unwrap();
     pm["encrypted"] = serde_json::json!(false);
@@ -5208,12 +5426,7 @@ async fn test_sse_s3_versioned_get_decrypts() {
     let vxml =
         b"<?xml version=\"1.0\"?><VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"
             .to_vec();
-    s3_request(
-        "PUT",
-        &format!("{}/ver-sse?versioning", base_url),
-        vxml,
-    )
-    .await;
+    s3_request("PUT", &format!("{}/ver-sse?versioning", base_url), vxml).await;
 
     let plaintext = b"versioned encrypted payload".to_vec();
     let put = s3_request_with_headers(
@@ -5535,15 +5748,69 @@ async fn test_ec_plus_encryption_roundtrip() {
     assert_eq!(got, plaintext);
 }
 
+/// EC + SSE overwrite: replacement must atomically swap the EC chunk directory
+/// and sidecar together enough that the latest object remains decryptable.
+#[tokio::test]
+async fn test_ec_plus_encryption_overwrite_reads_latest() {
+    let (base_url, tmp) = start_server_ec_parity(1024, 0).await;
+    s3_request("PUT", &format!("{}/ec-enc-overwrite", base_url), vec![]).await;
+
+    let first: Vec<u8> = (0..20_000u32).map(|i| (i % 251) as u8).collect();
+    let put1 = s3_request_with_headers(
+        "PUT",
+        &format!("{}/ec-enc-overwrite/o.bin", base_url),
+        first,
+        vec![("x-amz-server-side-encryption", "AES256")],
+    )
+    .await;
+    assert_eq!(put1.status(), 200);
+
+    let meta_path = tmp.path().join("buckets/ec-enc-overwrite/o.bin.meta.json");
+    let meta1: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    let nonce1 = meta1["encryption"]["nonce_prefix"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let second: Vec<u8> = (0..75_000u32)
+        .map(|i| (i.wrapping_mul(17) % 256) as u8)
+        .collect();
+    let put2 = s3_request_with_headers(
+        "PUT",
+        &format!("{}/ec-enc-overwrite/o.bin", base_url),
+        second.clone(),
+        vec![("x-amz-server-side-encryption", "AES256")],
+    )
+    .await;
+    assert_eq!(put2.status(), 200);
+
+    let meta2: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    assert_ne!(
+        nonce1,
+        meta2["encryption"]["nonce_prefix"].as_str().unwrap(),
+        "overwrite must publish fresh encryption metadata"
+    );
+
+    let get = s3_request(
+        "GET",
+        &format!("{}/ec-enc-overwrite/o.bin", base_url),
+        vec![],
+    )
+    .await;
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.bytes().await.unwrap().to_vec(), second);
+}
+
 async fn start_server_ec_parity(chunk_size: u64, parity_shards: u32) -> (String, TempDir) {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage =
-        FilesystemStorage::new(&data_dir, true, chunk_size, parity_shards, keyring)
-            .await
-            .unwrap();
+    let storage = FilesystemStorage::new(&data_dir, true, chunk_size, parity_shards, keyring)
+        .await
+        .unwrap();
 
     let config = Config {
         port: 0,
@@ -5553,6 +5820,8 @@ async fn start_server_ec_parity(chunk_size: u64, parity_shards: u32) -> (String,
         secret_key: SECRET_KEY.to_string(),
         region: REGION.to_string(),
         master_key: None,
+        allow_insecure_dev: true,
+        secure_cookies: false,
         erasure_coding: true,
         chunk_size,
         parity_shards,
@@ -5591,7 +5860,9 @@ async fn test_ec_plus_encryption_multi_frame_roundtrip() {
     s3_request("PUT", &format!("{}/ec-enc-multi", base_url), vec![]).await;
 
     // ~200 KiB of deterministic pseudo-random bytes → ~3 frames and ~200 chunks.
-    let plaintext: Vec<u8> = (0..200_000u32).map(|i| (i.wrapping_mul(31) % 256) as u8).collect();
+    let plaintext: Vec<u8> = (0..200_000u32)
+        .map(|i| (i.wrapping_mul(31) % 256) as u8)
+        .collect();
     let put = s3_request_with_headers(
         "PUT",
         &format!("{}/ec-enc-multi/big.bin", base_url),
@@ -5633,10 +5904,7 @@ async fn test_ec_plus_encryption_range_read() {
     .await;
     assert_eq!(got.status(), 206);
     let body = got.bytes().await.unwrap().to_vec();
-    assert_eq!(
-        body,
-        plaintext[range_start as usize..=range_end as usize]
-    );
+    assert_eq!(body, plaintext[range_start as usize..=range_end as usize]);
 }
 
 /// EC + SSE-S3 + parity: corrupt one data chunk on disk, GET must still succeed
@@ -5693,7 +5961,9 @@ async fn test_ec_plus_encryption_aead_catches_manifest_bypass() {
     chunk[50] ^= 0xFF;
     std::fs::write(&chunk_path, &chunk).unwrap();
 
-    let manifest_path = tmp.path().join("buckets/ec-enc-aead/a.bin.ec/manifest.json");
+    let manifest_path = tmp
+        .path()
+        .join("buckets/ec-enc-aead/a.bin.ec/manifest.json");
     let mut manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
     let new_sha = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&chunk));
@@ -5745,7 +6015,11 @@ async fn test_ec_plus_bucket_default_encryption() {
         cfg.as_bytes().to_vec(),
     )
     .await;
-    assert!(resp.status().is_success(), "put-bucket-encryption: {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "put-bucket-encryption: {}",
+        resp.status()
+    );
 
     let plaintext = b"bucket default EC-SSE".to_vec();
     let put = s3_request(
@@ -6106,6 +6380,25 @@ async fn test_copy_object_sse_c_wrong_source_key_fails() {
     )
     .await;
 
+    let missing_key_copy = s3_request_with_headers(
+        "PUT",
+        &format!("{}/cp-ssec-bad/missing-key-dst.bin", base_url),
+        vec![],
+        vec![("x-amz-copy-source", "/cp-ssec-bad/src.bin")],
+    )
+    .await;
+    assert_eq!(
+        missing_key_copy.status(),
+        400,
+        "copy without source SSE-C key should be a client error, not InternalError"
+    );
+    let body = missing_key_copy.text().await.unwrap();
+    assert!(
+        body.contains("SSE-C: customer key required"),
+        "body: {}",
+        body
+    );
+
     let copy = s3_request_with_headers(
         "PUT",
         &format!("{}/cp-ssec-bad/dst.bin", base_url),
@@ -6294,12 +6587,8 @@ async fn test_ec_plus_encryption_chunk_swap_rejected() {
     assert_eq!(put_b.status(), 200);
 
     // Replace b's chunk 000000 with a's chunk 000000.
-    let chunk_a = tmp
-        .path()
-        .join("buckets/ec-aad-swap/a.bin.ec/000000");
-    let chunk_b = tmp
-        .path()
-        .join("buckets/ec-aad-swap/b.bin.ec/000000");
+    let chunk_a = tmp.path().join("buckets/ec-aad-swap/a.bin.ec/000000");
+    let chunk_b = tmp.path().join("buckets/ec-aad-swap/b.bin.ec/000000");
     let a_bytes = std::fs::read(&chunk_a).expect("read a chunk 0");
     std::fs::write(&chunk_b, &a_bytes).unwrap();
 

@@ -12,8 +12,8 @@ use tokio_util::io::ReaderStream;
 use crate::error::S3Error;
 use crate::server::AppState;
 use crate::storage::{
-    BucketEncryptionConfig, ChecksumAlgorithm, EncryptionMode, EncryptionRequest,
-    UploadEncryptionSpec, StorageError,
+    BucketEncryptionConfig, ChecksumAlgorithm, EncryptionMode, EncryptionRequest, StorageError,
+    UploadEncryptionSpec,
 };
 use crate::xml::{
     response::to_xml,
@@ -56,8 +56,7 @@ pub(crate) fn extract_sse_request(
             .and_then(|v| v.to_str().ok())
         {
             use md5::Digest;
-            let computed = base64::engine::general_purpose::STANDARD
-                .encode(md5::Md5::digest(&key));
+            let computed = base64::engine::general_purpose::STANDARD.encode(md5::Md5::digest(&key));
             if computed != md5_b64 {
                 return Err(S3Error::invalid_argument("SSE-C key MD5 mismatch"));
             }
@@ -145,9 +144,7 @@ pub(crate) fn extract_customer_key(headers: &HeaderMap) -> Result<Option<[u8; 32
 }
 
 /// Build an EncryptionRequest from a bucket-level default encryption config.
-pub(crate) fn encryption_from_bucket_default(
-    _cfg: &BucketEncryptionConfig,
-) -> EncryptionRequest {
+pub(crate) fn encryption_from_bucket_default(_cfg: &BucketEncryptionConfig) -> EncryptionRequest {
     EncryptionRequest::sse_s3()
 }
 
@@ -155,8 +152,8 @@ pub(crate) fn encryption_from_bucket_default(
 /// persisted for the duration of a multipart upload.
 pub(crate) fn spec_from_request(req: &EncryptionRequest) -> UploadEncryptionSpec {
     let customer_key_md5 = req.customer_key.as_ref().map(|ck| {
-        use md5::Digest;
         use base64::Engine;
+        use md5::Digest;
         base64::engine::general_purpose::STANDARD.encode(md5::Md5::digest(&**ck))
     });
     UploadEncryptionSpec {
@@ -181,8 +178,8 @@ pub(crate) fn add_sse_headers(
                 builder = builder.header("x-amz-server-side-encryption", "AES256");
             }
             EncryptionMode::SseC => {
-                builder = builder
-                    .header("x-amz-server-side-encryption-customer-algorithm", "AES256");
+                builder =
+                    builder.header("x-amz-server-side-encryption-customer-algorithm", "AES256");
                 if let Some(ref md5) = em.customer_key_md5 {
                     builder = builder.header(
                         "x-amz-server-side-encryption-customer-key-md5",
@@ -310,8 +307,8 @@ pub async fn put_object(
     let applied_mode = encryption.as_ref().map(|e| e.mode.clone());
     let applied_ck_md5 = encryption.as_ref().and_then(|e| {
         e.customer_key.as_ref().map(|ck| {
-            use md5::Digest;
             use base64::Engine;
+            use md5::Digest;
             base64::engine::general_purpose::STANDARD.encode(md5::Md5::digest(&**ck))
         })
     });
@@ -344,8 +341,7 @@ pub async fn put_object(
             builder = builder.header("x-amz-server-side-encryption", "AES256");
         }
         Some(EncryptionMode::SseC) => {
-            builder =
-                builder.header("x-amz-server-side-encryption-customer-algorithm", "AES256");
+            builder = builder.header("x-amz-server-side-encryption-customer-algorithm", "AES256");
             if let Some(md5) = applied_ck_md5 {
                 builder = builder.header("x-amz-server-side-encryption-customer-key-md5", md5);
             }
@@ -443,6 +439,8 @@ async fn upload_part_copy(
                 .map_err(|e| match e {
                     StorageError::NotFound(_) => S3Error::no_such_key(&src_key),
                     StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
+                    StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
+                    StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
                     _ => S3Error::internal(e),
                 })?;
             r
@@ -455,6 +453,8 @@ async fn upload_part_copy(
                 .map_err(|e| match e {
                     StorageError::NotFound(_) => S3Error::no_such_key(&src_key),
                     StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
+                    StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
+                    StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
                     _ => S3Error::internal(e),
                 })?;
             r
@@ -506,6 +506,8 @@ async fn copy_object(
         .map_err(|e| match e {
             StorageError::NotFound(_) => S3Error::no_such_key(src_key),
             StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
+            StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
+            StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
             _ => S3Error::internal(e),
         })?;
 

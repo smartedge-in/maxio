@@ -1,9 +1,9 @@
-use axum::http::StatusCode;
 use axum::Router;
+use axum::http::StatusCode;
 use axum::routing::get;
 use std::sync::Arc;
 
-use crate::api::console::{console_router, LoginRateLimiter};
+use crate::api::console::{LoginRateLimiter, console_router};
 use crate::api::cors::cors_middleware;
 use crate::api::router::s3_router;
 use crate::auth::middleware::auth_middleware;

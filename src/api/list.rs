@@ -7,11 +7,11 @@ use axum::{
 };
 use http::StatusCode;
 
+use super::multipart;
 use crate::error::S3Error;
 use crate::server::AppState;
 use crate::storage::ObjectMeta;
 use crate::xml::{response::to_xml, types::*};
-use super::multipart;
 
 pub async fn handle_bucket_get(
     State(state): State<AppState>,
@@ -274,11 +274,8 @@ async fn list_object_versions(
     // Determine which version is latest per key (first in list since sorted newest-first per key)
     let mut latest_per_key: HashMap<String, String> = HashMap::new();
     for v in &all_versions {
-        if let Some(vid) = &v.version_id {
-            latest_per_key
-                .entry(v.key.clone())
-                .or_insert_with(|| vid.clone());
-        }
+        let vid = v.version_id.clone().unwrap_or_else(|| "null".to_string());
+        latest_per_key.entry(v.key.clone()).or_insert(vid);
     }
 
     let mut versions = Vec::new();
@@ -286,7 +283,9 @@ async fn list_object_versions(
 
     for v in &all_versions {
         let vid = v.version_id.as_deref().unwrap_or("null");
-        let is_latest = latest_per_key.get(&v.key).is_some_and(|latest| latest == vid);
+        let is_latest = latest_per_key
+            .get(&v.key)
+            .is_some_and(|latest| latest == vid);
         if v.is_delete_marker {
             delete_markers.push(DeleteMarkerEntry {
                 key: v.key.clone(),

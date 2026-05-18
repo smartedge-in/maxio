@@ -10,6 +10,33 @@ use tokio::io::AsyncRead;
 
 pub type ByteStream = Pin<Box<dyn AsyncRead + Send>>;
 
+pub fn validate_bucket_name(name: &str) -> Result<(), StorageError> {
+    if name.len() < 3 || name.len() > 63 {
+        return Err(StorageError::InvalidKey(format!(
+            "invalid bucket name: {name}"
+        )));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
+    {
+        return Err(StorageError::InvalidKey(format!(
+            "invalid bucket name: {name}"
+        )));
+    }
+    if !name.as_bytes()[0].is_ascii_alphanumeric()
+        || !name.as_bytes()[name.len() - 1].is_ascii_alphanumeric()
+        || name.contains("..")
+        || name.contains(".-")
+        || name.contains("-.")
+    {
+        return Err(StorageError::InvalidKey(format!(
+            "invalid bucket name: {name}"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ChecksumAlgorithm {
     CRC32,
@@ -236,7 +263,10 @@ pub struct EncryptionRequest {
 
 impl EncryptionRequest {
     pub fn sse_s3() -> Self {
-        Self { mode: EncryptionMode::SseS3, customer_key: None }
+        Self {
+            mode: EncryptionMode::SseS3,
+            customer_key: None,
+        }
     }
     pub fn sse_c(key: [u8; 32]) -> Self {
         Self {
@@ -301,4 +331,24 @@ pub enum StorageError {
     DecryptionError(String),
     #[error("Integrity error: {0}")]
     IntegrityError(String),
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::validate_bucket_name;
+
+    #[test]
+    fn rejects_path_like_bucket_names() {
+        for name in ["../evil", "a/b", "ab", "evil..bucket", "Uppercase"] {
+            assert!(
+                validate_bucket_name(name).is_err(),
+                "{name} should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_s3_style_bucket_name() {
+        assert!(validate_bucket_name("prod-logs.2026").is_ok());
+    }
 }

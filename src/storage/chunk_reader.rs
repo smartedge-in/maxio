@@ -44,12 +44,21 @@ impl VerifiedChunkReader {
             remaining: total,
             buf: Vec::new(),
             buf_pos: 0,
-            state: if total == 0 { ReaderState::Done } else { ReaderState::NeedLoad },
+            state: if total == 0 {
+                ReaderState::Done
+            } else {
+                ReaderState::NeedLoad
+            },
         }
     }
 
     /// Create a reader for a byte range [offset, offset+length).
-    pub fn with_range(chunks_dir: PathBuf, manifest: ChunkManifest, offset: u64, length: u64) -> Self {
+    pub fn with_range(
+        chunks_dir: PathBuf,
+        manifest: ChunkManifest,
+        offset: u64,
+        length: u64,
+    ) -> Self {
         if length == 0 || manifest.total_size == 0 {
             return Self {
                 chunks_dir,
@@ -86,13 +95,25 @@ impl VerifiedChunkReader {
     /// and parity shards are available.
     fn load_chunk_sync(&mut self) -> io::Result<()> {
         let idx = self.current_chunk as usize;
-        let chunk_info = &self.manifest.chunks[idx];
+        let chunk_info = self.manifest.chunks.get(idx).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "manifest missing chunk {} ({} entries)",
+                    self.current_chunk,
+                    self.manifest.chunks.len()
+                ),
+            )
+        })?;
         let chunk_path = self.chunks_dir.join(format!("{:06}", self.current_chunk));
 
         // Try reading and verifying the chunk directly
         let result = (|| -> io::Result<Vec<u8>> {
             let data = std::fs::read(&chunk_path).map_err(|e| {
-                io::Error::new(e.kind(), format!("failed to read chunk {}: {}", self.current_chunk, e))
+                io::Error::new(
+                    e.kind(),
+                    format!("failed to read chunk {}: {}", self.current_chunk, e),
+                )
             })?;
 
             if data.len() as u64 != chunk_info.size {
@@ -100,7 +121,9 @@ impl VerifiedChunkReader {
                     io::ErrorKind::InvalidData,
                     format!(
                         "chunk {} size mismatch: expected {}, got {}",
-                        self.current_chunk, chunk_info.size, data.len()
+                        self.current_chunk,
+                        chunk_info.size,
+                        data.len()
                     ),
                 ));
             }
@@ -132,7 +155,8 @@ impl VerifiedChunkReader {
                 if self.manifest.parity_shards.unwrap_or(0) > 0 {
                     tracing::warn!(
                         "chunk {} failed integrity check ({}), attempting Reed-Solomon recovery",
-                        self.current_chunk, original_err
+                        self.current_chunk,
+                        original_err
                     );
                     let data = try_reconstruct_data_chunk(
                         &self.chunks_dir,
@@ -165,16 +189,23 @@ fn try_reconstruct_data_chunk(
     let m = manifest.parity_shards.unwrap_or(0) as usize;
     let shard_size = manifest.shard_size.unwrap_or(manifest.chunk_size) as usize;
 
-    let rs = ReedSolomon::new(k, m).map_err(|e| {
-        io::Error::new(io::ErrorKind::Other, format!("RS init error: {e}"))
-    })?;
+    let rs = ReedSolomon::new(k, m)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("RS init error: {e}")))?;
 
     // Load all shards as Option<Vec<u8>>
     let total_shards = k + m;
     let mut shards: Vec<Option<Vec<u8>>> = Vec::with_capacity(total_shards);
 
     for i in 0..total_shards {
-        let chunk_info = &manifest.chunks[i];
+        let chunk_info = manifest.chunks.get(i).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "manifest missing shard {i} ({} entries)",
+                    manifest.chunks.len()
+                ),
+            )
+        })?;
         let chunk_path = chunks_dir.join(format!("{:06}", i));
 
         let shard = (|| -> Option<Vec<u8>> {
@@ -209,19 +240,28 @@ fn try_reconstruct_data_chunk(
 
     // Reconstruct
     rs.reconstruct(&mut shards).map_err(|e| {
-        io::Error::new(io::ErrorKind::Other, format!("RS reconstruction failed: {e}"))
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("RS reconstruction failed: {e}"),
+        )
     })?;
 
     // Extract the target data chunk and truncate to its real size
     let reconstructed = shards[target_index as usize].take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "reconstruction produced None for target shard")
+        io::Error::new(
+            io::ErrorKind::Other,
+            "reconstruction produced None for target shard",
+        )
     })?;
 
     let real_size = manifest.chunks[target_index as usize].size as usize;
     let mut result = reconstructed;
     result.truncate(real_size);
 
-    tracing::warn!("successfully recovered chunk {} via Reed-Solomon", target_index);
+    tracing::warn!(
+        "successfully recovered chunk {} via Reed-Solomon",
+        target_index
+    );
     Ok(result)
 }
 

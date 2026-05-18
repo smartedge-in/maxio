@@ -50,7 +50,10 @@ pub struct ListBucketResult {
     pub common_prefixes: Vec<CommonPrefix>,
     #[serde(rename = "ContinuationToken", skip_serializing_if = "Option::is_none")]
     pub continuation_token: Option<String>,
-    #[serde(rename = "NextContinuationToken", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "NextContinuationToken",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub next_continuation_token: Option<String>,
     #[serde(rename = "Delimiter", skip_serializing_if = "Option::is_none")]
     pub delimiter: Option<String>,
@@ -283,9 +286,17 @@ pub struct CorsRuleXml {
     pub allowed_origins: Vec<String>,
     #[serde(rename = "AllowedMethod")]
     pub allowed_methods: Vec<String>,
-    #[serde(rename = "AllowedHeader", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "AllowedHeader",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub allowed_headers: Vec<String>,
-    #[serde(rename = "ExposeHeader", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "ExposeHeader",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub expose_headers: Vec<String>,
     #[serde(rename = "MaxAgeSeconds", skip_serializing_if = "Option::is_none")]
     pub max_age_seconds: Option<u32>,

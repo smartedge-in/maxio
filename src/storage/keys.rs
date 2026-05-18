@@ -100,14 +100,15 @@ impl Keyring {
                 };
                 let kr = KeyringFile { keys: vec![entry] };
                 let json = serde_json::to_string_pretty(&kr)?;
-                fs::write(&file_path, &json).await?;
+                let tmp_path = format!("{}.tmp-{}", file_path, std::process::id());
+                fs::write(&tmp_path, &json).await?;
                 // Restrict permissions to owner-only.
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let mut perms = fs::metadata(&file_path).await?.permissions();
+                    let mut perms = fs::metadata(&tmp_path).await?.permissions();
                     perms.set_mode(0o600);
-                    fs::set_permissions(&file_path, perms).await?;
+                    fs::set_permissions(&tmp_path, perms).await?;
                 }
                 #[cfg(not(unix))]
                 {
@@ -117,6 +118,7 @@ impl Keyring {
                          restrict ACLs manually so only the maxio service account can read it"
                     );
                 }
+                fs::rename(&tmp_path, &file_path).await?;
                 kr
             };
 
@@ -129,8 +131,7 @@ impl Keyring {
                     }
                 }
             }
-            found_active
-                .ok_or_else(|| anyhow::anyhow!("Keyring file has no active key"))?
+            found_active.ok_or_else(|| anyhow::anyhow!("Keyring file has no active key"))?
         };
 
         Ok(Self { keys, active_id })
@@ -148,9 +149,9 @@ impl Keyring {
         dek
     }
 
-    /// Generate a fresh random 4-byte per-object nonce prefix.
-    pub fn generate_nonce_prefix() -> [u8; 4] {
-        let mut prefix = [0u8; 4];
+    /// Generate a fresh random 8-byte per-object nonce prefix for new object frames.
+    pub fn generate_nonce_prefix8() -> [u8; 8] {
+        let mut prefix = [0u8; 8];
         rand::rng().fill(&mut prefix[..]);
         prefix
     }
@@ -222,11 +223,7 @@ pub async fn rotate(data_dir: &str) -> anyhow::Result<RotateResult> {
     };
 
     // Capture previously-active id (if any) for the return payload.
-    let previous_active = kr
-        .keys
-        .iter()
-        .find(|e| e.active)
-        .map(|e| e.id.clone());
+    let previous_active = kr.keys.iter().find(|e| e.active).map(|e| e.id.clone());
 
     // Demote all existing keys
     for entry in kr.keys.iter_mut() {
@@ -307,7 +304,9 @@ fn decode_32(s: &str) -> anyhow::Result<[u8; 32]> {
 }
 
 fn now_iso() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
 }
 
 #[cfg(test)]

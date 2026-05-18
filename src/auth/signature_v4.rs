@@ -232,8 +232,7 @@ fn canonical_uri(uri: &str) -> String {
     let segments: Vec<String> = path
         .split('/')
         .map(|s| {
-            let decoded = percent_encoding::percent_decode_str(s)
-                .decode_utf8_lossy();
+            let decoded = percent_encoding::percent_decode_str(s).decode_utf8_lossy();
             percent_encoding::utf8_percent_encode(&decoded, S3_URI_ENCODE).to_string()
         })
         .collect();
@@ -294,11 +293,7 @@ fn canonical_headers(headers: &HeaderMap, signed_headers: &[String]) -> String {
     result
 }
 
-fn build_string_to_sign(
-    canonical_request: &str,
-    timestamp: &str,
-    parsed: &ParsedAuth,
-) -> String {
+fn build_string_to_sign(canonical_request: &str, timestamp: &str, parsed: &ParsedAuth) -> String {
     let scope = format!("{}/{}/s3/aws4_request", parsed.date, parsed.region);
 
     let hash = Sha256::digest(canonical_request.as_bytes());

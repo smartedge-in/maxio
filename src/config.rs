@@ -28,7 +28,7 @@ pub struct Config {
     pub port: u16,
 
     /// Address to bind to
-    #[arg(long, env = "MAXIO_ADDRESS", default_value = "0.0.0.0")]
+    #[arg(long, env = "MAXIO_ADDRESS", default_value = "127.0.0.1")]
     pub address: String,
 
     /// Root data directory
@@ -51,6 +51,14 @@ pub struct Config {
     /// When set, takes precedence over the keyring file for new writes.
     #[arg(long, env = "MAXIO_MASTER_KEY")]
     pub master_key: Option<String>,
+
+    /// Allow insecure development defaults (default credentials, HTTP cookies).
+    #[arg(long, env = "MAXIO_ALLOW_INSECURE_DEV", default_value = "false")]
+    pub allow_insecure_dev: bool,
+
+    /// Force Secure on console session cookies. Keep enabled for public consoles.
+    #[arg(long, env = "MAXIO_SECURE_COOKIES", default_value = "true")]
+    pub secure_cookies: bool,
 
     /// Enable erasure coding with per-chunk integrity checksums
     #[arg(long, env = "MAXIO_ERASURE_CODING", default_value = "false")]
