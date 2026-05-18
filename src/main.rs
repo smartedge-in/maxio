@@ -159,6 +159,8 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    storage::provision_default_buckets(&storage, &config.default_buckets, &config.region).await;
+
     let state = server::AppState {
         storage: Arc::new(storage),
         config: Arc::new(config.clone()),

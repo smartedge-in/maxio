@@ -9,7 +9,9 @@ use axum::{
 
 use crate::error::S3Error;
 use crate::server::AppState;
-use crate::storage::{BucketEncryptionConfig, BucketMeta, CorsRule, StorageError};
+use crate::storage::{
+    BucketEncryptionConfig, BucketMeta, CorsRule, StorageError, is_valid_bucket_name,
+};
 use crate::xml::{response::to_xml, types::*};
 
 pub async fn list_buckets(State(state): State<AppState>) -> Result<Response<Body>, S3Error> {
@@ -89,6 +91,7 @@ pub async fn head_bucket(
     match state.storage.head_bucket(&bucket).await {
         Ok(true) => {}
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(StorageError::InvalidKey(_)) => return Err(S3Error::no_such_bucket(&bucket)),
         Err(e) => return Err(S3Error::internal(e)),
     }
 
@@ -418,19 +421,9 @@ fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
 }
 
 fn validate_bucket_name(name: &str) -> Result<(), S3Error> {
-    if name.len() < 3 || name.len() > 63 {
-        return Err(S3Error::invalid_bucket_name(name));
+    if is_valid_bucket_name(name) {
+        Ok(())
+    } else {
+        Err(S3Error::invalid_bucket_name(name))
     }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
-    {
-        return Err(S3Error::invalid_bucket_name(name));
-    }
-    if !name.as_bytes()[0].is_ascii_alphanumeric()
-        || !name.as_bytes()[name.len() - 1].is_ascii_alphanumeric()
-    {
-        return Err(S3Error::invalid_bucket_name(name));
-    }
-    Ok(())
 }
