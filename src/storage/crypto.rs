@@ -348,13 +348,28 @@ impl AsyncRead for FrameDecryptor {
 
             // If current frame buffer is complete, decrypt it.
             if this.frame_filled == this.frame_target {
-                let nonce_bytes: [u8; 12] = this.frame_buf[..12].try_into().unwrap();
+                if this.frame_filled < 12 {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "ciphertext frame too short to contain a nonce",
+                    )));
+                }
+                let nonce_bytes: [u8; 12] = this.frame_buf[..12]
+                    .try_into()
+                    .expect("slice is exactly 12 bytes");
                 let ct_with_tag = &this.frame_buf[12..this.frame_filled];
 
                 // Verify that the nonce's chunk-index portion matches expected.
-                let stored_idx_v1 = u64::from_le_bytes(nonce_bytes[4..12].try_into().unwrap());
-                let stored_idx_v2 =
-                    u32::from_le_bytes(nonce_bytes[8..12].try_into().unwrap()) as u64;
+                let stored_idx_v1 = u64::from_le_bytes(
+                    nonce_bytes[4..12]
+                        .try_into()
+                        .expect("slice is exactly 8 bytes"),
+                );
+                let stored_idx_v2 = u32::from_le_bytes(
+                    nonce_bytes[8..12]
+                        .try_into()
+                        .expect("slice is exactly 4 bytes"),
+                ) as u64;
                 if stored_idx_v1 != this.chunk_index && stored_idx_v2 != this.chunk_index {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::InvalidData,

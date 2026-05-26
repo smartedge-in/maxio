@@ -10,7 +10,7 @@
 
 use aes_gcm::{
     Aes256Gcm, Key, Nonce,
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, Payload},
 };
 use base64::Engine;
 use rand::RngExt;
@@ -166,8 +166,16 @@ impl Keyring {
         rand::rng().fill(&mut nonce_bytes[..]);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
+        // Bind the wrapped DEK to its key_id via AAD so a wrapped-DEK/nonce
+        // pair from a different key context cannot be substituted undetected.
         let wrapped = cipher
-            .encrypt(nonce, dek.as_slice())
+            .encrypt(
+                nonce,
+                Payload {
+                    msg: dek.as_slice(),
+                    aad: key_id.as_bytes(),
+                },
+            )
             .map_err(|_| anyhow::anyhow!("DEK wrapping failed"))?;
 
         Ok((wrapped, nonce_bytes))
@@ -184,8 +192,17 @@ impl Keyring {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(master));
         let nonce = Nonce::from_slice(nonce);
 
+        // New objects bind key_id as AAD; fall back to no-AAD for DEKs
+        // wrapped before this binding was introduced (backward compatible).
         let plaintext = cipher
-            .decrypt(nonce, wrapped)
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: wrapped,
+                    aad: key_id.as_bytes(),
+                },
+            )
+            .or_else(|_| cipher.decrypt(nonce, wrapped))
             .map_err(|_| anyhow::anyhow!("DEK unwrapping failed: authentication error"))?;
 
         if plaintext.len() != 32 {

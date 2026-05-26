@@ -57,28 +57,25 @@ pub async fn auth_middleware(
         .map_err(|e| S3Error::access_denied(e))?;
 
     tracing::debug!(
-        "Parsed: access_key={}, date={}, region={}, signed_headers={:?}",
-        parsed.access_key,
+        "Parsed: date={}, region={}, signed_headers={:?}",
         parsed.date,
         parsed.region,
         parsed.signed_headers
     );
 
-    if parsed.access_key != state.config.access_key {
-        tracing::debug!(
-            "Access key mismatch: got '{}', expected '{}'",
-            parsed.access_key,
-            state.config.access_key
-        );
+    if !signature_v4::constant_time_eq(
+        parsed.access_key.as_bytes(),
+        state.config.access_key.as_bytes(),
+    ) {
+        tracing::debug!("Access key mismatch");
         return Err(S3Error::invalid_access_key());
     }
 
-    if parsed.region != state.config.region {
-        tracing::debug!(
-            "Region mismatch: got '{}', expected '{}'",
-            parsed.region,
-            state.config.region
-        );
+    if !signature_v4::constant_time_eq(
+        parsed.region.as_bytes(),
+        state.config.region.as_bytes(),
+    ) {
+        tracing::debug!("Region mismatch");
         return Err(S3Error::access_denied("Invalid region in credential scope"));
     }
 
@@ -225,11 +222,17 @@ async fn handle_presigned(
     let (parsed, timestamp, expires_secs) =
         signature_v4::parse_presigned_query(query).map_err(|e| S3Error::access_denied(e))?;
 
-    if parsed.access_key != state.config.access_key {
+    if !signature_v4::constant_time_eq(
+        parsed.access_key.as_bytes(),
+        state.config.access_key.as_bytes(),
+    ) {
         return Err(S3Error::invalid_access_key());
     }
 
-    if parsed.region != state.config.region {
+    if !signature_v4::constant_time_eq(
+        parsed.region.as_bytes(),
+        state.config.region.as_bytes(),
+    ) {
         return Err(S3Error::access_denied("Invalid region in credential scope"));
     }
 

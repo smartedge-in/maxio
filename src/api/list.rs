@@ -68,6 +68,23 @@ pub async fn handle_bucket_get(
     }
 }
 
+/// Parse the `max-keys` query parameter. Returns an `InvalidArgument` error
+/// for non-numeric or negative values; clamps valid values to 0..=1000.
+fn parse_max_keys(params: &HashMap<String, String>) -> Result<usize, S3Error> {
+    match params.get("max-keys") {
+        None => Ok(1000),
+        Some(raw) => {
+            let n: i64 = raw
+                .parse()
+                .map_err(|_| S3Error::invalid_argument("Invalid value for max-keys"))?;
+            if n < 0 {
+                return Err(S3Error::invalid_argument("Invalid value for max-keys"));
+            }
+            Ok((n as usize).min(1000))
+        }
+    }
+}
+
 async fn list_objects_v2(
     state: AppState,
     bucket: String,
@@ -75,11 +92,7 @@ async fn list_objects_v2(
 ) -> Result<Response<Body>, S3Error> {
     let prefix = params.get("prefix").cloned().unwrap_or_default();
     let delimiter = params.get("delimiter").cloned();
-    let max_keys: usize = params
-        .get("max-keys")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1000)
-        .min(1000);
+    let max_keys = parse_max_keys(&params)?;
     let start_after = params.get("start-after").cloned();
     let continuation_token = params.get("continuation-token").cloned();
 
@@ -155,11 +168,7 @@ async fn list_objects_v1(
 ) -> Result<Response<Body>, S3Error> {
     let prefix = params.get("prefix").cloned().unwrap_or_default();
     let delimiter = params.get("delimiter").cloned();
-    let max_keys: usize = params
-        .get("max-keys")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1000)
-        .min(1000);
+    let max_keys = parse_max_keys(&params)?;
     let marker = params.get("marker").cloned();
 
     let all_objects = state

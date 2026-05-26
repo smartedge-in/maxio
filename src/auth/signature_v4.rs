@@ -285,6 +285,9 @@ fn canonical_headers(headers: &HeaderMap, signed_headers: &[String]) -> String {
             .filter_map(|v| v.to_str().ok())
             .collect();
         let value = values.join(",");
+        // Header name is used as supplied in SignedHeaders. AWS SigV4
+        // mandates clients send these lowercase; the value lookup below is
+        // case-insensitive regardless.
         result.push_str(name);
         result.push(':');
         result.push_str(value.trim());
@@ -325,7 +328,7 @@ pub fn derive_signing_key(secret_key: &str, date: &str, region: &str) -> Vec<u8>
     mac.finalize().into_bytes().to_vec()
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

@@ -167,6 +167,28 @@ async fn main() -> anyhow::Result<()> {
         login_rate_limiter: Arc::new(api::console::LoginRateLimiter::new()),
     };
 
+    // Background housekeeping: abort stale multipart uploads (>7 days) and
+    // remove leftover temp files from crashed writes. Runs once at startup,
+    // then hourly.
+    {
+        let storage = state.storage.clone();
+        tokio::spawn(async move {
+            let stale_after = chrono::Duration::days(7);
+            let mut ticker = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                ticker.tick().await;
+                let (uploads, temps) = storage.housekeeping_sweep(stale_after).await;
+                if uploads > 0 || temps > 0 {
+                    tracing::info!(
+                        "housekeeping: removed {} stale upload(s), {} temp file(s)",
+                        uploads,
+                        temps
+                    );
+                }
+            }
+        });
+    }
+
     let app = server::build_router(state);
 
     let addr = format!("{}:{}", config.address, config.port);
