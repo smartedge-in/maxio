@@ -656,10 +656,9 @@ async fn preserve_empty_parent_folder_after_object_delete(
         .await
         .map_err(|e| e.to_string())?;
 
-    let parent_still_exists = remaining.iter().any(|obj| {
-        obj.key == parent_prefix
-            || (obj.key.starts_with(&parent_prefix) && obj.key != parent_prefix)
-    });
+    let parent_still_exists = remaining
+        .iter()
+        .any(|obj| obj.key == parent_prefix || obj.key.starts_with(&parent_prefix));
     if parent_still_exists {
         return Ok(());
     }

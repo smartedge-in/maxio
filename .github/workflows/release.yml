@@ -116,6 +116,7 @@ jobs:
 
   docker:
     name: Docker ${{ matrix.arch }}
+    needs: build
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -170,7 +171,7 @@ jobs:
 
   docker-manifest:
     name: Docker Manifest
-    needs: docker
+    needs: [build, docker]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
