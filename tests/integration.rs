@@ -5315,18 +5315,23 @@ async fn test_sse_s3_aad_catches_cross_key_ciphertext_swap() {
     let right_bytes = std::fs::read(&right_data_path).unwrap();
     std::fs::write(&left_data_path, &right_bytes).unwrap();
 
-    let get = s3_request("GET", &format!("{}/aad-bucket/left.bin", base_url), vec![]).await;
-    // Decryptor fails mid-stream after headers flushed; client sees 200 but
-    // the body bytes do NOT match the original plaintext (either truncated or
-    // garbled). The invariant we care about is that the attacker's swapped
-    // ciphertext never yields valid plaintext under the victim's sidecar.
-    let body_result = get.bytes().await;
-    let retrieved = body_result.unwrap_or_default();
-    assert_ne!(
-        retrieved.as_ref(),
-        plaintext.as_slice(),
-        "cross-key ciphertext must not authenticate under victim's key/AAD"
-    );
+    let get_result =
+        s3_request_result("GET", &format!("{}/aad-bucket/left.bin", base_url), vec![]).await;
+    // Decryptor may fail before headers or mid-stream. The invariant we care
+    // about is that the attacker's swapped ciphertext never yields valid
+    // plaintext under the victim's sidecar.
+    match get_result {
+        Err(_) => {}
+        Ok(get) => {
+            let body_result = get.bytes().await;
+            let retrieved = body_result.unwrap_or_default();
+            assert_ne!(
+                retrieved.as_ref(),
+                plaintext.as_slice(),
+                "cross-key ciphertext must not authenticate under victim's key/AAD"
+            );
+        }
+    }
 }
 
 /// Multipart SSE-S3: part files on disk contain ciphertext (nonce at offset 0),
