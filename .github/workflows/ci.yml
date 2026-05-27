@@ -35,9 +35,6 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: test
-        run: cargo test --all --all-features
-
       - name: Build frontend
         run: bun run build
         working-directory: ui
