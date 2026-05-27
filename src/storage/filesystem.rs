@@ -2754,7 +2754,11 @@ impl FilesystemStorage {
                     tracing::info!("housekeeping: removed leftover temp {}", path.display());
                 }
                 Err(e) => {
-                    tracing::warn!("housekeeping: failed to remove temp {}: {}", path.display(), e)
+                    tracing::warn!(
+                        "housekeeping: failed to remove temp {}: {}",
+                        path.display(),
+                        e
+                    )
                 }
             }
         }

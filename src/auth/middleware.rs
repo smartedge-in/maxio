@@ -71,10 +71,7 @@ pub async fn auth_middleware(
         return Err(S3Error::invalid_access_key());
     }
 
-    if !signature_v4::constant_time_eq(
-        parsed.region.as_bytes(),
-        state.config.region.as_bytes(),
-    ) {
+    if !signature_v4::constant_time_eq(parsed.region.as_bytes(), state.config.region.as_bytes()) {
         tracing::debug!("Region mismatch");
         return Err(S3Error::access_denied("Invalid region in credential scope"));
     }
@@ -229,10 +226,7 @@ async fn handle_presigned(
         return Err(S3Error::invalid_access_key());
     }
 
-    if !signature_v4::constant_time_eq(
-        parsed.region.as_bytes(),
-        state.config.region.as_bytes(),
-    ) {
+    if !signature_v4::constant_time_eq(parsed.region.as_bytes(), state.config.region.as_bytes()) {
         return Err(S3Error::access_denied("Invalid region in credential scope"));
     }
 

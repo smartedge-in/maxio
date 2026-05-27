@@ -32,7 +32,7 @@ pub struct Config {
     pub port: u16,
 
     /// Address to bind to
-    #[arg(long, env = "MAXIO_ADDRESS", default_value = "127.0.0.1")]
+    #[arg(long, env = "MAXIO_ADDRESS", default_value = "0.0.0.0")]
     pub address: String,
 
     /// Root data directory
@@ -84,4 +84,27 @@ pub struct Config {
     /// Max request body size for console JSON/form API routes, in bytes. Object uploads are streaming and not covered by this limit.
     #[arg(long, env = "MAXIO_MAX_CONSOLE_BODY_BYTES", default_value = "1048576")]
     pub max_console_body_bytes: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+    use clap::Parser;
+
+    #[derive(Parser, Debug)]
+    struct TestCli {
+        #[command(flatten)]
+        config: Config,
+    }
+
+    #[test]
+    fn default_address_is_all_interfaces() {
+        unsafe {
+            std::env::remove_var("MAXIO_ADDRESS");
+        }
+
+        let cli = TestCli::parse_from(["maxio"]);
+
+        assert_eq!(cli.config.address, "0.0.0.0");
+    }
 }
