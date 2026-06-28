@@ -30,3 +30,6 @@ require_min() {
 
 require_min storage/crypto.rs 80
 require_min auth/signature_v4.rs 25
+require_min api/virtual_host.rs 80
+require_min auth/credentials.rs 80
+require_min storage/policy.rs 80

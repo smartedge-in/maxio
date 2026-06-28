@@ -5,7 +5,10 @@ use axum::{
 };
 use chrono::{NaiveDateTime, Utc};
 
-use crate::api::virtual_host::{extract_virtual_bucket, host_header_value, VirtualHostContext};
+use crate::api::virtual_host::{
+    extract_virtual_bucket, host_header_value, object_key_from_signature_path,
+    signature_path_from_request, VirtualHostContext,
+};
 use crate::error::S3Error;
 use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
@@ -135,11 +138,7 @@ pub async fn auth_middleware(
         ));
     }
 
-    let path = request
-        .extensions()
-        .get::<VirtualHostContext>()
-        .map(|ctx| ctx.signature_path.clone())
-        .unwrap_or_else(|| request.uri().path().to_string());
+    let path = signature_path_from_request(&request);
 
     tracing::debug!("Verifying signature for {} {} ?{}", method, path, query);
 
@@ -229,8 +228,10 @@ async fn is_public_bypass_allowed(
     let (bucket, rest) = if let Some(host) = host {
         if let Some(bucket) = extract_virtual_bucket(host, &state.server_host) {
             let object_path = signature_path.unwrap_or(path);
-            let rest = object_path.trim_start_matches('/');
-            (bucket, rest.to_string())
+            let rest = object_key_from_signature_path(object_path)
+                .unwrap_or_else(|| object_path.trim_start_matches('/'))
+                .to_string();
+            (bucket, rest)
         } else if path == "/" || path.is_empty() {
             return false;
         } else {
@@ -335,11 +336,7 @@ async fn handle_presigned(
         ));
     }
 
-    let path = request
-        .extensions()
-        .get::<VirtualHostContext>()
-        .map(|ctx| ctx.signature_path.clone())
-        .unwrap_or_else(|| request.uri().path().to_string());
+    let path = signature_path_from_request(&request);
 
     tracing::debug!(
         "Verifying presigned signature for {} {} ?{}",

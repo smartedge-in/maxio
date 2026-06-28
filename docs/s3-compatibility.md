@@ -14,7 +14,8 @@ MaxIO targets AWS S3 API compatibility for common object-storage workflows. This
 - Configure the public endpoint host with `MAXIO_SERVER_HOST` / `--server-host` (e.g. `s3.example.com` or `localhost:9000`).
 - When unset, MaxIO derives `{bind-address}:{port}` (loopback substitution when binding `0.0.0.0`).
 - Requests with `Host: {bucket}.{server_host}` are dispatched to the correct bucket; object keys come from the URI path (`/key`).
-- Signature V4 verification uses the **client path** (`/key`), not an internal rewritten path.
+- Because Axum matches routes on the raw URI, handlers read [`VirtualHostContext`](https://github.com/smartedge-in/maxio/blob/main/src/api/virtual_host.rs) (set by middleware) to resolve the real bucket and object key.
+- Signature V4 verification uses the **client path** (`/key`) via the same context — not a rewritten URI.
 - Path-style requests continue to work on the same listener.
 
 **TLS:** Terminate TLS at your proxy and forward `Host` unchanged.

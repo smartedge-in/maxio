@@ -8,7 +8,7 @@ use axum::{
 };
 use http::{HeaderMap, StatusCode};
 
-use super::virtual_host::{virtual_host_object_key, VirtualHostContext};
+use super::virtual_host::{resolve_bucket, virtual_host_object_key, VirtualHostContext};
 
 use super::multipart;
 use crate::error::S3Error;
@@ -23,23 +23,18 @@ pub async fn handle_bucket_get(
     vhost: Option<Extension<VirtualHostContext>>,
     headers: HeaderMap,
 ) -> Result<Response<Body>, S3Error> {
-    if params.is_empty() {
-        if let Some(Extension(ctx)) = &vhost {
-            if let Some(key) = virtual_host_object_key(&ctx.signature_path) {
-                return super::object::get_object(
-                    State(state),
-                    Path((ctx.bucket.clone(), key.to_string())),
-                    Query(HashMap::new()),
-                    headers,
-                )
-                .await;
-            }
-        }
+    if let Some(key) = virtual_host_object_key(&params, vhost.as_ref()) {
+        let bucket = resolve_bucket(vhost.as_ref().map(|Extension(c)| c), &path_bucket);
+        return super::object::get_object(
+            State(state),
+            Path((bucket, key)),
+            Query(HashMap::new()),
+            headers,
+        )
+        .await;
     }
 
-    let bucket = vhost
-        .map(|Extension(ctx)| ctx.bucket)
-        .unwrap_or(path_bucket);
+    let bucket = resolve_bucket(vhost.as_ref().map(|Extension(c)| c), &path_bucket);
 
     tracing::debug!("GET /{} params={:?}", bucket, params);
 

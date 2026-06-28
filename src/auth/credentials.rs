@@ -68,7 +68,6 @@ impl CredentialStore {
             .filter(|c| c.enabled)
     }
 
-    #[allow(dead_code)]
     pub fn list_access_keys(&self) -> Vec<&str> {
         self.by_access_key
             .values()
@@ -149,6 +148,53 @@ mod tests {
         assert!(store.lookup("primary").is_some());
         assert!(store.lookup("user2").is_some());
         assert_eq!(store.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_access_keys_returns_enabled_only() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        fs::write(
+            format!("{dir}/{CREDENTIALS_FILE}"),
+            r#"{"credentials":[
+                {"access_key":"on","secret_key":"a","enabled":true},
+                {"access_key":"off","secret_key":"b","enabled":false}
+            ]}"#,
+        )
+        .await
+        .unwrap();
+
+        let store = CredentialStore::load(dir, &test_config()).await.unwrap();
+        let mut keys = store.list_access_keys();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["on", "primary"]);
+    }
+
+    #[tokio::test]
+    async fn skips_empty_access_or_secret_in_file() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        fs::write(
+            format!("{dir}/{CREDENTIALS_FILE}"),
+            r#"{"credentials":[
+                {"access_key":"","secret_key":"x","enabled":true},
+                {"access_key":"no-secret","secret_key":"","enabled":true}
+            ]}"#,
+        )
+        .await
+        .unwrap();
+
+        let store = CredentialStore::load(dir, &test_config()).await.unwrap();
+        assert_eq!(store.len(), 1);
+        assert!(store.lookup("no-secret").is_none());
+    }
+
+    #[tokio::test]
+    async fn malformed_credentials_file_returns_error() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        fs::write(format!("{dir}/{CREDENTIALS_FILE}"), "not-json").await.unwrap();
+        assert!(CredentialStore::load(dir, &test_config()).await.is_err());
     }
 
     #[tokio::test]

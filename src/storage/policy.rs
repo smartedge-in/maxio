@@ -1,9 +1,11 @@
 //! Minimal S3 bucket policy subset (P1-11 v1).
+//!
+//! See `docs/plans/2026-06-28-bucket-policy-evaluation.md` for supported grammar and non-goals.
 
 use serde::Deserialize;
 use serde_json::Value;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PolicyEffects {
     pub public_read: bool,
     pub public_list: bool,
@@ -40,21 +42,10 @@ enum PolicyResources {
     Many(Vec<String>),
 }
 
-impl PolicyActions {
-    fn iter(&self) -> Box<dyn Iterator<Item = &str> + '_> {
-        match self {
-            Self::One(s) => Box::new(std::iter::once(s.as_str())),
-            Self::Many(v) => Box::new(v.iter().map(String::as_str)),
-        }
-    }
-}
-
-impl PolicyResources {
-    fn iter(&self) -> Box<dyn Iterator<Item = &str> + '_> {
-        match self {
-            Self::One(s) => Box::new(std::iter::once(s.as_str())),
-            Self::Many(v) => Box::new(v.iter().map(String::as_str)),
-        }
+fn any_resource(resources: &PolicyResources, expected: &str) -> bool {
+    match resources {
+        PolicyResources::One(s) => resource_matches(s, expected),
+        PolicyResources::Many(v) => v.iter().any(|s| resource_matches(s, expected)),
     }
 }
 
@@ -89,39 +80,40 @@ pub fn evaluate_v1_policy(bucket: &str, raw: &str) -> Result<PolicyEffects, Stri
             );
         }
 
-        for action in stmt.action.iter() {
-            let action = normalize_action(action);
+        let mut apply_action = |raw_action: &str| -> Result<(), String> {
+            let action = normalize_action(raw_action);
             match action.as_str() {
                 "s3:GetObject" => {
-                    if stmt
-                        .resource
-                        .iter()
-                        .any(|r| resource_matches(r, &object_arn))
-                    {
+                    if any_resource(&stmt.resource, &object_arn) {
                         effects.public_read = true;
+                        Ok(())
                     } else {
-                        return Err(format!(
+                        Err(format!(
                             "MalformedPolicy: s3:GetObject requires Resource {object_arn}"
-                        ));
+                        ))
                     }
                 }
                 "s3:ListBucket" => {
-                    if stmt
-                        .resource
-                        .iter()
-                        .any(|r| resource_matches(r, &bucket_arn))
-                    {
+                    if any_resource(&stmt.resource, &bucket_arn) {
                         effects.public_list = true;
+                        Ok(())
                     } else {
-                        return Err(format!(
+                        Err(format!(
                             "MalformedPolicy: s3:ListBucket requires Resource {bucket_arn}"
-                        ));
+                        ))
                     }
                 }
-                other => {
-                    return Err(format!(
-                        "MalformedPolicy: unsupported Action '{other}' in v1 (allowed: s3:GetObject, s3:ListBucket)"
-                    ));
+                other => Err(format!(
+                    "MalformedPolicy: unsupported Action '{other}' in v1 (allowed: s3:GetObject, s3:ListBucket)"
+                )),
+            }
+        };
+
+        match &stmt.action {
+            PolicyActions::One(s) => apply_action(s)?,
+            PolicyActions::Many(v) => {
+                for s in v {
+                    apply_action(s)?;
                 }
             }
         }
@@ -143,8 +135,8 @@ fn principal_is_wildcard(principal: &Value) -> bool {
 }
 
 fn normalize_action(action: &str) -> String {
-    if let Some((_service, rest)) = action.split_once(':') {
-        if _service == "s3" || _service.eq_ignore_ascii_case("s3") {
+    if let Some((service, rest)) = action.split_once(':') {
+        if service.eq_ignore_ascii_case("s3") {
             return format!("s3:{rest}");
         }
     }
@@ -159,9 +151,15 @@ fn resource_matches(resource: &str, expected: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn read_policy(bucket: &str, json: &str) -> PolicyEffects {
+        evaluate_v1_policy(bucket, json).expect("policy should parse")
+    }
+
     #[test]
     fn parses_public_read_policy() {
-        let raw = r#"{
+        let effects = read_policy(
+            "photos",
+            r#"{
             "Version": "2012-10-17",
             "Statement": [{
                 "Effect": "Allow",
@@ -169,15 +167,22 @@ mod tests {
                 "Action": "s3:GetObject",
                 "Resource": "arn:aws:s3:::photos/*"
             }]
-        }"#;
-        let effects = evaluate_v1_policy("photos", raw).unwrap();
-        assert!(effects.public_read);
-        assert!(!effects.public_list);
+        }"#,
+        );
+        assert_eq!(
+            effects,
+            PolicyEffects {
+                public_read: true,
+                public_list: false
+            }
+        );
     }
 
     #[test]
     fn parses_public_list_policy() {
-        let raw = r#"{
+        let effects = read_policy(
+            "photos",
+            r#"{
             "Version": "2012-10-17",
             "Statement": [{
                 "Effect": "Allow",
@@ -185,10 +190,39 @@ mod tests {
                 "Action": "s3:ListBucket",
                 "Resource": "arn:aws:s3:::photos"
             }]
-        }"#;
-        let effects = evaluate_v1_policy("photos", raw).unwrap();
-        assert!(!effects.public_read);
-        assert!(effects.public_list);
+        }"#,
+        );
+        assert_eq!(
+            effects,
+            PolicyEffects {
+                public_read: false,
+                public_list: true
+            }
+        );
+    }
+
+    #[test]
+    fn parses_combined_read_and_list() {
+        let effects = read_policy(
+            "data",
+            r#"{
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": ["s3:GetObject", "s3:ListBucket"],
+                "Resource": ["arn:aws:s3:::data/*", "arn:aws:s3:::data"]
+              }
+            ]
+        }"#,
+        );
+        assert_eq!(
+            effects,
+            PolicyEffects {
+                public_read: true,
+                public_list: true
+            }
+        );
     }
 
     #[test]
@@ -202,5 +236,78 @@ mod tests {
             }]
         }"#;
         assert!(evaluate_v1_policy("photos", raw).is_err());
+    }
+
+    #[test]
+    fn rejects_non_wildcard_principal() {
+        let raw = r#"{
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"AWS": "arn:aws:iam::123:root"},
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::photos/*"
+            }]
+        }"#;
+        let err = evaluate_v1_policy("photos", raw).unwrap_err();
+        assert!(err.contains("Principal"));
+    }
+
+    #[test]
+    fn rejects_wrong_resource_for_get_object() {
+        let raw = r#"{
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::photos"
+            }]
+        }"#;
+        let err = evaluate_v1_policy("photos", raw).unwrap_err();
+        assert!(err.contains("s3:GetObject"));
+    }
+
+    #[test]
+    fn rejects_unsupported_action() {
+        let raw = r#"{
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:PutObject",
+                "Resource": "arn:aws:s3:::photos/*"
+            }]
+        }"#;
+        let err = evaluate_v1_policy("photos", raw).unwrap_err();
+        assert!(err.contains("PutObject"));
+    }
+
+    #[test]
+    fn rejects_bad_version() {
+        let raw = r#"{
+            "Version": "2008-10-17",
+            "Statement": []
+        }"#;
+        let err = evaluate_v1_policy("b", raw).unwrap_err();
+        assert!(err.contains("Version"));
+    }
+
+    #[test]
+    fn rejects_invalid_json() {
+        assert!(evaluate_v1_policy("b", "{").is_err());
+    }
+
+    #[test]
+    fn normalizes_s3_action_prefix_case() {
+        let effects = read_policy(
+            "x",
+            r#"{
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "S3:GetObject",
+                "Resource": "arn:aws:s3:::x/*"
+            }]
+        }"#,
+        );
+        assert!(effects.public_read);
     }
 }

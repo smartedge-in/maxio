@@ -8,7 +8,7 @@ use axum::{
     Extension,
 };
 
-use super::virtual_host::{virtual_host_object_key, VirtualHostContext};
+use super::virtual_host::{resolve_bucket, virtual_host_object_key, VirtualHostContext};
 
 use crate::error::S3Error;
 use crate::server::AppState;
@@ -139,24 +139,19 @@ pub async fn handle_bucket_put(
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response<Body>, S3Error> {
-    if params.is_empty() {
-        if let Some(Extension(ctx)) = &vhost {
-            if let Some(key) = virtual_host_object_key(&ctx.signature_path) {
-                return super::object::put_object(
-                    State(state),
-                    Path((ctx.bucket.clone(), key.to_string())),
-                    Query(HashMap::new()),
-                    headers,
-                    body,
-                )
-                .await;
-            }
-        }
+    if let Some(key) = virtual_host_object_key(&params, vhost.as_ref()) {
+        let bucket = resolve_bucket(vhost.as_ref().map(|Extension(c)| c), &_path_bucket);
+        return super::object::put_object(
+            State(state),
+            Path((bucket, key)),
+            Query(HashMap::new()),
+            headers,
+            body,
+        )
+        .await;
     }
 
-    let bucket = vhost
-        .map(|Extension(ctx)| ctx.bucket)
-        .unwrap_or(_path_bucket);
+    let bucket = resolve_bucket(vhost.as_ref().map(|Extension(c)| c), &_path_bucket);
 
     if params.contains_key("versioning") {
         return put_bucket_versioning(State(state), Path(bucket), body).await;
