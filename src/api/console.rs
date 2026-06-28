@@ -541,6 +541,8 @@ pub async fn upload_object(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/octet-stream");
 
+    let declared_size = crate::api::object::parse_content_length(&headers);
+
     let stream = body.into_data_stream();
     let reader = tokio_util::io::StreamReader::new(
         stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
@@ -569,6 +571,7 @@ pub async fn upload_object(
             Box::pin(reader),
             None,
             encryption,
+            declared_size,
         )
         .await
     {
@@ -671,6 +674,7 @@ async fn preserve_empty_parent_folder_after_object_delete(
             Box::pin(tokio::io::empty()),
             None,
             None,
+            Some(0),
         )
         .await
         .map(|_| ())
@@ -879,6 +883,7 @@ pub async fn create_folder(
             Box::pin(tokio::io::empty()),
             None,
             encryption,
+            Some(0),
         )
         .await
     {
@@ -1191,13 +1196,18 @@ mod tests {
     use std::sync::Arc;
 
     use crate::storage::keys::Keyring;
+    use crate::storage::quota::QuotaLimits;
     use crate::storage::{BucketMeta, ByteStream};
 
     use super::*;
 
     async fn test_storage(data_dir: &str) -> Result<FilesystemStorage, Box<dyn std::error::Error>> {
         let keyring = Arc::new(Keyring::load(data_dir, None).await?);
-        Ok(FilesystemStorage::new(data_dir, false, 10 * 1024 * 1024, 0, keyring).await?)
+        let quota = QuotaLimits::from_config(0, 0);
+        Ok(
+            FilesystemStorage::new(data_dir, false, 10 * 1024 * 1024, 0, keyring, quota)
+                .await?,
+        )
     }
 
     async fn create_test_bucket(storage: &FilesystemStorage, bucket: &str) {
@@ -1248,6 +1258,7 @@ mod tests {
                 bytes(b"hello"),
                 None,
                 None,
+                Some(5),
             )
             .await
             .unwrap();
@@ -1280,6 +1291,7 @@ mod tests {
                 Box::pin(tokio::io::empty()),
                 None,
                 None,
+                Some(0),
             )
             .await
             .unwrap();

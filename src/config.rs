@@ -84,6 +84,14 @@ pub struct Config {
     /// Max request body size for console JSON/form API routes, in bytes. Object uploads are streaming and not covered by this limit.
     #[arg(long, env = "MAXIO_MAX_CONSOLE_BODY_BYTES", default_value = "1048576")]
     pub max_console_body_bytes: usize,
+
+    /// Maximum S3 object size in bytes (0 = unlimited).
+    #[arg(long, env = "MAXIO_MAX_OBJECT_BYTES", default_value = "0")]
+    pub max_object_bytes: u64,
+
+    /// Minimum free disk bytes to reserve on the data volume (0 = disabled).
+    #[arg(long, env = "MAXIO_MIN_FREE_DISK_BYTES", default_value = "0")]
+    pub min_free_disk_bytes: u64,
 }
 
 #[cfg(test)]

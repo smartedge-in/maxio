@@ -47,8 +47,14 @@ async fn healthz() -> StatusCode {
     StatusCode::OK
 }
 
-async fn readyz(State(_state): State<AppState>) -> StatusCode {
-    StatusCode::OK
+async fn readyz(State(state): State<AppState>) -> StatusCode {
+    match state.storage.check_readiness().await {
+        Ok(()) => StatusCode::OK,
+        Err(e) => {
+            tracing::warn!("readiness check failed: {e}");
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+    }
 }
 
 async fn request_id_middleware(

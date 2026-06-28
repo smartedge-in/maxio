@@ -150,12 +150,17 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let quota = storage::quota::QuotaLimits::from_config(
+        config.max_object_bytes,
+        config.min_free_disk_bytes,
+    );
     let storage = storage::filesystem::FilesystemStorage::new(
         &config.data_dir,
         config.erasure_coding,
         config.chunk_size,
         config.parity_shards,
         keyring.clone(),
+        quota,
     )
     .await?;
 

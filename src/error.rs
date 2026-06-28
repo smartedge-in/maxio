@@ -28,6 +28,8 @@ pub enum S3ErrorCode {
     InvalidRange,
     NotImplemented,
     EntityTooSmall,
+    EntityTooLarge,
+    InsufficientStorage,
     ExpiredPresignedUrl,
     NoSuchCORSConfiguration,
     PreconditionFailed,
@@ -56,6 +58,8 @@ impl S3ErrorCode {
             Self::InvalidRange => "InvalidRange",
             Self::NotImplemented => "NotImplemented",
             Self::EntityTooSmall => "EntityTooSmall",
+            Self::EntityTooLarge => "EntityTooLarge",
+            Self::InsufficientStorage => "InsufficientStorage",
             Self::ExpiredPresignedUrl => "AccessDenied",
             Self::PreconditionFailed => "PreconditionFailed",
             Self::NoSuchCORSConfiguration => "NoSuchCORSConfiguration",
@@ -81,6 +85,7 @@ impl S3ErrorCode {
             | Self::ServerSideEncryptionConfigurationNotFound => StatusCode::NOT_FOUND,
             Self::BucketAlreadyOwnedByYou | Self::BucketNotEmpty => StatusCode::CONFLICT,
             Self::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
             Self::InvalidRange => StatusCode::RANGE_NOT_SATISFIABLE,
             Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
             Self::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
@@ -197,6 +202,25 @@ impl S3Error {
         Self {
             code: S3ErrorCode::EntityTooSmall,
             message: "Your proposed upload is smaller than the minimum allowed object size.".into(),
+            resource: None,
+        }
+    }
+
+    pub fn entity_too_large(max: u64) -> Self {
+        Self {
+            code: S3ErrorCode::EntityTooLarge,
+            message: format!(
+                "Your proposed upload exceeds the maximum allowed object size of {} bytes.",
+                max
+            ),
+            resource: None,
+        }
+    }
+
+    pub fn insufficient_storage(msg: &str) -> Self {
+        Self {
+            code: S3ErrorCode::InsufficientStorage,
+            message: msg.to_string(),
             resource: None,
         }
     }

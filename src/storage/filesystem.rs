@@ -1,6 +1,7 @@
 use super::chunk_reader::VerifiedChunkReader;
 use super::crypto::{AadBuilder, FRAME_CHUNK_SIZE, FrameDecryptor};
 use super::keys::Keyring;
+use super::quota::{QuotaLimits, QuotaReader, map_read_quota_error};
 use super::{
     BucketEncryptionConfig, BucketMeta, ByteStream, ChecksumAlgorithm, ChunkInfo, ChunkKind,
     ChunkManifest, DeleteResult, EncryptionMeta, EncryptionMode, EncryptionRequest,
@@ -64,11 +65,13 @@ impl ChecksumHasher {
 }
 
 pub struct FilesystemStorage {
+    data_root: PathBuf,
     buckets_dir: PathBuf,
     erasure_coding: bool,
     chunk_size: u64,
     parity_shards: u32,
     keyring: Arc<Keyring>,
+    quota: QuotaLimits,
 }
 
 /// Validate that an object key does not contain path traversal components.
@@ -284,16 +287,54 @@ impl FilesystemStorage {
         chunk_size: u64,
         parity_shards: u32,
         keyring: Arc<Keyring>,
+        quota: QuotaLimits,
     ) -> Result<Self, anyhow::Error> {
-        let buckets_dir = Path::new(data_dir).join("buckets");
+        let data_root = Path::new(data_dir).to_path_buf();
+        let buckets_dir = data_root.join("buckets");
         fs::create_dir_all(&buckets_dir).await?;
         Ok(Self {
+            data_root,
             buckets_dir,
             erasure_coding,
             chunk_size,
             parity_shards,
             keyring,
+            quota,
         })
+    }
+
+    pub async fn check_readiness(&self) -> Result<(), String> {
+        if !fs::try_exists(&self.data_root)
+            .await
+            .map_err(|e| format!("data directory stat failed: {e}"))?
+        {
+            return Err("data directory missing".into());
+        }
+
+        let probe = self.data_root.join(".maxio-readyz-probe");
+        fs::write(&probe, b"1")
+            .await
+            .map_err(|e| format!("data directory not writable: {e}"))?;
+        let _ = fs::remove_file(&probe).await;
+
+        if !self.keyring.is_usable() {
+            return Err("SSE-S3 keyring has no keys".into());
+        }
+
+        Ok(())
+    }
+
+    pub fn check_upload_start(&self, declared_size: Option<u64>) -> Result<(), StorageError> {
+        self.quota.check_declared_size(declared_size)?;
+        self.quota.check_disk_reserve(&self.data_root)
+    }
+
+    fn wrap_upload_reader(&self, body: ByteStream) -> ByteStream {
+        Box::pin(QuotaReader::new(
+            body,
+            self.quota,
+            self.data_root.clone(),
+        ))
     }
 
     // --- Bucket operations ---
@@ -511,12 +552,15 @@ impl FilesystemStorage {
         bucket: &str,
         key: &str,
         content_type: &str,
-        mut body: ByteStream,
+        body: ByteStream,
         checksum: Option<(ChecksumAlgorithm, Option<String>)>,
         encryption: Option<EncryptionRequest>,
+        declared_size: Option<u64>,
     ) -> Result<PutResult, StorageError> {
         validate_bucket_name(bucket)?;
         validate_key(key)?;
+        self.check_upload_start(declared_size)?;
+        let mut body = self.wrap_upload_reader(body);
 
         // Folder marker: zero-byte object with key ending in /
         if key.ends_with('/') {
@@ -594,7 +638,7 @@ impl FilesystemStorage {
         let mut chunk_index: u64 = 0;
 
         loop {
-            let n = body.read(&mut buf).await?;
+            let n = body.read(&mut buf).await.map_err(map_read_quota_error)?;
             if n == 0 {
                 // flush remaining partial frame
                 if let Some(ref cipher) = cipher_opt {
@@ -740,7 +784,7 @@ impl FilesystemStorage {
         let mut chunk_buf = Vec::with_capacity(self.chunk_size as usize);
 
         loop {
-            let n = body.read(&mut read_buf).await?;
+            let n = body.read(&mut read_buf).await.map_err(map_read_quota_error)?;
             if n == 0 {
                 // Flush remaining chunk_buf
                 if !chunk_buf.is_empty() {
@@ -923,7 +967,7 @@ impl FilesystemStorage {
         let mut chunk_buf: Vec<u8> = Vec::with_capacity(self.chunk_size as usize);
 
         loop {
-            let n = body.read(&mut read_buf).await?;
+            let n = body.read(&mut read_buf).await.map_err(map_read_quota_error)?;
             if n == 0 {
                 // Flush trailing partial frame.
                 if !frame_buf.is_empty() {
@@ -2115,12 +2159,15 @@ impl FilesystemStorage {
         bucket: &str,
         upload_id: &str,
         part_number: u32,
-        mut body: ByteStream,
+        body: ByteStream,
         checksum: Option<(ChecksumAlgorithm, Option<String>)>,
         customer_key: Option<[u8; 32]>,
+        declared_size: Option<u64>,
     ) -> Result<PartMeta, StorageError> {
         validate_bucket_name(bucket)?;
         validate_upload_id(upload_id)?;
+        self.check_upload_start(declared_size)?;
+        let mut body = self.wrap_upload_reader(body);
         if part_number == 0 || part_number > 10_000 {
             return Err(StorageError::InvalidKey(
                 "part number must be 1..=10000".into(),
@@ -2162,7 +2209,7 @@ impl FilesystemStorage {
         let mut chunk_index: u64 = 0;
 
         loop {
-            let n = body.read(&mut buf).await?;
+            let n = body.read(&mut buf).await.map_err(map_read_quota_error)?;
             if n == 0 {
                 if let Some(ref cipher) = cipher_opt {
                     if !frame_buf.is_empty() {
@@ -2287,6 +2334,10 @@ impl FilesystemStorage {
             }
             selected.push(meta);
         }
+
+        let total_size: u64 = selected.iter().map(|p| p.size).sum();
+        self.quota.check_object_size(total_size)?;
+        self.quota.check_disk_reserve(&self.data_root)?;
 
         if self.erasure_coding {
             if upload_meta.encryption_spec.is_some() {

@@ -48,6 +48,10 @@ pub struct Keyring {
 }
 
 impl Keyring {
+    pub fn is_usable(&self) -> bool {
+        !self.keys.is_empty()
+    }
+
     /// Load (or bootstrap) the keyring.
     ///
     /// If `master_key_b64` is `Some`, that key is active and the keyring file

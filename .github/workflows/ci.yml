@@ -35,6 +35,54 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: test
+        run: cargo test --all --all-features
+
       - name: Build frontend
         run: bun run build
         working-directory: ui
+
+  aws-cli:
+    name: AWS CLI compatibility
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+        working-directory: ui
+
+      - name: Install AWS CLI
+        run: pip install awscli
+
+      - name: Build maxio
+        run: cargo build --release
+
+      - name: Run AWS CLI integration tests
+        run: |
+          DATA_DIR=$(mktemp -d)
+          PORT=19000
+          ./target/release/maxio \
+            --data-dir "$DATA_DIR" \
+            --port "$PORT" \
+            --address 127.0.0.1 \
+            --allow-insecure-dev &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 30); do
+            if curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -sf "http://127.0.0.1:${PORT}/healthz" >/dev/null
+
+          ./tests/aws_cli_test.sh "$PORT" "$DATA_DIR"

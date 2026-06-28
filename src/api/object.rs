@@ -313,17 +313,20 @@ pub async fn put_object(
         })
     });
 
+    let declared_size = parse_content_length(&headers);
     let result = state
         .storage
-        .put_object(&bucket, &key, content_type, reader, checksum, encryption)
+        .put_object(
+            &bucket,
+            &key,
+            content_type,
+            reader,
+            checksum,
+            encryption,
+            declared_size,
+        )
         .await
-        .map_err(|e| match e {
-            StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
-            StorageError::ChecksumMismatch(_) => S3Error::bad_checksum("x-amz-checksum"),
-            StorageError::EncryptionError(msg) => S3Error::invalid_argument(&msg),
-            StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
-            _ => S3Error::internal(e),
-        })?;
+        .map_err(crate::storage::map_upload_error)?;
 
     let mut builder = Response::builder()
         .status(StatusCode::OK)
@@ -463,9 +466,18 @@ async fn upload_part_copy(
 
     let checksum = extract_checksum(&headers);
     let dst_ck = extract_customer_key(&headers)?;
+    let declared_size = parse_content_length(&headers);
     let part = state
         .storage
-        .upload_part(&bucket, upload_id, part_number, reader, checksum, dst_ck)
+        .upload_part(
+            &bucket,
+            upload_id,
+            part_number,
+            reader,
+            checksum,
+            dst_ck,
+            declared_size,
+        )
         .await
         .map_err(multipart::map_storage_err)?;
 
@@ -545,14 +557,17 @@ async fn copy_object(
     // Write destination
     let result = state
         .storage
-        .put_object(&bucket, &key, &content_type, reader, checksum, encryption)
+        .put_object(
+            &bucket,
+            &key,
+            &content_type,
+            reader,
+            checksum,
+            encryption,
+            Some(src_meta.size),
+        )
         .await
-        .map_err(|e| match e {
-            StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
-            StorageError::EncryptionError(msg) => S3Error::invalid_argument(&msg),
-            StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
-            _ => S3Error::internal(e),
-        })?;
+        .map_err(crate::storage::map_upload_error)?;
 
     // Get destination metadata for LastModified
     let dst_meta = state
@@ -1349,6 +1364,13 @@ mod tests {
         let h = headers_with(&[("if-modified-since", "not-a-date")]);
         assert!(matches!(check_conditions(&h, &meta), None));
     }
+}
+
+pub(crate) fn parse_content_length(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
 }
 
 pub(crate) async fn body_to_reader(

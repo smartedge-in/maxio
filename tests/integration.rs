@@ -9,6 +9,7 @@ use maxio::config::Config;
 use maxio::server::{self, AppState};
 use maxio::storage::filesystem::FilesystemStorage;
 use maxio::storage::keys::Keyring;
+use maxio::storage::quota::QuotaLimits;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -22,17 +23,12 @@ const ACCESS_KEY: &str = "maxioadmin";
 const SECRET_KEY: &str = "maxioadmin";
 const REGION: &str = "us-east-1";
 
-/// Spin up a test server on a random port, return the base URL.
-async fn start_server() -> (String, TempDir) {
-    let tmp = TempDir::new().unwrap();
-    let data_dir = tmp.path().to_str().unwrap().to_string();
+fn unlimited_quota() -> QuotaLimits {
+    QuotaLimits::from_config(0, 0)
+}
 
-    let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage = FilesystemStorage::new(&data_dir, false, 10 * 1024 * 1024, 0, keyring)
-        .await
-        .unwrap();
-
-    let config = Config {
+fn default_test_config(data_dir: String) -> Config {
+    Config {
         port: 0,
         address: "127.0.0.1".to_string(),
         data_dir,
@@ -47,10 +43,34 @@ async fn start_server() -> (String, TempDir) {
         parity_shards: 0,
         default_buckets: String::new(),
         max_console_body_bytes: 1024 * 1024,
-    };
+        max_object_bytes: 0,
+        min_free_disk_bytes: 0,
+    }
+}
 
+async fn new_test_storage(
+    data_dir: &str,
+    erasure_coding: bool,
+    chunk_size: u64,
+    parity_shards: u32,
+    quota: QuotaLimits,
+) -> FilesystemStorage {
+    let keyring = Arc::new(Keyring::load(data_dir, None).await.unwrap());
+    FilesystemStorage::new(
+        data_dir,
+        erasure_coding,
+        chunk_size,
+        parity_shards,
+        keyring,
+        quota,
+    )
+    .await
+    .unwrap()
+}
+
+async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> String {
     let state = AppState {
-        storage: Arc::new(storage),
+        storage,
         config: Arc::new(config),
         login_rate_limiter: Arc::new(maxio::api::console::LoginRateLimiter::new()),
     };
@@ -69,6 +89,30 @@ async fn start_server() -> (String, TempDir) {
         .unwrap();
     });
 
+    base_url
+}
+
+/// Spin up a test server on a random port, return the base URL.
+async fn start_server() -> (String, TempDir) {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
+    (base_url, tmp)
+}
+
+async fn start_server_with_quota(max_object_bytes: u64) -> (String, TempDir) {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let quota = QuotaLimits::from_config(max_object_bytes, 0);
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, quota).await,
+    );
+    let mut config = default_test_config(data_dir);
+    config.max_object_bytes = max_object_bytes;
+    let base_url = spawn_test_server(storage, config).await;
     (base_url, tmp)
 }
 
@@ -169,49 +213,14 @@ async fn start_server_with_default_buckets(default_buckets: &str) -> (String, Te
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage = FilesystemStorage::new(&data_dir, false, 10 * 1024 * 1024, 0, keyring)
-        .await
-        .unwrap();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    maxio::storage::provision_default_buckets(storage.as_ref(), default_buckets, REGION).await;
 
-    maxio::storage::provision_default_buckets(&storage, default_buckets, REGION).await;
-
-    let config = Config {
-        port: 0,
-        address: "127.0.0.1".to_string(),
-        data_dir: data_dir.clone(),
-        access_key: ACCESS_KEY.to_string(),
-        secret_key: SECRET_KEY.to_string(),
-        region: REGION.to_string(),
-        master_key: None,
-        allow_insecure_dev: true,
-        secure_cookies: false,
-        erasure_coding: false,
-        chunk_size: 10 * 1024 * 1024,
-        parity_shards: 0,
-        default_buckets: default_buckets.to_string(),
-        max_console_body_bytes: 1024 * 1024,
-    };
-
-    let state = AppState {
-        storage: Arc::new(storage),
-        config: Arc::new(config),
-        login_rate_limiter: Arc::new(maxio::api::console::LoginRateLimiter::new()),
-    };
-
-    let app = server::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{}", addr);
-
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
+    let mut config = default_test_config(data_dir);
+    config.default_buckets = default_buckets.to_string();
+    let base_url = spawn_test_server(storage, config).await;
 
     (base_url, tmp)
 }
@@ -242,49 +251,16 @@ async fn test_default_buckets_skip_existing() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage = FilesystemStorage::new(&data_dir, false, 10 * 1024 * 1024, 0, keyring)
-        .await
-        .unwrap();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
 
     // First provision: creates the bucket
-    maxio::storage::provision_default_buckets(&storage, "existing", REGION).await;
+    maxio::storage::provision_default_buckets(storage.as_ref(), "existing", REGION).await;
     // Second provision: must be idempotent — no error, no duplicate
-    maxio::storage::provision_default_buckets(&storage, "existing", REGION).await;
+    maxio::storage::provision_default_buckets(storage.as_ref(), "existing", REGION).await;
 
-    let config = Config {
-        port: 0,
-        address: "127.0.0.1".to_string(),
-        data_dir: data_dir.clone(),
-        access_key: ACCESS_KEY.to_string(),
-        secret_key: SECRET_KEY.to_string(),
-        region: REGION.to_string(),
-        master_key: None,
-        allow_insecure_dev: true,
-        secure_cookies: false,
-        erasure_coding: false,
-        chunk_size: 10 * 1024 * 1024,
-        parity_shards: 0,
-        default_buckets: String::new(),
-        max_console_body_bytes: 1024 * 1024,
-    };
-    let state = AppState {
-        storage: Arc::new(storage),
-        config: Arc::new(config),
-        login_rate_limiter: Arc::new(maxio::api::console::LoginRateLimiter::new()),
-    };
-    let app = server::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{}", addr);
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
+    let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
 
     let resp = s3_request("HEAD", &format!("{}/existing", base_url), vec![]).await;
     assert_eq!(resp.status(), 200);
@@ -668,6 +644,54 @@ async fn test_readyz_is_public_and_returns_ok() {
 }
 
 #[tokio::test]
+#[cfg(unix)]
+async fn test_readyz_returns_503_when_data_dir_unwritable() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let base_url = spawn_test_server(storage, default_test_config(data_dir.clone())).await;
+
+    let resp = client()
+        .get(format!("{}/readyz", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(&data_dir).unwrap().permissions();
+    perms.set_mode(0o555);
+    std::fs::set_permissions(&data_dir, perms).unwrap();
+
+    let resp = client()
+        .get(format!("{}/readyz", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 503);
+}
+
+#[tokio::test]
+async fn test_put_object_rejected_when_exceeding_max_object_bytes() {
+    let (base_url, _tmp) = start_server_with_quota(10).await;
+    s3_request("PUT", &format!("{}/quota-bucket", base_url), vec![]).await;
+
+    let body = b"01234567890123456789".to_vec();
+    let resp = s3_request_with_headers(
+        "PUT",
+        &format!("{}/quota-bucket/too-big.bin", base_url),
+        body,
+        vec![("content-length", "20")],
+    )
+    .await;
+    assert_eq!(resp.status(), 400);
+    let xml = resp.text().await.unwrap();
+    assert!(xml.contains("EntityTooLarge"), "unexpected body: {xml}");
+}
+
+#[tokio::test]
 async fn test_security_headers_are_applied() {
     let (base_url, _tmp) = start_server().await;
     let resp = client()
@@ -898,10 +922,7 @@ async fn test_delete_bucket_rejects_real_object() {
 async fn test_delete_bucket_sweeps_nested_versions() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage = FilesystemStorage::new(&data_dir, false, 10 * 1024 * 1024, 0, keyring)
-        .await
-        .unwrap();
+    let storage = new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await;
 
     storage
         .create_bucket(&maxio::storage::BucketMeta {
@@ -2958,47 +2979,11 @@ async fn start_server_ec() -> (String, TempDir) {
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     // Use 1KB chunk size for easy multi-chunk testing
-    let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage = FilesystemStorage::new(&data_dir, true, 1024, 0, keyring)
-        .await
-        .unwrap();
-
-    let config = Config {
-        port: 0,
-        address: "127.0.0.1".to_string(),
-        data_dir,
-        access_key: ACCESS_KEY.to_string(),
-        secret_key: SECRET_KEY.to_string(),
-        region: REGION.to_string(),
-        master_key: None,
-        allow_insecure_dev: true,
-        secure_cookies: false,
-        erasure_coding: true,
-        chunk_size: 1024,
-        parity_shards: 0,
-        default_buckets: String::new(),
-        max_console_body_bytes: 1024 * 1024,
-    };
-
-    let state = AppState {
-        storage: Arc::new(storage),
-        config: Arc::new(config),
-        login_rate_limiter: Arc::new(maxio::api::console::LoginRateLimiter::new()),
-    };
-
-    let app = server::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{}", addr);
-
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
+    let storage = Arc::new(new_test_storage(&data_dir, true, 1024, 0, unlimited_quota()).await);
+    let mut config = default_test_config(data_dir);
+    config.erasure_coding = true;
+    config.chunk_size = 1024;
+    let base_url = spawn_test_server(storage, config).await;
 
     (base_url, tmp)
 }
@@ -3415,47 +3400,14 @@ async fn start_server_parity(parity_shards: u32) -> (String, TempDir) {
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     // 100-byte chunks for easy multi-chunk testing
-    let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage = FilesystemStorage::new(&data_dir, true, 100, parity_shards, keyring)
-        .await
-        .unwrap();
-
-    let config = Config {
-        port: 0,
-        address: "127.0.0.1".to_string(),
-        data_dir,
-        access_key: ACCESS_KEY.to_string(),
-        secret_key: SECRET_KEY.to_string(),
-        region: REGION.to_string(),
-        master_key: None,
-        allow_insecure_dev: true,
-        secure_cookies: false,
-        erasure_coding: true,
-        chunk_size: 100,
-        parity_shards,
-        default_buckets: String::new(),
-        max_console_body_bytes: 1024 * 1024,
-    };
-
-    let state = AppState {
-        storage: Arc::new(storage),
-        config: Arc::new(config),
-        login_rate_limiter: Arc::new(maxio::api::console::LoginRateLimiter::new()),
-    };
-
-    let app = server::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{}", addr);
-
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
+    let storage = Arc::new(
+        new_test_storage(&data_dir, true, 100, parity_shards, unlimited_quota()).await,
+    );
+    let mut config = default_test_config(data_dir);
+    config.erasure_coding = true;
+    config.chunk_size = 100;
+    config.parity_shards = parity_shards;
+    let base_url = spawn_test_server(storage, config).await;
 
     (base_url, tmp)
 }
@@ -6089,47 +6041,14 @@ async fn start_server_ec_parity(chunk_size: u64, parity_shards: u32) -> (String,
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
-    let storage = FilesystemStorage::new(&data_dir, true, chunk_size, parity_shards, keyring)
-        .await
-        .unwrap();
-
-    let config = Config {
-        port: 0,
-        address: "127.0.0.1".to_string(),
-        data_dir,
-        access_key: ACCESS_KEY.to_string(),
-        secret_key: SECRET_KEY.to_string(),
-        region: REGION.to_string(),
-        master_key: None,
-        allow_insecure_dev: true,
-        secure_cookies: false,
-        erasure_coding: true,
-        chunk_size,
-        parity_shards,
-        default_buckets: String::new(),
-        max_console_body_bytes: 1024 * 1024,
-    };
-
-    let state = AppState {
-        storage: Arc::new(storage),
-        config: Arc::new(config),
-        login_rate_limiter: Arc::new(maxio::api::console::LoginRateLimiter::new()),
-    };
-
-    let app = server::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{}", addr);
-
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
+    let storage = Arc::new(
+        new_test_storage(&data_dir, true, chunk_size, parity_shards, unlimited_quota()).await,
+    );
+    let mut config = default_test_config(data_dir);
+    config.erasure_coding = true;
+    config.chunk_size = chunk_size;
+    config.parity_shards = parity_shards;
+    let base_url = spawn_test_server(storage, config).await;
 
     (base_url, tmp)
 }

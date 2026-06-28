@@ -2,6 +2,7 @@ pub mod chunk_reader;
 pub mod crypto;
 pub mod filesystem;
 pub mod keys;
+pub mod quota;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -383,6 +384,23 @@ pub enum StorageError {
     DecryptionError(String),
     #[error("Integrity error: {0}")]
     IntegrityError(String),
+    #[error("object exceeds maximum allowed size of {max} bytes")]
+    ObjectTooLarge { max: u64 },
+    #[error("insufficient storage: {0}")]
+    InsufficientStorage(String),
+}
+
+/// Map storage failures from upload paths to S3 XML errors.
+pub fn map_upload_error(err: StorageError) -> crate::error::S3Error {
+    match err {
+        StorageError::ObjectTooLarge { max } => crate::error::S3Error::entity_too_large(max),
+        StorageError::InsufficientStorage(msg) => crate::error::S3Error::insufficient_storage(&msg),
+        StorageError::InvalidKey(msg) => crate::error::S3Error::invalid_argument(&msg),
+        StorageError::ChecksumMismatch(_) => crate::error::S3Error::bad_checksum("x-amz-checksum"),
+        StorageError::EncryptionError(msg) => crate::error::S3Error::invalid_argument(&msg),
+        StorageError::IntegrityError(msg) => crate::error::S3Error::invalid_argument(&msg),
+        other => crate::error::S3Error::internal(other),
+    }
 }
 
 #[cfg(test)]

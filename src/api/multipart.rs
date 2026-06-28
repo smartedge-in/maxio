@@ -100,6 +100,7 @@ pub async fn upload_part(
     let checksum = extract_checksum(&headers);
     let customer_key = extract_customer_key(&headers)?;
     let reader = body_to_reader(&headers, body).await?;
+    let declared_size = super::object::parse_content_length(&headers);
     let part = state
         .storage
         .upload_part(
@@ -109,6 +110,7 @@ pub async fn upload_part(
             reader,
             checksum,
             customer_key,
+            declared_size,
         )
         .await
         .map_err(map_storage_err)?;
@@ -271,6 +273,8 @@ pub(super) async fn ensure_bucket_exists(state: &AppState, bucket: &str) -> Resu
 
 pub(super) fn map_storage_err(err: StorageError) -> S3Error {
     match err {
+        StorageError::ObjectTooLarge { max } => S3Error::entity_too_large(max),
+        StorageError::InsufficientStorage(msg) => S3Error::insufficient_storage(&msg),
         StorageError::ChecksumMismatch(_) => S3Error::bad_checksum("x-amz-checksum"),
         StorageError::UploadNotFound(upload_id) => S3Error::no_such_upload(&upload_id),
         StorageError::InvalidKey(msg) if msg.contains("part too small") => {

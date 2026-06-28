@@ -138,8 +138,19 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | `MAXIO_MASTER_KEY` | `--master-key` | _(auto-generated)_ | Base64-encoded 32-byte SSE-S3 master key. If unset, a key is generated and stored under `<data-dir>/.maxio-keys.json`. Provide explicitly to control key rotation |
 | `MAXIO_DEFAULT_BUCKETS` | `--default-buckets` | _(none)_ | Comma-separated list of bucket names to create during startup (aliases: `MINIO_DEFAULT_BUCKETS`) |
 | `MAXIO_MAX_CONSOLE_BODY_BYTES` | `--max-console-body-bytes` | `1048576` | Max request body size for console JSON/form API routes; object uploads are streaming and not covered by this limit |
+| `MAXIO_MAX_OBJECT_BYTES` | `--max-object-bytes` | `0` | Maximum S3 object size in bytes (`0` = unlimited). Oversized uploads return `EntityTooLarge` |
+| `MAXIO_MIN_FREE_DISK_BYTES` | `--min-free-disk-bytes` | `0` | Minimum free bytes to keep on the data volume (`0` = disabled). New uploads are rejected with HTTP 507 when free space is below this reserve |
 | `MAXIO_HEALTHCHECK_URL` | `healthcheck --url` | `http://127.0.0.1:9000/healthz` | Healthcheck endpoint URL; default port follows `MAXIO_PORT` when set |
 | `MAXIO_HEALTHCHECK_TIMEOUT_MS` | `healthcheck --timeout-ms` | `2000` | Healthcheck connect/read timeout in milliseconds |
+
+### Health endpoints
+
+| Path | Behavior |
+|------|----------|
+| `/healthz` | Liveness probe — returns `200` when the process is running |
+| `/readyz` | Readiness probe — returns `200` when the data directory is writable and the SSE-S3 keyring is usable; `503` otherwise |
+
+See [docs/operations.md](docs/operations.md) for production deployment, TLS, backups, and Kubernetes examples.
 
 ## Usage
 
@@ -199,6 +210,10 @@ aws --endpoint-url http://localhost:9000 s3api put-object \
 - ~~Versioning~~, lifecycle rules, ~~server-side encryption (SSE-S3, SSE-C)~~
 - Multi-user support
 - Distributed mode, ~~erasure coding~~, replication
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Contributing
 
