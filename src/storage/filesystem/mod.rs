@@ -425,7 +425,7 @@ impl FilesystemStorage {
     pub async fn put_bucket_policy(&self, bucket: &str, policy: &str) -> Result<(), StorageError> {
         validate_bucket_name(bucket)?;
         let effects = crate::storage::policy::evaluate_v1_policy(bucket, policy)
-            .map_err(|e| StorageError::InvalidKey(e))?;
+            .map_err(StorageError::InvalidKey)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {

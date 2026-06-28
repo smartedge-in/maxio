@@ -132,6 +132,18 @@ pub struct Config {
     /// Public S3 endpoint host for virtual-hosted-style requests (`bucket.{server_host}`), e.g. `s3.example.com` or `localhost:9000`.
     #[arg(long, env = "MAXIO_SERVER_HOST", default_value = "")]
     pub server_host: String,
+
+    /// Expose Prometheus metrics at `GET /metrics` on the main HTTP listener.
+    #[arg(long, env = "MAXIO_METRICS_ENABLED", default_value = "false")]
+    pub metrics_enabled: bool,
+
+    /// Optional dedicated metrics listen address port (`0` = disabled; use `/metrics` on main port when enabled).
+    #[arg(long, env = "MAXIO_METRICS_PORT", default_value = "0")]
+    pub metrics_port: u16,
+
+    /// Emit structured JSON audit log lines (`target=maxio_audit`) for mutating S3/console/admin actions.
+    #[arg(long, env = "MAXIO_AUDIT_LOG", default_value = "false")]
+    pub audit_log: bool,
 }
 
 #[cfg(test)]

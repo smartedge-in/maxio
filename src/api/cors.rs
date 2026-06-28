@@ -70,10 +70,10 @@ fn apply_cors_headers(headers: &mut HeaderMap, rule: &CorsRule, origin: &str) {
             headers.insert("access-control-expose-headers", val);
         }
     }
-    if let Some(max_age) = rule.max_age_seconds {
-        if let Ok(val) = HeaderValue::from_str(&max_age.to_string()) {
-            headers.insert("access-control-max-age", val);
-        }
+    if let Some(max_age) = rule.max_age_seconds
+        && let Ok(val) = HeaderValue::from_str(&max_age.to_string())
+    {
+        headers.insert("access-control-max-age", val);
     }
 }
 

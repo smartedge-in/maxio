@@ -107,7 +107,7 @@ impl FrameEncryptor {
                     aad: &aad,
                 },
             )
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "AES-GCM encryption failed"))?;
+            .map_err(|_| io::Error::other("AES-GCM encryption failed"))?;
 
         self.ct_buf.clear();
         self.ct_buf.extend_from_slice(&nonce_bytes);
@@ -255,6 +255,7 @@ impl FrameDecryptor {
         )
     }
 
+    #[allow(clippy::too_many_arguments)] // range decrypt: frame index, skip, remaining, AAD builder
     fn for_range_internal(
         inner: Pin<Box<dyn AsyncRead + Send>>,
         key: &[u8; 32],
@@ -380,21 +381,20 @@ impl AsyncRead for FrameDecryptor {
                         "ciphertext frame too short to contain a nonce",
                     )));
                 }
-                let nonce_bytes: [u8; 12] = this.frame_buf[..12]
-                    .try_into()
-                    .expect("slice is exactly 12 bytes");
+                let nonce_bytes: [u8; 12] = this.frame_buf[..12].try_into().map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid nonce length")
+                })?;
                 let ct_with_tag = &this.frame_buf[12..this.frame_filled];
 
                 // Verify that the nonce's chunk-index portion matches expected.
-                let stored_idx_v1 = u64::from_le_bytes(
-                    nonce_bytes[4..12]
-                        .try_into()
-                        .expect("slice is exactly 8 bytes"),
-                );
+                let stored_idx_v1 =
+                    u64::from_le_bytes(nonce_bytes[4..12].try_into().map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidData, "invalid nonce")
+                    })?);
                 let stored_idx_v2 = u32::from_le_bytes(
                     nonce_bytes[8..12]
                         .try_into()
-                        .expect("slice is exactly 4 bytes"),
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid nonce"))?,
                 ) as u64;
                 if stored_idx_v1 != this.chunk_index && stored_idx_v2 != this.chunk_index {
                     return Poll::Ready(Err(io::Error::new(

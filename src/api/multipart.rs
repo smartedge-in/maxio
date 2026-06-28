@@ -37,10 +37,10 @@ pub async fn create_multipart_upload(
 
     // Resolve encryption spec at upload-create time (explicit > bucket default).
     let mut encryption = extract_sse_request(&headers)?;
-    if encryption.is_none() {
-        if let Ok(Some(cfg)) = state.storage.get_bucket_encryption(&bucket).await {
-            encryption = Some(encryption_from_bucket_default(&cfg));
-        }
+    if encryption.is_none()
+        && let Ok(Some(cfg)) = state.storage.get_bucket_encryption(&bucket).await
+    {
+        encryption = Some(encryption_from_bucket_default(&cfg));
     }
     let encryption_spec = encryption.as_ref().map(spec_from_request);
     let applied_mode = encryption.as_ref().map(|e| e.mode.clone());

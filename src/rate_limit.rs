@@ -36,7 +36,7 @@ impl SlidingWindowLimiter {
             return None;
         }
 
-        let mut map = self.buckets.lock().unwrap();
+        let mut map = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         let window = self.window_secs;
 

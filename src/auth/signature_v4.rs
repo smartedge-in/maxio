@@ -1,8 +1,7 @@
-use hmac::{Hmac, Mac};
 use http::HeaderMap;
 use sha2::{Digest, Sha256};
 
-type HmacSha256 = Hmac<Sha256>;
+use super::hmac::hmac_sha256_digest;
 
 /// Characters that do NOT get percent-encoded in S3 SigV4 canonical URI.
 /// Per AWS spec: A-Z, a-z, 0-9, '-', '_', '.', '~'
@@ -82,9 +81,7 @@ pub fn verify_signature(
 
     let signing_key = derive_signing_key(secret_key, &parsed.date, &parsed.region);
 
-    let mut mac = HmacSha256::new_from_slice(&signing_key).unwrap();
-    mac.update(string_to_sign.as_bytes());
-    let computed = hex::encode(mac.finalize().into_bytes());
+    let computed = hex::encode(hmac_sha256_digest(&signing_key, string_to_sign.as_bytes()));
 
     tracing::debug!("Computed signature: {}", computed);
     tracing::debug!("Provided signature: {}", parsed.signature);
@@ -211,9 +208,7 @@ pub fn verify_presigned_signature(
 
     let signing_key = derive_signing_key(secret_key, &parsed.date, &parsed.region);
 
-    let mut mac = HmacSha256::new_from_slice(&signing_key).unwrap();
-    mac.update(string_to_sign.as_bytes());
-    let computed = hex::encode(mac.finalize().into_bytes());
+    let computed = hex::encode(hmac_sha256_digest(&signing_key, string_to_sign.as_bytes()));
 
     tracing::debug!("Computed signature: {}", computed);
     tracing::debug!("Provided signature: {}", parsed.signature);
@@ -333,22 +328,10 @@ fn build_string_to_sign(canonical_request: &str, timestamp: &str, parsed: &Parse
 
 pub fn derive_signing_key(secret_key: &str, date: &str, region: &str) -> Vec<u8> {
     let key = format!("AWS4{}", secret_key);
-
-    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).unwrap();
-    mac.update(date.as_bytes());
-    let date_key = mac.finalize().into_bytes();
-
-    let mut mac = HmacSha256::new_from_slice(&date_key).unwrap();
-    mac.update(region.as_bytes());
-    let date_region_key = mac.finalize().into_bytes();
-
-    let mut mac = HmacSha256::new_from_slice(&date_region_key).unwrap();
-    mac.update(b"s3");
-    let date_region_service_key = mac.finalize().into_bytes();
-
-    let mut mac = HmacSha256::new_from_slice(&date_region_service_key).unwrap();
-    mac.update(b"aws4_request");
-    mac.finalize().into_bytes().to_vec()
+    let date_key = hmac_sha256_digest(key.as_bytes(), date.as_bytes());
+    let date_region_key = hmac_sha256_digest(&date_key, region.as_bytes());
+    let date_region_service_key = hmac_sha256_digest(&date_region_key, b"s3");
+    hmac_sha256_digest(&date_region_service_key, b"aws4_request").to_vec()
 }
 
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

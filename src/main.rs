@@ -1,25 +1,10 @@
-#![allow(
-    clippy::collapsible_if,
-    clippy::redundant_closure,
-    clippy::redundant_pattern_matching,
-    clippy::needless_borrows_for_generic_args,
-    clippy::io_other_error,
-    clippy::if_same_then_else,
-    clippy::manual_pattern_char_comparison,
-    clippy::derivable_impls,
-    clippy::items_after_test_module,
-    clippy::overly_complex_bool_expr,
-    clippy::too_many_arguments,
-    clippy::new_without_default,
-    clippy::needless_bool,
-    clippy::collapsible_else_if
-)]
-
 mod api;
+mod audit;
 mod auth;
 mod config;
 mod embedded;
 mod error;
+mod metrics;
 mod proxy;
 mod rate_limit;
 mod server;
@@ -225,6 +210,23 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    if config.metrics_port > 0 {
+        let metrics_state = state.clone();
+        let metrics_addr = format!("{}:{}", config.address, config.metrics_port);
+        tokio::spawn(async move {
+            match tokio::net::TcpListener::bind(&metrics_addr).await {
+                Ok(listener) => {
+                    tracing::info!("Metrics listener on {}", metrics_addr);
+                    let app = server::metrics_router(metrics_state);
+                    if let Err(err) = axum::serve(listener, app.into_make_service()).await {
+                        tracing::error!("metrics server error: {err}");
+                    }
+                }
+                Err(err) => tracing::error!("failed to bind metrics port {}: {err}", metrics_addr),
+            }
+        });
+    }
+
     let app = server::build_router(state);
     if config.access_key == "maxioadmin" && config.secret_key == "maxioadmin" {
         tracing::warn!(
@@ -258,6 +260,16 @@ async fn main() -> anyhow::Result<()> {
         &config.address
     };
     tracing::info!("Web UI:     http://{}:{}/ui/", display_host, config.port);
+    if config.metrics_enabled {
+        tracing::info!(
+            "Metrics:    http://{}:{}/metrics",
+            display_host,
+            config.port
+        );
+    }
+    if config.audit_log {
+        tracing::info!("Audit log:  enabled (target=maxio_audit, JSON lines)");
+    }
 
     axum::serve(
         listener,

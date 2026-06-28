@@ -133,6 +133,9 @@ mod tests {
             trusted_proxies: String::new(),
             login_rate_limit_redis_url: None,
             server_host: String::new(),
+            metrics_enabled: false,
+            metrics_port: 0,
+            audit_log: false,
         }
     }
 

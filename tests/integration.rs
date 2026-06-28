@@ -56,6 +56,9 @@ fn default_test_config(data_dir: String) -> Config {
         trusted_proxies: String::new(),
         login_rate_limit_redis_url: None,
         server_host: String::new(),
+        metrics_enabled: false,
+        metrics_port: 0,
+        audit_log: false,
     }
 }
 
@@ -7828,4 +7831,45 @@ async fn test_virtual_host_anonymous_public_read() {
         virtual_host_get_anonymous(listen, &server_host, "pub-vh", "/secret.txt").await;
     assert_eq!(status, 200);
     assert_eq!(body, "public-vh");
+}
+
+#[tokio::test]
+async fn test_metrics_endpoint_when_enabled() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let mut config = default_test_config(data_dir);
+    config.metrics_enabled = true;
+    let base_url = spawn_test_server(storage, config).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert!(
+        resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.contains("text/plain")),
+        "expected Prometheus text content-type"
+    );
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("maxio_uptime_seconds"));
+}
+
+#[tokio::test]
+async fn test_metrics_endpoint_disabled_by_default() {
+    let (base_url, _tmp) = start_server().await;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .unwrap();
+    // Without MAXIO_METRICS_ENABLED, /metrics is handled as an S3 bucket path (auth required).
+    assert_eq!(resp.status(), 403);
 }

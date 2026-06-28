@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Prometheus metrics (`MAXIO_METRICS_ENABLED`, optional `MAXIO_METRICS_PORT`): `GET /metrics` with request counters, latency sum/count, SlowDown total, upload bytes, uptime, disk free/total, active multipart uploads.
+- Structured audit log (`MAXIO_AUDIT_LOG`): JSON lines on `target=maxio_audit` for mutating S3/console/admin actions (principal, bucket, key, status, outcome).
+- `auth/hmac` helper and `AuthPrincipal` request extension for SigV4-authenticated access keys.
 - Root **`VERSION`** file as the single source of truth for [Semantic Versioning](https://semver.org/); `make sync-version` propagates it to `Cargo.toml` (workspace) and `ui/package.json`; `maxio::version::VERSION` is exposed at runtime.
 - Production GNU **Makefile** with a full local validation pipeline (`make ci` / `make all`): fmt, check, clippy, test, coverage, `cargo audit`, `cargo deny`, Trivy filesystem/secret/config/license scans, CycloneDX SBOM, doc, release build, Docker image, and Trivy image scan.
 - `make install-tools` — installs Rust toolchain components, `cargo-audit` / `cargo-deny` / `cargo-llvm-cov`, bun (when `unzip` is available), and Trivy to `~/.local/bin` (run as a normal user, not `sudo`).
@@ -63,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed crate-level `#![allow(clippy::…)]` from `lib.rs` / `main.rs`; fixed mechanical clippy lints workspace-wide.
+- Replaced `unwrap`/`expect` in auth HMAC and storage hot paths with `StorageError` / `IntegrityError` returns.
 - Bumped direct dependency `rand` from `0.10.0` to `0.10.1` (fixes `RUSTSEC-2026-0097` / GHSA-cq8v-f236-94qc reported by Trivy and `cargo audit`).
 - Licensing: replaced MPL-2.0 `dirs` in `maxio-admin` with XDG/HOME config-dir resolution; switched `reqwest` from `rustls-tls` to `native-tls-vendored`; embedded UI fonts changed from OFL Geist to MIT Inter + JetBrains Mono; CI enforces permissive Rust licenses via `cargo-deny` (`deny.toml`, `docs/licensing.md`).
 - Three review/refactor cycles on P1 S3 code: shared virtual-host helpers, auth public-bypass constants, integration test helpers, expanded unit/integration tests, and ≥80% CI coverage floors on `virtual_host`, `credentials`, and `policy`.

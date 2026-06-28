@@ -133,7 +133,7 @@ async fn list_objects_v2(
         .storage
         .list_objects(&bucket, &prefix)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     let filtered: Vec<&ObjectMeta> = all_objects
         .iter()
@@ -174,7 +174,7 @@ async fn list_objects_v2(
         start_after,
     };
 
-    let xml = to_xml(&result).map_err(|e| S3Error::internal(e))?;
+    let xml = to_xml(&result).map_err(S3Error::internal)?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -197,7 +197,7 @@ async fn list_objects_v1(
         .storage
         .list_objects(&bucket, &prefix)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     let filtered: Vec<&ObjectMeta> = all_objects
         .iter()
@@ -233,7 +233,7 @@ async fn list_objects_v1(
         delimiter,
     };
 
-    let xml = to_xml(&result).map_err(|e| S3Error::internal(e))?;
+    let xml = to_xml(&result).map_err(S3Error::internal)?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -300,7 +300,7 @@ async fn list_object_versions(
         .storage
         .list_object_versions(&bucket, &prefix)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     // Determine which version is latest per key (first in list since sorted newest-first per key)
     let mut latest_per_key: HashMap<String, String> = HashMap::new();
@@ -348,7 +348,7 @@ async fn list_object_versions(
         delete_markers,
     };
 
-    let xml = to_xml(&result).map_err(|e| S3Error::internal(e))?;
+    let xml = to_xml(&result).map_err(S3Error::internal)?;
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/xml")

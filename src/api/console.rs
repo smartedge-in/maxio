@@ -239,15 +239,15 @@ async fn console_csrf_middleware(
             .get("origin")
             .and_then(|v| v.to_str().ok())
             .or_else(|| headers.get("referer").and_then(|v| v.to_str().ok()));
-        if let Some(origin) = origin {
-            if !same_origin_host(origin, host) && !dev_loopback_origin_allowed(&state, origin, host)
-            {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(serde_json::json!({"error": "CSRF origin check failed"})),
-                )
-                    .into_response();
-            }
+        if let Some(origin) = origin
+            && !same_origin_host(origin, host)
+            && !dev_loopback_origin_allowed(&state, origin, host)
+        {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "CSRF origin check failed"})),
+            )
+                .into_response();
         }
     }
     let mut response = next.run(request).await;
@@ -506,9 +506,7 @@ pub async fn upload_object(
     let declared_size = crate::api::object::parse_content_length(&headers);
 
     let stream = body.into_data_stream();
-    let reader = tokio_util::io::StreamReader::new(
-        stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-    );
+    let reader = tokio_util::io::StreamReader::new(stream.map_err(std::io::Error::other));
 
     let encryption = match state.storage.get_bucket_encryption(&bucket).await {
         Ok(Some(cfg)) => Some(crate::api::object::encryption_from_bucket_default(&cfg)),
@@ -734,11 +732,7 @@ pub async fn presign_object(
     // URI-encode each path segment per AWS SigV4 spec. The bucket/key values
     // arrive decoded from Axum's Path extractor, so we must encode them for
     // both the canonical request and the presigned URL.
-    let encoded_key: String = key
-        .split('/')
-        .map(|s| encode(s))
-        .collect::<Vec<_>>()
-        .join("/");
+    let encoded_key: String = key.split('/').map(&encode).collect::<Vec<_>>().join("/");
     let path = format!("/{}/{}", encode(&bucket), encoded_key);
 
     // Build query string params (sorted alphabetically, excluding Signature)

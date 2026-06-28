@@ -33,7 +33,7 @@ impl FilesystemStorage {
                 })?;
                 let dek = Keyring::generate_dek();
                 let nonce_prefix = Keyring::generate_nonce_prefix8();
-                let md5 = Md5::digest(&**customer_key);
+                let md5 = Md5::digest(**customer_key);
                 let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&**customer_key));
                 let mut wrap_nonce = [0u8; 12];
                 rand::rng().fill(&mut wrap_nonce[..]);
@@ -126,7 +126,7 @@ impl FilesystemStorage {
                 })?;
                 // Validate MD5 if recorded.
                 if let Some(ref stored_md5_b64) = enc_meta.customer_key_md5 {
-                    let provided_md5 = Md5::digest(&ck);
+                    let provided_md5 = Md5::digest(ck);
                     let provided_b64 = b64.encode(provided_md5);
                     if &provided_b64 != stored_md5_b64 {
                         return Err(StorageError::DecryptionError(
@@ -205,12 +205,14 @@ impl FilesystemStorage {
         meta: &ObjectMeta,
         data_path: &Path,
     ) -> Result<(), StorageError> {
-        let version_id = meta.version_id.as_ref().unwrap();
+        let version_id = meta.version_id.as_deref().ok_or_else(|| {
+            StorageError::IntegrityError("write_version called without version_id".into())
+        })?;
         let ver_dir = self.versions_dir(bucket, key);
         fs::create_dir_all(&ver_dir).await?;
 
         // Copy data to version store
-        let ver_data = ver_dir.join(format!("{}.data", version_id));
+        let ver_data = ver_dir.join(format!("{version_id}.data"));
         fs::copy(data_path, &ver_data).await?;
 
         // Write version metadata
@@ -227,7 +229,9 @@ impl FilesystemStorage {
         key: &str,
         meta: &ObjectMeta,
     ) -> Result<(), StorageError> {
-        let version_id = meta.version_id.as_ref().unwrap();
+        let version_id = meta.version_id.as_deref().ok_or_else(|| {
+            StorageError::IntegrityError("write_version_chunked called without version_id".into())
+        })?;
         let ver_dir = self.versions_dir(bucket, key);
         fs::create_dir_all(&ver_dir).await?;
 
@@ -320,7 +324,9 @@ impl FilesystemStorage {
             let meta: ObjectMeta = serde_json::from_str(&data)?;
             if !meta.is_delete_marker {
                 // Restore this version as current
-                let vid = meta.version_id.as_ref().unwrap();
+                let vid = meta.version_id.as_deref().ok_or_else(|| {
+                    StorageError::IntegrityError("version metadata missing version_id".into())
+                })?;
                 let obj_meta_path = self.meta_path(bucket, key);
 
                 let ver_ec = ver_dir.join(format!("{}.ec", vid));

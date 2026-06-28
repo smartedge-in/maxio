@@ -286,6 +286,13 @@ make audit         # RustSec advisories
 make trivy-fs      # Trivy filesystem scan
 ```
 
+### Observability
+
+- **Metrics:** `MAXIO_METRICS_ENABLED=1` → `GET /metrics` (Prometheus text). Optional `MAXIO_METRICS_PORT` for a dedicated listener.
+- **Audit log:** `MAXIO_AUDIT_LOG=1` → JSON lines on tracing target `maxio_audit` for mutating API calls.
+
+Crate-level `#![allow(clippy::…)]` has been removed from `lib.rs` / `main.rs`; only function-level allows remain where needed (e.g. `too_many_arguments` on storage entry points).
+
 ### Benchmarking (MaxIO vs MinIO)
 
 Uses [WARP](https://github.com/minio/warp) to compare MaxIO against MinIO across 7 scenarios: PUT (4KiB/1MiB/64MiB), GET (4KiB/1MiB), mixed workload, and multipart uploads. Prerequisites: `brew install minio-warp` and `brew install minio/stable/minio`.

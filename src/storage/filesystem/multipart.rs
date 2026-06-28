@@ -112,10 +112,10 @@ impl FilesystemStorage {
                 let b64 = base64::engine::general_purpose::STANDARD;
                 let mut raw_checksums = Vec::new();
                 for part in selected {
-                    if let Some(ref val) = part.checksum_value {
-                        if let Ok(raw) = b64.decode(val) {
-                            raw_checksums.extend_from_slice(&raw);
-                        }
+                    if let Some(ref val) = part.checksum_value
+                        && let Ok(raw) = b64.decode(val)
+                    {
+                        raw_checksums.extend_from_slice(&raw);
                     }
                 }
                 if !raw_checksums.is_empty() {
@@ -209,10 +209,11 @@ impl FilesystemStorage {
         };
 
         // Upload-scoped DEK used to decrypt each part on read.
-        let upload_spec = upload_meta
-            .encryption_spec
-            .as_ref()
-            .expect("complete_multipart_chunked_encrypted called without encryption_spec");
+        let upload_spec = upload_meta.encryption_spec.as_ref().ok_or_else(|| {
+            StorageError::IntegrityError(
+                "complete_multipart_chunked_encrypted called without encryption_spec".into(),
+            )
+        })?;
         let upload_dek = self.resolve_upload_dek(upload_spec, customer_key)?;
 
         // Fresh per-object encryption (distinct DEK from the upload DEK).
@@ -370,10 +371,10 @@ impl FilesystemStorage {
             if let Some(algo) = upload_meta.checksum_algorithm {
                 let mut raw_checksums = Vec::new();
                 for part in selected {
-                    if let Some(ref val) = part.checksum_value {
-                        if let Ok(raw) = b64.decode(val) {
-                            raw_checksums.extend_from_slice(&raw);
-                        }
+                    if let Some(ref val) = part.checksum_value
+                        && let Ok(raw) = b64.decode(val)
+                    {
+                        raw_checksums.extend_from_slice(&raw);
                     }
                 }
                 if !raw_checksums.is_empty() {
@@ -412,9 +413,13 @@ impl FilesystemStorage {
             part_sizes: Some(part_sizes),
             encryption: Some(enc_meta),
         };
-        object_meta.encryption.as_mut().unwrap().sidecar_mac = String::new();
+        if let Some(em) = object_meta.encryption.as_mut() {
+            em.sidecar_mac.clear();
+        }
         let mac = compute_sidecar_mac(&dek, &object_meta)?;
-        object_meta.encryption.as_mut().unwrap().sidecar_mac = mac;
+        if let Some(em) = object_meta.encryption.as_mut() {
+            em.sidecar_mac = mac;
+        }
 
         let meta_path = self.meta_path(bucket, key);
         if let Some(parent) = meta_path.parent() {
@@ -545,6 +550,7 @@ impl FilesystemStorage {
         Ok(meta)
     }
 
+    #[allow(clippy::too_many_arguments)] // multipart part upload: id, part number, body, checksum, SSE-C key, size
     pub async fn upload_part(
         &self,
         bucket: &str,
@@ -602,19 +608,19 @@ impl FilesystemStorage {
         loop {
             let n = body.read(&mut buf).await.map_err(map_read_quota_error)?;
             if n == 0 {
-                if let Some(ref cipher) = cipher_opt {
-                    if !frame_buf.is_empty() {
-                        let aad = build_part_aad(upload_id, part_number, chunk_index);
-                        write_encrypted_frame(
-                            &mut writer,
-                            cipher,
-                            &nonce_prefix,
-                            chunk_index,
-                            &frame_buf,
-                            &aad,
-                        )
-                        .await?;
-                    }
+                if let Some(ref cipher) = cipher_opt
+                    && !frame_buf.is_empty()
+                {
+                    let aad = build_part_aad(upload_id, part_number, chunk_index);
+                    write_encrypted_frame(
+                        &mut writer,
+                        cipher,
+                        &nonce_prefix,
+                        chunk_index,
+                        &frame_buf,
+                        &aad,
+                    )
+                    .await?;
                 }
                 break;
             }
@@ -647,15 +653,20 @@ impl FilesystemStorage {
 
         // Validate and compute checksum
         let (checksum_algorithm, checksum_value) = if let Some((algo, expected)) = checksum {
-            let computed = checksum_hasher.unwrap().finalize_base64();
-            if let Some(expected_val) = expected {
-                if computed != expected_val {
-                    let _ = fs::remove_file(&part_path).await;
-                    return Err(StorageError::ChecksumMismatch(format!(
-                        "expected {}, got {}",
-                        expected_val, computed
-                    )));
-                }
+            let Some(hasher) = checksum_hasher else {
+                return Err(StorageError::IntegrityError(
+                    "checksum validation enabled but hasher missing".into(),
+                ));
+            };
+            let computed = hasher.finalize_base64();
+            if let Some(expected_val) = expected
+                && computed != expected_val
+            {
+                let _ = fs::remove_file(&part_path).await;
+                return Err(StorageError::ChecksumMismatch(format!(
+                    "expected {}, got {}",
+                    expected_val, computed
+                )));
             }
             (Some(algo), Some(computed))
         } else {
@@ -734,21 +745,21 @@ impl FilesystemStorage {
             if upload_meta.encryption_spec.is_some() {
                 // SSE-C key continuity + per-part `encrypted` flag checks
                 // belong with the encrypted multipart path even under EC.
-                if let Some(ref spec) = upload_meta.encryption_spec {
-                    if matches!(spec.mode, EncryptionMode::SseC) {
-                        let ck = customer_key.ok_or_else(|| {
-                            StorageError::EncryptionError(
-                                "SSE-C requires customer key on CompleteMultipartUpload".into(),
-                            )
-                        })?;
-                        if let Some(ref stored) = spec.customer_key_md5 {
-                            let b64 = base64::engine::general_purpose::STANDARD;
-                            let provided = b64.encode(Md5::digest(ck));
-                            if provided != *stored {
-                                return Err(StorageError::EncryptionError(
-                                    "SSE-C key changed between Create and Complete".into(),
-                                ));
-                            }
+                if let Some(ref spec) = upload_meta.encryption_spec
+                    && matches!(spec.mode, EncryptionMode::SseC)
+                {
+                    let ck = customer_key.ok_or_else(|| {
+                        StorageError::EncryptionError(
+                            "SSE-C requires customer key on CompleteMultipartUpload".into(),
+                        )
+                    })?;
+                    if let Some(ref stored) = spec.customer_key_md5 {
+                        let b64 = base64::engine::general_purpose::STANDARD;
+                        let provided = b64.encode(Md5::digest(ck));
+                        if provided != *stored {
+                            return Err(StorageError::EncryptionError(
+                                "SSE-C key changed between Create and Complete".into(),
+                            ));
                         }
                     }
                 }
@@ -782,21 +793,21 @@ impl FilesystemStorage {
         // object would be encrypted with the wrong key and the parts
         // (encrypted under the Create-time key) could not be decrypted
         // consistently anyway.
-        if let Some(ref spec) = upload_meta.encryption_spec {
-            if matches!(spec.mode, EncryptionMode::SseC) {
-                let ck = customer_key.ok_or_else(|| {
-                    StorageError::EncryptionError(
-                        "SSE-C requires customer key on CompleteMultipartUpload".into(),
-                    )
-                })?;
-                if let Some(ref stored) = spec.customer_key_md5 {
-                    let b64 = base64::engine::general_purpose::STANDARD;
-                    let provided = b64.encode(Md5::digest(ck));
-                    if provided != *stored {
-                        return Err(StorageError::EncryptionError(
-                            "SSE-C key changed between Create and Complete".into(),
-                        ));
-                    }
+        if let Some(ref spec) = upload_meta.encryption_spec
+            && matches!(spec.mode, EncryptionMode::SseC)
+        {
+            let ck = customer_key.ok_or_else(|| {
+                StorageError::EncryptionError(
+                    "SSE-C requires customer key on CompleteMultipartUpload".into(),
+                )
+            })?;
+            if let Some(ref stored) = spec.customer_key_md5 {
+                let b64 = base64::engine::general_purpose::STANDARD;
+                let provided = b64.encode(Md5::digest(ck));
+                if provided != *stored {
+                    return Err(StorageError::EncryptionError(
+                        "SSE-C key changed between Create and Complete".into(),
+                    ));
                 }
             }
         }
@@ -936,24 +947,24 @@ impl FilesystemStorage {
             etag_hasher.update(raw_md5);
         }
         // Flush trailing partial frame
-        if let Some(ref cipher) = cipher_opt {
-            if !frame_buf.is_empty() {
-                let aad = build_frame_aad(
-                    bucket_for_aad,
-                    key_for_aad,
-                    version_id.as_deref(),
-                    chunk_index,
-                );
-                write_encrypted_frame(
-                    &mut writer,
-                    cipher,
-                    &nonce_prefix,
-                    chunk_index,
-                    &frame_buf,
-                    &aad,
-                )
-                .await?;
-            }
+        if let Some(ref cipher) = cipher_opt
+            && !frame_buf.is_empty()
+        {
+            let aad = build_frame_aad(
+                bucket_for_aad,
+                key_for_aad,
+                version_id.as_deref(),
+                chunk_index,
+            );
+            write_encrypted_frame(
+                &mut writer,
+                cipher,
+                &nonce_prefix,
+                chunk_index,
+                &frame_buf,
+                &aad,
+            )
+            .await?;
         }
         writer.flush().await?;
 
@@ -969,10 +980,10 @@ impl FilesystemStorage {
                 let b64 = base64::engine::general_purpose::STANDARD;
                 let mut raw_checksums = Vec::new();
                 for part in &selected {
-                    if let Some(ref val) = part.checksum_value {
-                        if let Ok(raw) = b64.decode(val) {
-                            raw_checksums.extend_from_slice(&raw);
-                        }
+                    if let Some(ref val) = part.checksum_value
+                        && let Ok(raw) = b64.decode(val)
+                    {
+                        raw_checksums.extend_from_slice(&raw);
                     }
                 }
                 if !raw_checksums.is_empty() {
@@ -1006,10 +1017,16 @@ impl FilesystemStorage {
             part_sizes: Some(part_sizes),
             encryption: enc_meta_opt,
         };
-        if let (Some(dek), Some(em)) = (dek_opt.as_ref(), object_meta.encryption.as_mut()) {
-            em.sidecar_mac = String::new();
-            let mac = compute_sidecar_mac(dek, &object_meta)?;
-            object_meta.encryption.as_mut().unwrap().sidecar_mac = mac;
+        if object_meta.encryption.is_some() {
+            if let Some(em) = object_meta.encryption.as_mut() {
+                em.sidecar_mac.clear();
+            }
+            if let Some(dek) = dek_opt.as_ref() {
+                let mac = compute_sidecar_mac(dek, &object_meta)?;
+                if let Some(em) = object_meta.encryption.as_mut() {
+                    em.sidecar_mac = mac;
+                }
+            }
         }
         let meta_path = self.meta_path(bucket, &upload_meta.key);
         if let Some(parent) = meta_path.parent() {

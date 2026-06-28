@@ -163,6 +163,9 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | `MAXIO_TRUSTED_PROXIES` | `--trusted-proxies` | _(empty)_ | Comma-separated trusted proxy CIDRs; when the direct peer matches, `X-Forwarded-For` is used for client IP (console login + rate limits) |
 | `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` | `--login-rate-limit-redis-url` | _(empty)_ | Optional Redis URL for shared console login rate limiting across replicas (`redis://host:6379`) |
 | `MAXIO_SERVER_HOST` | `--server-host` | _(auto)_ | Public S3 endpoint host for virtual-hosted-style requests (`bucket.{server_host}`), e.g. `s3.example.com` or `localhost:9000` |
+| `MAXIO_METRICS_ENABLED` | `--metrics-enabled` | `false` | Expose Prometheus metrics at `GET /metrics` |
+| `MAXIO_METRICS_PORT` | `--metrics-port` | `0` | Optional dedicated metrics listener port (`0` = main port only) |
+| `MAXIO_AUDIT_LOG` | `--audit-log` | `false` | Emit JSON audit lines for mutating S3/console/admin actions |
 
 ### Health endpoints
 

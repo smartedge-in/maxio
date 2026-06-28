@@ -81,23 +81,22 @@ fn verify_admin_auth(
         return false;
     };
 
-    if let Some(token) = auth.strip_prefix("Bearer ") {
-        if !config.admin_token.is_empty() && token == config.admin_token {
-            return true;
-        }
+    if let Some(token) = auth.strip_prefix("Bearer ")
+        && !config.admin_token.is_empty()
+        && token == config.admin_token
+    {
+        return true;
     }
 
-    if let Some(encoded) = auth.strip_prefix("Basic ") {
-        if let Ok(decoded) = B64.decode(encoded) {
-            if let Ok(creds) = String::from_utf8(decoded) {
-                if let Some((user, pass)) = creds.split_once(':') {
-                    if let Some(cred) = credentials.lookup(user) {
-                        return pass == cred.secret_key;
-                    }
-                    return user == config.access_key && pass == config.secret_key;
-                }
-            }
+    if let Some(encoded) = auth.strip_prefix("Basic ")
+        && let Ok(decoded) = B64.decode(encoded)
+        && let Ok(creds) = String::from_utf8(decoded)
+        && let Some((user, pass)) = creds.split_once(':')
+    {
+        if let Some(cred) = credentials.lookup(user) {
+            return pass == cred.secret_key;
         }
+        return user == config.access_key && pass == config.secret_key;
     }
 
     false
@@ -432,6 +431,9 @@ mod tests {
             trusted_proxies: String::new(),
             login_rate_limit_redis_url: None,
             server_host: String::new(),
+            metrics_enabled: false,
+            metrics_port: 0,
+            audit_log: false,
         }
     }
 

@@ -76,12 +76,12 @@ impl Keyring {
             keys.insert(id.clone(), key_bytes);
 
             // Merge in keyring file for read-only access to old objects.
-            if let Ok(data) = fs::read_to_string(&file_path).await {
-                if let Ok(kr) = serde_json::from_str::<KeyringFile>(&data) {
-                    for entry in kr.keys {
-                        if let Ok(kb) = decode_32(&entry.key_b64) {
-                            keys.entry(entry.id).or_insert(kb);
-                        }
+            if let Ok(data) = fs::read_to_string(&file_path).await
+                && let Ok(kr) = serde_json::from_str::<KeyringFile>(&data)
+            {
+                for entry in kr.keys {
+                    if let Ok(kb) = decode_32(&entry.key_b64) {
+                        keys.entry(entry.id).or_insert(kb);
                     }
                 }
             }

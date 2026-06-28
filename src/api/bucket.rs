@@ -22,7 +22,7 @@ pub async fn list_buckets(State(state): State<AppState>) -> Result<Response<Body
         .storage
         .list_buckets()
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     let result = ListAllMyBucketsResult {
         owner: Owner {
@@ -40,7 +40,7 @@ pub async fn list_buckets(State(state): State<AppState>) -> Result<Response<Body
         },
     };
 
-    let xml = to_xml(&result).map_err(|e| S3Error::internal(e))?;
+    let xml = to_xml(&result).map_err(S3Error::internal)?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -75,7 +75,7 @@ pub async fn create_bucket(
         .storage
         .create_bucket(&meta)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     if !created {
         return Err(S3Error::bucket_already_owned(&bucket));
@@ -181,23 +181,17 @@ async fn put_bucket_versioning(
 
     let body_bytes = axum::body::to_bytes(body, 1024 * 64)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
     let body_str = String::from_utf8_lossy(&body_bytes);
 
     // Parse <VersioningConfiguration><Status>Enabled|Suspended</Status></VersioningConfiguration>
-    let enabled = if body_str.contains("<Status>Enabled</Status>") {
-        true
-    } else if body_str.contains("<Status>Suspended</Status>") {
-        false
-    } else {
-        false
-    };
+    let enabled = body_str.contains("<Status>Enabled</Status>");
 
     state
         .storage
         .set_versioning(&bucket, enabled)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -213,7 +207,7 @@ pub async fn get_bucket_versioning(
         .storage
         .is_versioned(&bucket)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     let result = VersioningConfiguration {
         status: if versioned {
@@ -223,7 +217,7 @@ pub async fn get_bucket_versioning(
         },
     };
 
-    let xml = to_xml(&result).map_err(|e| S3Error::internal(e))?;
+    let xml = to_xml(&result).map_err(S3Error::internal)?;
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/xml")
@@ -244,7 +238,7 @@ async fn put_bucket_cors(
 
     let body_bytes = axum::body::to_bytes(body, 64 * 1024)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     let config: CorsConfiguration = quick_xml::de::from_str(&String::from_utf8_lossy(&body_bytes))
         .map_err(|_| S3Error::malformed_xml())?;
@@ -287,7 +281,7 @@ async fn put_bucket_cors(
         .storage
         .put_bucket_cors(&bucket, rules)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     Ok(Response::builder()
         .status(StatusCode::OK)
@@ -305,7 +299,7 @@ pub async fn get_bucket_cors(state: AppState, bucket: String) -> Result<Response
             e => S3Error::internal(e),
         })?;
 
-    let rules = rules.ok_or_else(|| S3Error::no_such_cors_configuration())?;
+    let rules = rules.ok_or_else(S3Error::no_such_cors_configuration)?;
 
     let config = CorsConfiguration {
         rules: rules
@@ -320,7 +314,7 @@ pub async fn get_bucket_cors(state: AppState, bucket: String) -> Result<Response
             .collect(),
     };
 
-    let xml = to_xml(&config).map_err(|e| S3Error::internal(e))?;
+    let xml = to_xml(&config).map_err(S3Error::internal)?;
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/xml")
@@ -339,7 +333,7 @@ async fn delete_bucket_cors(state: AppState, bucket: String) -> Result<Response<
         .storage
         .delete_bucket_cors(&bucket)
         .await
-        .map_err(|e| S3Error::internal(e))?;
+        .map_err(S3Error::internal)?;
 
     Ok(Response::builder()
         .status(StatusCode::NO_CONTENT)
@@ -452,7 +446,7 @@ async fn put_bucket_policy(
     let body_bytes = axum::body::to_bytes(body, 1024 * 1024)
         .await
         .map_err(S3Error::internal)?;
-    let policy = String::from_utf8(body_bytes.to_vec()).map_err(|e| S3Error::internal(e))?;
+    let policy = String::from_utf8(body_bytes.to_vec()).map_err(S3Error::internal)?;
 
     state
         .storage

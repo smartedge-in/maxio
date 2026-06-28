@@ -408,10 +408,10 @@ impl IntoResponse for S3Error {
         if let Ok(value) = HeaderValue::from_str(&request_id.to_string()) {
             headers.insert("x-amz-request-id", value);
         }
-        if let Some(retry_after) = self.retry_after_secs {
-            if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
-                headers.insert(header::RETRY_AFTER, value);
-            }
+        if let Some(retry_after) = self.retry_after_secs
+            && let Ok(value) = HeaderValue::from_str(&retry_after.to_string())
+        {
+            headers.insert(header::RETRY_AFTER, value);
         }
         (status, headers, xml).into_response()
     }

@@ -131,10 +131,10 @@ fn principal_is_wildcard(principal: &Value) -> bool {
 }
 
 fn normalize_action(action: &str) -> String {
-    if let Some((service, rest)) = action.split_once(':') {
-        if service.eq_ignore_ascii_case("s3") {
-            return format!("s3:{rest}");
-        }
+    if let Some((service, rest)) = action.split_once(':')
+        && service.eq_ignore_ascii_case("s3")
+    {
+        return format!("s3:{rest}");
     }
     action.to_string()
 }

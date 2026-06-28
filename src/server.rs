@@ -14,10 +14,12 @@ use crate::api::console::console_router;
 use crate::api::cors::cors_middleware;
 use crate::api::router::s3_router;
 use crate::api::virtual_host::virtual_host_middleware;
+use crate::audit::audit_middleware;
 use crate::auth::credentials::CredentialStore;
 use crate::auth::middleware::auth_middleware;
 use crate::config::Config;
 use crate::embedded::ui_handler;
+use crate::metrics::{metrics_handler, metrics_middleware};
 use crate::proxy::TrustedProxies;
 use crate::rate_limit::{AdminRateLimiter, LoginRateLimiter, S3RateLimiter};
 use crate::storage::filesystem::FilesystemStorage;
@@ -43,6 +45,7 @@ pub struct AppState {
     pub last_housekeeping_at: Arc<AtomicI64>,
     pub credentials: Arc<CredentialStore>,
     pub server_host: String,
+    pub metrics: Arc<crate::metrics::Metrics>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -71,17 +74,42 @@ pub fn build_router(state: AppState) -> Router {
             crate::api::admin::admin_auth_middleware,
         ));
 
-    Router::new()
+    let mut router = Router::new()
         .nest("/api/admin/v1", admin_routes)
         .nest("/api", console_router(state.clone()))
         .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+        .route("/readyz", get(readyz));
+
+    if state.config.metrics_enabled {
+        router = router.route("/metrics", get(metrics_handler));
+    }
+
+    router
         .route("/ui", get(ui_handler))
         .route("/ui/", get(ui_handler))
         .route("/ui/{*path}", get(ui_handler))
         .merge(s3_routes)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            audit_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            metrics_middleware,
+        ))
         .layer(axum::middleware::from_fn(security_headers_middleware))
         .layer(axum::middleware::from_fn(request_id_middleware))
+        .with_state(state)
+}
+
+pub fn metrics_router(state: AppState) -> Router {
+    Router::new()
+        .route("/metrics", get(metrics_handler))
+        .route("/healthz", get(|| async { StatusCode::OK }))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            metrics_middleware,
+        ))
         .with_state(state)
 }
 
@@ -235,5 +263,6 @@ pub fn new_app_state(
         last_housekeeping_at: Arc::new(AtomicI64::new(0)),
         credentials,
         server_host: crate::api::virtual_host::effective_server_host(&config, listen_port),
+        metrics: Arc::new(crate::metrics::Metrics::default()),
     }
 }

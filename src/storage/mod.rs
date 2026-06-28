@@ -158,15 +158,11 @@ pub struct PartMeta {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ChunkKind {
+    #[default]
     Data,
     Parity,
-}
-
-impl Default for ChunkKind {
-    fn default() -> Self {
-        ChunkKind::Data
-    }
 }
 
 impl ChunkKind {
@@ -306,8 +302,8 @@ pub fn is_valid_bucket_name(name: &str) -> bool {
         return false;
     }
 
-    let first = name.chars().next().unwrap();
-    let last = name.chars().last().unwrap();
+    let bytes = name.as_bytes();
+    let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
     if !first.is_ascii_alphanumeric() || !last.is_ascii_alphanumeric() {
         return false;
     }

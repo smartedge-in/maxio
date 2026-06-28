@@ -12,6 +12,7 @@ impl ChunkInfoExt for ChunkInfo {
 }
 
 impl FilesystemStorage {
+    #[allow(clippy::too_many_arguments)] // S3 PutObject surface: bucket, key, body, checksum, encryption, size
     pub async fn put_object(
         &self,
         bucket: &str,
@@ -106,19 +107,19 @@ impl FilesystemStorage {
             let n = body.read(&mut buf).await.map_err(map_read_quota_error)?;
             if n == 0 {
                 // flush remaining partial frame
-                if let Some(ref cipher) = cipher_opt {
-                    if !frame_buf.is_empty() {
-                        let aad = build_frame_aad(bucket, key, version_id.as_deref(), chunk_index);
-                        write_encrypted_frame(
-                            &mut writer,
-                            cipher,
-                            &nonce_prefix,
-                            chunk_index,
-                            &frame_buf,
-                            &aad,
-                        )
-                        .await?;
-                    }
+                if let Some(ref cipher) = cipher_opt
+                    && !frame_buf.is_empty()
+                {
+                    let aad = build_frame_aad(bucket, key, version_id.as_deref(), chunk_index);
+                    write_encrypted_frame(
+                        &mut writer,
+                        cipher,
+                        &nonce_prefix,
+                        chunk_index,
+                        &frame_buf,
+                        &aad,
+                    )
+                    .await?;
                 }
                 break;
             }
@@ -154,15 +155,20 @@ impl FilesystemStorage {
 
         // Validate and compute checksum
         let (checksum_algorithm, checksum_value) = if let Some((algo, expected)) = checksum {
-            let computed = checksum_hasher.unwrap().finalize_base64();
-            if let Some(expected_val) = expected {
-                if computed != expected_val {
-                    let _ = fs::remove_file(&tmp_obj_path).await;
-                    return Err(StorageError::ChecksumMismatch(format!(
-                        "expected {}, got {}",
-                        expected_val, computed
-                    )));
-                }
+            let Some(hasher) = checksum_hasher else {
+                return Err(StorageError::IntegrityError(
+                    "checksum validation enabled but hasher missing".into(),
+                ));
+            };
+            let computed = hasher.finalize_base64();
+            if let Some(expected_val) = expected
+                && computed != expected_val
+            {
+                let _ = fs::remove_file(&tmp_obj_path).await;
+                return Err(StorageError::ChecksumMismatch(format!(
+                    "expected {}, got {}",
+                    expected_val, computed
+                )));
             }
             (Some(algo), Some(computed))
         } else {
@@ -190,10 +196,16 @@ impl FilesystemStorage {
             part_sizes: None,
             encryption: enc_meta_opt.take(),
         };
-        if let (Some(dek), Some(em)) = (dek_opt.as_ref(), meta.encryption.as_mut()) {
-            em.sidecar_mac = String::new();
-            let mac = compute_sidecar_mac(dek, &meta)?;
-            meta.encryption.as_mut().unwrap().sidecar_mac = mac;
+        if meta.encryption.is_some() {
+            if let Some(em) = meta.encryption.as_mut() {
+                em.sidecar_mac.clear();
+            }
+            if let Some(dek) = dek_opt.as_ref() {
+                let mac = compute_sidecar_mac(dek, &meta)?;
+                if let Some(em) = meta.encryption.as_mut() {
+                    em.sidecar_mac = mac;
+                }
+            }
         }
 
         let meta_path = self.meta_path(bucket, key);
@@ -537,15 +549,20 @@ impl FilesystemStorage {
         let etag_quoted = format!("\"{}\"", etag);
 
         let (ck_algo, ck_val) = if let Some(algo) = checksum_algo {
-            let computed = checksum_hasher.unwrap().finalize_base64();
-            if let Some(expected) = expected_checksum {
-                if computed != expected {
-                    let _ = fs::remove_dir_all(&tmp_ec_dir).await;
-                    return Err(StorageError::ChecksumMismatch(format!(
-                        "expected {}, got {}",
-                        expected, computed
-                    )));
-                }
+            let Some(hasher) = checksum_hasher else {
+                return Err(StorageError::IntegrityError(
+                    "checksum validation enabled but hasher missing".into(),
+                ));
+            };
+            let computed = hasher.finalize_base64();
+            if let Some(expected) = expected_checksum
+                && computed != expected
+            {
+                let _ = fs::remove_dir_all(&tmp_ec_dir).await;
+                return Err(StorageError::ChecksumMismatch(format!(
+                    "expected {}, got {}",
+                    expected, computed
+                )));
             }
             (Some(algo), Some(computed))
         } else {
@@ -576,9 +593,13 @@ impl FilesystemStorage {
             part_sizes: None,
             encryption: Some(enc_meta),
         };
-        meta.encryption.as_mut().unwrap().sidecar_mac = String::new();
+        if let Some(em) = meta.encryption.as_mut() {
+            em.sidecar_mac.clear();
+        }
         let mac = compute_sidecar_mac(&dek, &meta)?;
-        meta.encryption.as_mut().unwrap().sidecar_mac = mac;
+        if let Some(em) = meta.encryption.as_mut() {
+            em.sidecar_mac = mac;
+        }
 
         let meta_path = self.meta_path(bucket, key);
         if let Some(parent) = meta_path.parent() {

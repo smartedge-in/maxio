@@ -472,9 +472,42 @@ Pull requests run a `coverage` job that prints a `cargo llvm-cov` summary for li
 
 Integration tests are excluded from these thresholds; they remain the primary S3 compatibility gate.
 
+## Prometheus metrics
+
+Enable with `MAXIO_METRICS_ENABLED=true` (or `--metrics-enabled`). Scrape `GET /metrics` on the main HTTP listener.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAXIO_METRICS_ENABLED` | `false` | Register `/metrics` on the main port |
+| `MAXIO_METRICS_PORT` | `0` | Optional dedicated metrics-only listener (same bind address) |
+
+Exported series include `maxio_http_requests_total{method,status_class}`, request duration sum/count, `maxio_s3_slow_down_total`, `maxio_upload_bytes_total`, `maxio_uptime_seconds`, `maxio_disk_free_bytes`, `maxio_disk_total_bytes`, and `maxio_active_multipart_uploads`.
+
+Example:
+
+```bash
+export MAXIO_METRICS_ENABLED=true
+curl -sS http://127.0.0.1:9000/metrics | head
+```
+
+## Structured audit log
+
+Enable with `MAXIO_AUDIT_LOG=true` (or `--audit-log`). MaxIO emits one JSON object per line on the `maxio_audit` tracing target for mutating requests (`PUT`, `POST`, `DELETE`, `PATCH`) on S3, console (`/api/`), and admin (`/api/admin/v1/`) routes.
+
+Fields: `timestamp`, `source` (`s3` | `console` | `admin`), `action`, `method`, `path`, `bucket`, `key`, `principal` (SigV4 access key when authenticated), `client_ip`, `status`, `outcome` (`success` | `failure`).
+
+Pipe stderr through your log agent or set a JSON filter on `target=maxio_audit`:
+
+```bash
+export MAXIO_AUDIT_LOG=true
+export RUST_LOG=info
+maxio serve --data-dir /data 2>&1 | grep maxio_audit
+```
+
 ## Monitoring recommendations
 
 - Alert on `/readyz` returning 503
+- Scrape `/metrics` when `MAXIO_METRICS_ENABLED` is set (request rate, 5xx ratio, disk free bytes)
 - Monitor free disk space on the data volume; align alerts with `MAXIO_MIN_FREE_DISK_BYTES`
 - Track 507 and `EntityTooLarge` rates as early signs of quota pressure
 - Log shipping via container runtime or sidecar (MaxIO uses structured `tracing` on stderr)

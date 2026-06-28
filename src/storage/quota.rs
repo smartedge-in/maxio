@@ -169,10 +169,10 @@ pub fn quota_io_error(err: StorageError) -> std::io::Error {
 
 pub fn map_read_quota_error(err: std::io::Error) -> StorageError {
     let msg = err.to_string();
-    if let Some(rest) = msg.strip_prefix("maxio:quota:object-too-large:") {
-        if let Ok(max) = rest.parse::<u64>() {
-            return StorageError::ObjectTooLarge { max };
-        }
+    if let Some(rest) = msg.strip_prefix("maxio:quota:object-too-large:")
+        && let Ok(max) = rest.parse::<u64>()
+    {
+        return StorageError::ObjectTooLarge { max };
     }
     if let Some(rest) = msg.strip_prefix("maxio:quota:insufficient-storage:") {
         return StorageError::InsufficientStorage(rest.to_string());

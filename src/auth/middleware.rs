@@ -13,6 +13,7 @@ use crate::error::S3Error;
 use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
 
+use super::principal::AuthPrincipal;
 use super::signature_v4;
 
 pub async fn auth_middleware(
@@ -26,10 +27,12 @@ pub async fn auth_middleware(
 
     tracing::debug!("{} {}", method, uri);
 
-    if method == "PUT" && state.s3_rate_limiter.put_requests.is_enabled() {
-        if let Some(retry_after) = state.s3_rate_limiter.put_requests.try_acquire(&client_ip) {
-            return Err(S3Error::slow_down(retry_after));
-        }
+    if method == "PUT"
+        && state.s3_rate_limiter.put_requests.is_enabled()
+        && let Some(retry_after) = state.s3_rate_limiter.put_requests.try_acquire(&client_ip)
+    {
+        state.metrics.record_slow_down();
+        return Err(S3Error::slow_down(retry_after));
     }
 
     let query = request.uri().query().unwrap_or("").to_string();
@@ -169,6 +172,10 @@ pub async fn auth_middleware(
     }
 
     tracing::debug!("Signature verification OK");
+    let mut request = request;
+    request.extensions_mut().insert(AuthPrincipal {
+        access_key: parsed.access_key.clone(),
+    });
     let response = next.run(request).await;
     tracing::debug!("{} {} -> {}", method, uri, response.status());
     Ok(response)
@@ -295,10 +302,10 @@ fn query_has_forbidden_public_subresource(query: &str) -> bool {
 }
 
 fn auth_failure(state: &AppState, client_ip: &str, err: S3Error) -> S3Error {
-    if state.s3_rate_limiter.auth_failures.is_enabled() {
-        if let Some(retry_after) = state.s3_rate_limiter.auth_failures.try_acquire(client_ip) {
-            return S3Error::slow_down(retry_after);
-        }
+    if state.s3_rate_limiter.auth_failures.is_enabled()
+        && let Some(retry_after) = state.s3_rate_limiter.auth_failures.try_acquire(client_ip)
+    {
+        return S3Error::slow_down(retry_after);
     }
     err
 }
@@ -388,6 +395,10 @@ async fn handle_presigned(
     }
 
     tracing::debug!("Presigned signature verification OK");
+    let mut request = request;
+    request.extensions_mut().insert(AuthPrincipal {
+        access_key: parsed.access_key.clone(),
+    });
     let response = next.run(request).await;
     Ok(response)
 }
