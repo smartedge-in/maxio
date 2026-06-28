@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::config::Config;
-use crate::rate_limit::client_ip_from_request;
+use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
 use crate::storage::keys;
 use crate::storage::quota::disk_space_bytes;
@@ -53,7 +53,7 @@ pub async fn admin_rate_limit_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let ip = client_ip_from_request(&request);
+    let ip = client_ip_from_request(&request, &state.trusted_proxies);
     if let Some(retry) = state.admin_rate_limiter.check_and_increment(&ip) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -332,7 +332,7 @@ async fn housekeeping_run(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> Json<HousekeepingResponse> {
-    let ip = client_ip_from_request(&request);
+    let ip = client_ip_from_request(&request, &state.trusted_proxies);
     tracing::info!(
         principal = %ip,
         action = "admin.housekeeping.run",
@@ -419,6 +419,8 @@ mod tests {
             admin_token: "secret-token".into(),
             admin_rate_max: 120,
             admin_rate_window_secs: 60,
+            trusted_proxies: String::new(),
+            login_rate_limit_redis_url: None,
         }
     }
 

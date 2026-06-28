@@ -120,6 +120,14 @@ pub struct Config {
     /// Sliding window for admin API rate limit, in seconds.
     #[arg(long, env = "MAXIO_ADMIN_RATE_WINDOW_SECS", default_value = "60")]
     pub admin_rate_window_secs: u64,
+
+    /// Comma-separated trusted proxy CIDRs. When the direct peer matches, `X-Forwarded-For` is used for client IP (console login + rate limits).
+    #[arg(long, env = "MAXIO_TRUSTED_PROXIES", default_value = "")]
+    pub trusted_proxies: String,
+
+    /// Optional Redis URL for distributed console login rate limiting across replicas (`redis://host:6379`).
+    #[arg(long, env = "MAXIO_LOGIN_RATE_LIMIT_REDIS_URL")]
+    pub login_rate_limit_redis_url: Option<String>,
 }
 
 #[cfg(test)]

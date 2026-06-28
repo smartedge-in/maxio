@@ -4,11 +4,18 @@ Production deployment checklist for MaxIO: networking, credentials, storage heal
 
 ## Bind address and exposure
 
-MaxIO binds `0.0.0.0` by default (`MAXIO_ADDRESS`). For local development, prefer `127.0.0.1`. In production, run MaxIO on a private network and expose it only through a reverse proxy or ingress controller.
+MaxIO binds **`0.0.0.0` (all interfaces) by default** (`MAXIO_ADDRESS`). That exposes the S3 API and web console on every network interface on the host, which is convenient for containers but risky on machines with a public IP.
+
+**Recommendations:**
+
+- **Local development:** bind to loopback only.
+- **Production:** run on a private network; expose only through a reverse proxy or Kubernetes ingress. Do not publish port 9000 directly to the internet.
 
 ```bash
 MAXIO_ADDRESS=127.0.0.1 maxio --data-dir /data --port 9000
 ```
+
+In Docker/Kubernetes, binding `0.0.0.0` inside the pod is normal when the Service/Ingress controls external access.
 
 ## TLS termination
 
@@ -38,7 +45,7 @@ export MAXIO_SECRET_KEY="..."
 
 Do **not** use `--allow-insecure-dev` or `MAXIO_ALLOW_INSECURE_DEV=true` in production. That flag permits default credentials (`maxioadmin` / `maxioadmin`) and HTTP-only console cookies.
 
-Rotate credentials by updating the environment and restarting MaxIO. Console sessions issued before rotation remain valid until they expire (7 days); plan a maintenance window or force users to re-login.
+Rotate credentials by updating the environment and restarting MaxIO. Console session cookies include a **credential fingerprint** — sessions issued before rotation are rejected immediately after restart with new keys (users must log in again). Tokens still expire after 7 days when credentials are unchanged.
 
 ## SSE-S3 keyring backup
 
@@ -52,12 +59,37 @@ export MAXIO_MASTER_KEY="$(openssl rand -base64 32)"
 
 Store the value in your secrets manager. The on-disk keyring file is still merged for decrypting objects written under older keys.
 
+## Trusted reverse proxies
+
+By default, MaxIO **does not trust** `X-Forwarded-For` — client IP for console login and rate limits comes from the direct TCP peer. Behind a load balancer, configure known proxy CIDRs:
+
+```bash
+export MAXIO_TRUSTED_PROXIES="10.0.0.0/8,192.168.1.0/24"
+```
+
+When the direct peer matches a trusted CIDR, MaxIO walks `X-Forwarded-For` from the right, stripping trusted hops, and uses the leftmost remaining address for login rate limiting and S3/admin per-IP limits. Only list proxies you control; never trust the public internet.
+
+## Console login rate limiting (multi-replica)
+
+The default login rate limiter is **in-memory** (10 attempts per 5 minutes per IP). It applies per MaxIO process — multiple console replicas without a shared store each maintain independent counters.
+
+For horizontally scaled deployments, set a Redis backend:
+
+```bash
+export MAXIO_LOGIN_RATE_LIMIT_REDIS_URL="redis://redis.internal:6379"
+```
+
+When unset, run a single console replica or accept per-replica limits.
+
 ## Health probes
 
 | Endpoint | Purpose | Success | Failure |
 |----------|---------|---------|---------|
 | `/healthz` | Liveness — process is running | `200` | n/a |
+| `/healthz?verbose=1` | Liveness + subsystem JSON (disk, uploads, housekeeping) | `200` | n/a |
 | `/readyz` | Readiness — storage is usable | `200` | `503` |
+
+`/healthz?verbose=1` returns JSON including uptime, `readyz` status, disk free percent, active multipart upload count, and seconds since the last housekeeping sweep. Use it for deeper monitoring without hitting the admin API.
 
 `/readyz` checks that the data directory exists, is writable (write probe), and the SSE-S3 keyring has at least one key. Use `/healthz` for liveness and `/readyz` for readiness in Kubernetes:
 

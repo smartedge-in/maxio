@@ -30,12 +30,12 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 |----|-------|------|--------|-------------|-------------------|
 | ~~P1-01~~ | ~~S3 API rate limiting~~ | security | M | Done — `MAXIO_S3_RATE_AUTH_*` and `MAXIO_S3_RATE_PUT_*`; per-IP sliding window; `429` + `Retry-After` + S3 `SlowDown`. | — |
 | ~~P1-02~~ | ~~Tighten console CSP~~ | ui | M | Done — theme bootstrap moved to `/ui/theme-init.js`; `script-src 'self'` only; `style-src` keeps `'unsafe-inline'` for Svelte (documented). | — |
-| P1-03 | Trusted proxy configuration | security | S | `X-Forwarded-For` is intentionally ignored for console login IP. | `MAXIO_TRUSTED_PROXIES` (CIDR list) enables correct client IP behind known load balancers only. |
-| P1-04 | Secure bind defaults documentation | ops | S | Server binds `0.0.0.0` by default. | README warns about exposure; recommend `127.0.0.1` for dev and ingress-only for prod. |
-| P1-05 | Session invalidation on credential rotate | auth | M | Console HMAC tokens remain valid for 7 days after access/secret change. | Document limitation or add token version keyed to credential hash; force re-login on rotate. |
-| P1-06 | Distributed login rate limit | security | M | In-memory `LoginRateLimiter` does not work across replicas. | Optional Redis/shared store backend or document single-replica console requirement. |
+| ~~P1-03~~ | ~~Trusted proxy configuration~~ | security | S | Done — `MAXIO_TRUSTED_PROXIES` CIDR list; `X-Forwarded-For` honored only from trusted peers for console login + S3/admin rate limits. | — |
+| ~~P1-04~~ | ~~Secure bind defaults documentation~~ | ops | S | Done — README and `docs/operations.md` warn about `0.0.0.0` exposure; recommend `127.0.0.1` for dev and ingress-only for prod. | — |
+| ~~P1-05~~ | ~~Session invalidation on credential rotate~~ | auth | M | Done — console session tokens include credential fingerprint; old tokens rejected after access/secret change. | — |
+| ~~P1-06~~ | ~~Distributed login rate limit~~ | security | M | Done — optional `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` Redis backend; in-memory default documented for single-replica console. | — |
 | ~~P1-07~~ | ~~Presigned URL detection hardening~~ | auth | S | Done — `query_has_presigned_signature()` and case-insensitive `parse_presigned_query`; unit + integration tests. | — |
-| P1-08 | Deep health metrics | ops | M | `/healthz` is liveness-only with no subsystem signal. | Optional `/healthz?verbose=1` or metrics export for housekeeping lag, disk free %, active uploads. |
+| ~~P1-08~~ | ~~Deep health metrics~~ | ops | M | Done — `/healthz?verbose=1` JSON: uptime, readyz, disk free %, active multipart uploads, housekeeping lag. | — |
 
 ---
 

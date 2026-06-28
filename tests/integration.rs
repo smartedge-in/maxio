@@ -6,7 +6,7 @@
 )]
 
 use maxio::config::Config;
-use maxio::server::{self, AppState};
+use maxio::server;
 use maxio::storage::filesystem::FilesystemStorage;
 use maxio::storage::keys::Keyring;
 use maxio::storage::quota::QuotaLimits;
@@ -53,6 +53,8 @@ fn default_test_config(data_dir: String) -> Config {
         admin_token: ADMIN_TOKEN.to_string(),
         admin_rate_max: 120,
         admin_rate_window_secs: 60,
+        trusted_proxies: String::new(),
+        login_rate_limit_redis_url: None,
     }
 }
 
@@ -77,22 +79,11 @@ async fn new_test_storage(
 }
 
 async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> String {
-    let state = AppState {
+    let state = server::new_app_state(
         storage,
-        config: Arc::new(config.clone()),
-        login_rate_limiter: Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
-        s3_rate_limiter: Arc::new(maxio::rate_limit::S3RateLimiter::from_config(
-            config.s3_rate_auth_max,
-            config.s3_rate_auth_window_secs,
-            config.s3_rate_put_max,
-            config.s3_rate_put_window_secs,
-        )),
-        admin_rate_limiter: Arc::new(maxio::rate_limit::AdminRateLimiter::from_config(
-            config.admin_rate_max,
-            config.admin_rate_window_secs,
-        )),
-        started_at: std::time::Instant::now(),
-    };
+        Arc::new(config.clone()),
+        Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
+    );
 
     let app = server::build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -7408,4 +7399,63 @@ async fn test_admin_api_housekeeping_run() {
     assert_eq!(body["stale_after_days"], 7);
     assert!(body["uploads_removed"].as_u64().is_some());
     assert!(body["temp_files_removed"].as_u64().is_some());
+}
+
+#[tokio::test]
+async fn test_healthz_verbose_returns_subsystem_metrics() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = client()
+        .get(format!("{}/healthz?verbose=1", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["readyz"], "ok");
+    assert!(body["uptime_secs"].as_u64().is_some());
+    assert!(body["disk"]["free_percent"].is_number() || body["disk"]["free_percent"].is_null());
+    assert!(body["active_multipart_uploads"].as_u64().is_some());
+    assert_eq!(body["housekeeping"]["interval_secs"], 3600);
+}
+
+#[tokio::test]
+async fn test_trusted_proxy_uses_x_forwarded_for_for_login_rate_limit() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let mut config = default_test_config(data_dir);
+    config.trusted_proxies = "127.0.0.0/8".to_string();
+    let base_url = spawn_test_server(storage, config).await;
+
+    for _ in 0..10 {
+        let resp = client()
+            .post(format!("{}/api/auth/login", base_url))
+            .header("x-forwarded-for", "198.51.100.77")
+            .json(&serde_json::json!({"accessKey": "bad", "secretKey": "bad"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 401);
+    }
+    let resp = client()
+        .post(format!("{}/api/auth/login", base_url))
+        .header("x-forwarded-for", "198.51.100.77")
+        .json(&serde_json::json!({"accessKey": "bad", "secretKey": "bad"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 429);
+
+    // Different forwarded client should not inherit the limit.
+    let resp = client()
+        .post(format!("{}/api/auth/login", base_url))
+        .header("x-forwarded-for", "198.51.100.88")
+        .json(&serde_json::json!({"accessKey": "bad", "secretKey": "bad"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
 }

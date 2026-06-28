@@ -6,7 +6,7 @@ use axum::{
 use chrono::{NaiveDateTime, Utc};
 
 use crate::error::S3Error;
-use crate::rate_limit::client_ip_from_request;
+use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
 
 use super::signature_v4;
@@ -18,7 +18,7 @@ pub async fn auth_middleware(
 ) -> Result<Response, S3Error> {
     let method = request.method().as_str().to_string();
     let uri = request.uri().to_string();
-    let client_ip = client_ip_from_request(&request);
+    let client_ip = client_ip_from_request(&request, &state.trusted_proxies);
 
     tracing::debug!("{} {}", method, uri);
 

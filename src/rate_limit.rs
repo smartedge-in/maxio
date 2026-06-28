@@ -63,12 +63,112 @@ impl SlidingWindowLimiter {
     }
 }
 
-pub fn client_ip_from_request(request: &axum::extract::Request) -> String {
-    request
-        .extensions()
-        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|connect_info| connect_info.0.ip().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+enum LoginRateLimiterBackend {
+    Memory(SlidingWindowLimiter),
+    Redis {
+        manager: redis::aio::ConnectionManager,
+        max: u32,
+        window_secs: u64,
+    },
+}
+
+/// Console login rate limiter (counts every attempt, success or failure).
+///
+/// Uses an in-memory sliding window by default. Set `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL`
+/// for a shared store when running multiple console replicas.
+pub struct LoginRateLimiter {
+    backend: LoginRateLimiterBackend,
+}
+
+impl LoginRateLimiter {
+    const DEFAULT_MAX: u32 = 10;
+    const DEFAULT_WINDOW_SECS: u64 = 300;
+
+    pub fn new() -> Self {
+        Self::in_memory(Self::DEFAULT_MAX, Self::DEFAULT_WINDOW_SECS)
+    }
+
+    pub fn in_memory(max: u32, window_secs: u64) -> Self {
+        Self {
+            backend: LoginRateLimiterBackend::Memory(SlidingWindowLimiter::new(
+                max, window_secs,
+            )),
+        }
+    }
+
+    pub async fn from_config(redis_url: Option<&str>) -> anyhow::Result<Self> {
+        if let Some(url) = redis_url.filter(|s| !s.trim().is_empty()) {
+            let client = redis::Client::open(url.to_string())?;
+            let manager = client.get_connection_manager().await?;
+            tracing::info!("console login rate limiter using Redis backend");
+            return Ok(Self {
+                backend: LoginRateLimiterBackend::Redis {
+                    manager,
+                    max: Self::DEFAULT_MAX,
+                    window_secs: Self::DEFAULT_WINDOW_SECS,
+                },
+            });
+        }
+        Ok(Self::new())
+    }
+
+    /// Returns `Some(retry_after_secs)` if the IP is rate-limited, `None` if allowed.
+    pub async fn check_and_increment(&self, ip: &str) -> Option<u64> {
+        match &self.backend {
+            LoginRateLimiterBackend::Memory(inner) => inner.try_acquire(ip),
+            LoginRateLimiterBackend::Redis {
+                manager,
+                max,
+                window_secs,
+            } => redis_check_and_increment(manager.clone(), ip, *max, *window_secs).await,
+        }
+    }
+}
+
+async fn redis_check_and_increment(
+    mut manager: redis::aio::ConnectionManager,
+    ip: &str,
+    max: u32,
+    window_secs: u64,
+) -> Option<u64> {
+    if max == 0 {
+        return None;
+    }
+    let key = format!("maxio:login:{ip}");
+    let count: u32 = match redis::cmd("INCR")
+        .arg(&key)
+        .query_async(&mut manager)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("redis login rate limit INCR failed: {e}");
+            return None;
+        }
+    };
+    if count == 1 {
+        let _: Result<(), _> = redis::cmd("EXPIRE")
+            .arg(&key)
+            .arg(window_secs)
+            .query_async(&mut manager)
+            .await;
+    }
+    if count > max {
+        let ttl: i64 = redis::cmd("TTL")
+            .arg(&key)
+            .query_async(&mut manager)
+            .await
+            .unwrap_or(1);
+        Some(ttl.max(1) as u64)
+    } else {
+        None
+    }
+}
+
+impl Default for LoginRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug)]
@@ -88,30 +188,6 @@ impl S3RateLimiter {
             auth_failures: SlidingWindowLimiter::new(auth_max, auth_window_secs),
             put_requests: SlidingWindowLimiter::new(put_max, put_window_secs),
         }
-    }
-}
-
-/// Console login rate limiter (counts every attempt, success or failure).
-pub struct LoginRateLimiter {
-    inner: SlidingWindowLimiter,
-}
-
-impl LoginRateLimiter {
-    pub fn new() -> Self {
-        Self {
-            inner: SlidingWindowLimiter::new(10, 300),
-        }
-    }
-
-    /// Returns `Some(retry_after_secs)` if the IP is rate-limited, `None` if allowed.
-    pub fn check_and_increment(&self, ip: &str) -> Option<u64> {
-        self.inner.try_acquire(ip)
-    }
-}
-
-impl Default for LoginRateLimiter {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -163,5 +239,13 @@ mod tests {
         assert!(limiter.try_acquire("b").is_none());
         assert!(limiter.try_acquire("a").is_some());
         assert!(limiter.try_acquire("b").is_some());
+    }
+
+    #[tokio::test]
+    async fn login_limiter_memory_backend_blocks() {
+        let limiter = LoginRateLimiter::in_memory(2, 60);
+        assert!(limiter.check_and_increment("1.2.3.4").await.is_none());
+        assert!(limiter.check_and_increment("1.2.3.4").await.is_none());
+        assert!(limiter.check_and_increment("1.2.3.4").await.is_some());
     }
 }

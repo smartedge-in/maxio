@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- P1 security & reliability: `MAXIO_TRUSTED_PROXIES` for safe `X-Forwarded-For` client IP behind known load balancers (P1-03).
+- P1 security & reliability: console session tokens keyed to credential fingerprint — sessions invalidate immediately when access/secret change (P1-05).
+- P1 security & reliability: optional `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` for distributed console login rate limiting across replicas (P1-06).
+- P1 security & reliability: `/healthz?verbose=1` returns JSON subsystem metrics — disk free %, active multipart uploads, housekeeping lag, readyz (P1-08).
+- Unit and integration tests for trusted proxy, verbose healthz, and session credential invalidation.
+
+### Changed
+
+- P1 security & reliability: README and `docs/operations.md` document bind-address exposure risks and recommend `127.0.0.1` for dev (P1-04).
+
 - Sprint 5 (ops tooling): authenticated admin HTTP API at `/api/admin/v1/*` — Bearer `MAXIO_ADMIN_TOKEN` or Basic access/secret auth, per-IP rate limiting, endpoints for status, info, doctor, buckets, keyring metadata, and on-demand housekeeping (P2-13).
 - Sprint 5 (ops tooling): `maxio-admin` CLI — remote-first commands via admin API; local `doctor --data-dir` and `keyring rotate`; profiles, `--json`, human tables; documented in `docs/operations.md` (P2-12).
 - Admin API integration tests (auth failure, Bearer/Basic success, JSON schema checks).

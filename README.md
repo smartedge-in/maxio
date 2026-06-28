@@ -125,7 +125,7 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | Variable | CLI Flag | Default | Description |
 |---|---|---|---|
 | `MAXIO_PORT` | `--port` | `9000` | Listen port |
-| `MAXIO_ADDRESS` | `--address` | `0.0.0.0` | Bind address |
+| `MAXIO_ADDRESS` | `--address` | `0.0.0.0` | Bind address — **exposes all interfaces by default**; use `127.0.0.1` for local dev and restrict production exposure to ingress/private networks only |
 | `MAXIO_DATA_DIR` | `--data-dir` | `./data` | Storage directory |
 | `MAXIO_ACCESS_KEY` | `--access-key` | `maxioadmin` | Access key (aliases: `MINIO_ROOT_USER`, `MINIO_ACCESS_KEY`) |
 | `MAXIO_SECRET_KEY` | `--secret-key` | `maxioadmin` | Secret key (aliases: `MINIO_ROOT_PASSWORD`, `MINIO_SECRET_KEY`) |
@@ -149,12 +149,15 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | `MAXIO_ADMIN_TOKEN` | `--admin-token` | _(empty)_ | Bearer token for `/api/admin/v1` admin API (empty disables Bearer auth; Basic access/secret still works) |
 | `MAXIO_ADMIN_RATE_MAX` | `--admin-rate-max` | `120` | Max admin API requests per client IP per window (`0` = disabled) |
 | `MAXIO_ADMIN_RATE_WINDOW_SECS` | `--admin-rate-window-secs` | `60` | Sliding window for admin API rate limit (seconds) |
+| `MAXIO_TRUSTED_PROXIES` | `--trusted-proxies` | _(empty)_ | Comma-separated trusted proxy CIDRs; when the direct peer matches, `X-Forwarded-For` is used for client IP (console login + rate limits) |
+| `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` | `--login-rate-limit-redis-url` | _(empty)_ | Optional Redis URL for shared console login rate limiting across replicas (`redis://host:6379`) |
 
 ### Health endpoints
 
 | Path | Behavior |
 |------|----------|
 | `/healthz` | Liveness probe — returns `200` when the process is running |
+| `/healthz?verbose=1` | Liveness with JSON subsystem metrics (disk free %, active multipart uploads, housekeeping lag, readyz status) |
 | `/readyz` | Readiness probe — returns `200` when the data directory is writable and the SSE-S3 keyring is usable; `503` otherwise |
 
 See [docs/operations.md](docs/operations.md) for production deployment, TLS, backups, and Kubernetes examples.

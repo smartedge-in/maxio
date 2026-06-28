@@ -1,8 +1,14 @@
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use axum::Json;
+use serde::Deserialize;
+use serde::Serialize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Instant;
 
 use crate::api::console::console_router;
 use crate::api::cors::cors_middleware;
@@ -10,9 +16,12 @@ use crate::api::router::s3_router;
 use crate::auth::middleware::auth_middleware;
 use crate::config::Config;
 use crate::embedded::ui_handler;
+use crate::proxy::TrustedProxies;
 use crate::rate_limit::{AdminRateLimiter, LoginRateLimiter, S3RateLimiter};
-use std::time::Instant;
 use crate::storage::filesystem::FilesystemStorage;
+use crate::storage::quota::disk_space_bytes;
+
+pub const HOUSEKEEPING_INTERVAL_SECS: u64 = 3600;
 
 /// Content-Security-Policy for all HTTP responses.
 ///
@@ -27,7 +36,9 @@ pub struct AppState {
     pub login_rate_limiter: Arc<LoginRateLimiter>,
     pub s3_rate_limiter: Arc<S3RateLimiter>,
     pub admin_rate_limiter: Arc<AdminRateLimiter>,
+    pub trusted_proxies: Arc<TrustedProxies>,
     pub started_at: Instant,
+    pub last_housekeeping_at: Arc<AtomicI64>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -65,8 +76,83 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn healthz() -> StatusCode {
-    StatusCode::OK
+#[derive(Deserialize)]
+struct HealthQuery {
+    verbose: Option<u8>,
+}
+
+#[derive(Serialize)]
+struct VerboseHealth {
+    status: &'static str,
+    uptime_secs: u64,
+    readyz: &'static str,
+    disk: DiskHealth,
+    active_multipart_uploads: u64,
+    housekeeping: HousekeepingHealth,
+}
+
+#[derive(Serialize)]
+struct DiskHealth {
+    total_bytes: Option<u64>,
+    free_bytes: Option<u64>,
+    free_percent: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct HousekeepingHealth {
+    last_run_at: Option<i64>,
+    seconds_since_last_run: Option<i64>,
+    interval_secs: u64,
+}
+
+async fn healthz(
+    State(state): State<AppState>,
+    Query(query): Query<HealthQuery>,
+) -> Response {
+    if query.verbose != Some(1) {
+        return StatusCode::OK.into_response();
+    }
+
+    let readyz = match state.storage.check_readiness().await {
+        Ok(()) => "ok",
+        Err(_) => "unavailable",
+    };
+
+    let (total_bytes, free_bytes) = disk_space_bytes(state.storage.data_root())
+        .map(|(t, f)| (Some(t), Some(f)))
+        .unwrap_or((None, None));
+    let free_percent = match (total_bytes, free_bytes) {
+        (Some(t), Some(f)) if t > 0 => Some((f as f64 / t as f64) * 100.0),
+        _ => None,
+    };
+
+    let last_run = state.last_housekeeping_at.load(Ordering::Relaxed);
+    let now = chrono::Utc::now().timestamp();
+    let seconds_since = if last_run > 0 {
+        Some(now.saturating_sub(last_run))
+    } else {
+        None
+    };
+
+    let active_multipart_uploads = state.storage.count_active_multipart_uploads().await;
+
+    Json(VerboseHealth {
+        status: "ok",
+        uptime_secs: state.started_at.elapsed().as_secs(),
+        readyz,
+        disk: DiskHealth {
+            total_bytes,
+            free_bytes,
+            free_percent,
+        },
+        active_multipart_uploads,
+        housekeeping: HousekeepingHealth {
+            last_run_at: if last_run > 0 { Some(last_run) } else { None },
+            seconds_since_last_run: seconds_since,
+            interval_secs: HOUSEKEEPING_INTERVAL_SECS,
+        },
+    })
+    .into_response()
 }
 
 async fn readyz(State(state): State<AppState>) -> StatusCode {
@@ -115,4 +201,29 @@ async fn security_headers_middleware(
             "camera=(), microphone=(), geolocation=()",
         ));
     response
+}
+
+pub fn new_app_state(
+    storage: Arc<FilesystemStorage>,
+    config: Arc<Config>,
+    login_rate_limiter: Arc<LoginRateLimiter>,
+) -> AppState {
+    AppState {
+        storage,
+        config: config.clone(),
+        login_rate_limiter,
+        s3_rate_limiter: Arc::new(S3RateLimiter::from_config(
+            config.s3_rate_auth_max,
+            config.s3_rate_auth_window_secs,
+            config.s3_rate_put_max,
+            config.s3_rate_put_window_secs,
+        )),
+        admin_rate_limiter: Arc::new(AdminRateLimiter::from_config(
+            config.admin_rate_max,
+            config.admin_rate_window_secs,
+        )),
+        trusted_proxies: Arc::new(TrustedProxies::parse(&config.trusted_proxies)),
+        started_at: Instant::now(),
+        last_housekeeping_at: Arc::new(AtomicI64::new(0)),
+    }
 }

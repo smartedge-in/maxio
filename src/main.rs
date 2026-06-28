@@ -20,6 +20,7 @@ mod auth;
 mod config;
 mod embedded;
 mod error;
+mod proxy;
 mod rate_limit;
 mod server;
 mod storage;
@@ -167,34 +168,31 @@ async fn main() -> anyhow::Result<()> {
 
     storage::provision_default_buckets(&storage, &config.default_buckets, &config.region).await;
 
-    let state = server::AppState {
-        storage: Arc::new(storage),
-        config: Arc::new(config.clone()),
-        login_rate_limiter: Arc::new(rate_limit::LoginRateLimiter::new()),
-        s3_rate_limiter: Arc::new(rate_limit::S3RateLimiter::from_config(
-            config.s3_rate_auth_max,
-            config.s3_rate_auth_window_secs,
-            config.s3_rate_put_max,
-            config.s3_rate_put_window_secs,
-        )),
-        admin_rate_limiter: Arc::new(rate_limit::AdminRateLimiter::from_config(
-            config.admin_rate_max,
-            config.admin_rate_window_secs,
-        )),
-        started_at: std::time::Instant::now(),
-    };
+    let login_rate_limiter = Arc::new(
+        rate_limit::LoginRateLimiter::from_config(config.login_rate_limit_redis_url.as_deref())
+            .await?,
+    );
+    let state = server::new_app_state(
+        Arc::new(storage),
+        Arc::new(config.clone()),
+        login_rate_limiter,
+    );
 
     // Background housekeeping: abort stale multipart uploads (>7 days) and
     // remove leftover temp files from crashed writes. Runs once at startup,
     // then hourly.
     {
         let storage = state.storage.clone();
+        let last_run = state.last_housekeeping_at.clone();
         tokio::spawn(async move {
             let stale_after = chrono::Duration::days(7);
-            let mut ticker = tokio::time::interval(Duration::from_secs(3600));
+            let mut ticker = tokio::time::interval(Duration::from_secs(
+                server::HOUSEKEEPING_INTERVAL_SECS,
+            ));
             loop {
                 ticker.tick().await;
                 let (uploads, temps) = storage.housekeeping_sweep(stale_after).await;
+                last_run.store(chrono::Utc::now().timestamp(), std::sync::atomic::Ordering::Relaxed);
                 if uploads > 0 || temps > 0 {
                     tracing::info!(
                         "housekeeping: removed {} stale upload(s), {} temp file(s)",

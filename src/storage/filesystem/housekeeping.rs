@@ -68,6 +68,31 @@ impl FilesystemStorage {
         (uploads_removed, temp_removed)
     }
 
+    /// Count in-progress multipart uploads across all buckets.
+    pub async fn count_active_multipart_uploads(&self) -> u64 {
+        let mut total = 0u64;
+        let mut bucket_entries = match fs::read_dir(&self.buckets_dir).await {
+            Ok(e) => e,
+            Err(_) => return 0,
+        };
+        while let Ok(Some(bucket_entry)) = bucket_entries.next_entry().await {
+            if !matches!(bucket_entry.file_type().await, Ok(ft) if ft.is_dir()) {
+                continue;
+            }
+            let uploads_dir = bucket_entry.path().join(".uploads");
+            let mut uploads = match fs::read_dir(&uploads_dir).await {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            while let Ok(Some(up)) = uploads.next_entry().await {
+                if matches!(up.file_type().await, Ok(ft) if ft.is_dir()) {
+                    total += 1;
+                }
+            }
+        }
+        total
+    }
+
     /// Remove `.maxio-tmp-*` entries directly inside `dir`.
     pub(super) async fn sweep_temp_files(dir: &Path) -> u64 {
         let mut removed = 0u64;

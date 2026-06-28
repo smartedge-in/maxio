@@ -22,26 +22,43 @@ type HmacSha256 = Hmac<Sha256>;
 const COOKIE_NAME: &str = "maxio_session";
 const TOKEN_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60; // 7 days
 
-fn extract_client_ip(headers: &HeaderMap, addr: &SocketAddr) -> String {
-    let _ = headers;
-    // Public console: do not trust spoofable X-Forwarded-For unless/until a
-    // trusted-proxy allowlist is configured. Use the connected peer IP.
-    addr.ip().to_string()
+fn credential_fingerprint(access_key: &str, secret_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(access_key.as_bytes());
+    hasher.update(b":");
+    hasher.update(secret_key.as_bytes());
+    hex::encode(&hasher.finalize()[..4])
 }
 
 fn generate_token(access_key: &str, secret_key: &str, issued_at: i64) -> String {
     let issued_hex = format!("{:x}", issued_at);
+    let fp = credential_fingerprint(access_key, secret_key);
     let mut mac =
         HmacSha256::new_from_slice(secret_key.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(format!("{}:{}", access_key, issued_hex).as_bytes());
+    mac.update(format!("{}:{}:{}", access_key, issued_hex, fp).as_bytes());
     let sig = hex::encode(mac.finalize().into_bytes());
-    format!("{}.{}", issued_hex, sig)
+    format!("{}.{}.{}", issued_hex, sig, fp)
 }
 
 fn verify_token(token: &str, access_key: &str, secret_key: &str) -> bool {
-    let Some((issued_hex, signature)) = token.split_once('.') else {
+    let mut parts = token.split('.');
+    let Some(issued_hex) = parts.next() else {
         return false;
     };
+    let Some(signature) = parts.next() else {
+        return false;
+    };
+    let Some(fp) = parts.next() else {
+        return false;
+    };
+    if parts.next().is_some() {
+        return false;
+    }
+
+    let current_fp = credential_fingerprint(access_key, secret_key);
+    if !constant_time_eq(fp.as_bytes(), current_fp.as_bytes()) {
+        return false;
+    }
 
     let Ok(issued_at) = i64::from_str_radix(issued_hex, 16) else {
         return false;
@@ -54,7 +71,7 @@ fn verify_token(token: &str, access_key: &str, secret_key: &str) -> bool {
 
     let mut mac =
         HmacSha256::new_from_slice(secret_key.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(format!("{}:{}", access_key, issued_hex).as_bytes());
+    mac.update(format!("{}:{}:{}", access_key, issued_hex, fp).as_bytes());
     let expected = hex::encode(mac.finalize().into_bytes());
 
     constant_time_eq(signature.as_bytes(), expected.as_bytes())
@@ -125,9 +142,9 @@ pub async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Response {
-    let ip = extract_client_ip(&headers, &addr);
+    let ip = state.trusted_proxies.client_ip(&headers, &addr);
 
-    if let Some(retry_after) = state.login_rate_limiter.check_and_increment(&ip) {
+    if let Some(retry_after) = state.login_rate_limiter.check_and_increment(&ip).await {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             [(axum::http::header::RETRY_AFTER, retry_after.to_string())],
@@ -1250,5 +1267,22 @@ mod tests {
 
         let objects = storage.list_objects("bucket", "folder/").await.unwrap();
         assert!(objects.is_empty());
+    }
+
+    #[test]
+    fn session_token_invalidates_when_credentials_change() {
+        let now = chrono::Utc::now().timestamp();
+        let token = generate_token("old-key", "old-secret", now);
+        assert!(verify_token(&token, "old-key", "old-secret"));
+        assert!(!verify_token(&token, "new-key", "old-secret"));
+        assert!(!verify_token(&token, "old-key", "new-secret"));
+    }
+
+    #[test]
+    fn legacy_two_part_tokens_are_rejected() {
+        let now = chrono::Utc::now().timestamp();
+        let issued_hex = format!("{:x}", now);
+        let legacy = format!("{issued_hex}.deadbeef");
+        assert!(!verify_token(&legacy, "maxioadmin", "maxioadmin"));
     }
 }
