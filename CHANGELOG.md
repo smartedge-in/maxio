@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sprint 1 (stabilize): case-insensitive presigned URL detection (`query_has_presigned_signature`, `parse_presigned_query`); regression tests in `signature_v4` and integration suite.
+- CI: `bun run check` (svelte-check) in pull-request checks before frontend build (P2-03).
 - `maxio-admin` workspace crate — remote-first ops CLI scaffolding (`status`, `info`, `doctor`, `buckets`, `housekeeping`, `keyring`) with profile config and stub responses until P2-13 admin API is implemented.
 - Server stub routes at `/api/admin/v1/*` returning `501 Not Implemented` (P2-13 placeholder).
 

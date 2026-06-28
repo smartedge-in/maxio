@@ -34,7 +34,7 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | P1-04 | Secure bind defaults documentation | ops | S | Server binds `0.0.0.0` by default. | README warns about exposure; recommend `127.0.0.1` for dev and ingress-only for prod. |
 | P1-05 | Session invalidation on credential rotate | auth | M | Console HMAC tokens remain valid for 7 days after access/secret change. | Document limitation or add token version keyed to credential hash; force re-login on rotate. |
 | P1-06 | Distributed login rate limit | security | M | In-memory `LoginRateLimiter` does not work across replicas. | Optional Redis/shared store backend or document single-replica console requirement. |
-| P1-07 | Presigned URL detection hardening | auth | S | Presigned detection uses case-sensitive `query.contains("X-Amz-Signature=")`. | Parse query keys case-insensitively per AWS conventions; add regression test. |
+| ~~P1-07~~ | ~~Presigned URL detection hardening~~ | auth | S | Done — `query_has_presigned_signature()` and case-insensitive `parse_presigned_query`; unit + integration tests. | — |
 | P1-08 | Deep health metrics | ops | M | `/healthz` is liveness-only with no subsystem signal. | Optional `/healthz?verbose=1` or metrics export for housekeeping lag, disk free %, active uploads. |
 
 ---
@@ -64,7 +64,7 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 |----|-------|------|--------|-------------|-------------------|
 | P2-01 | Split `filesystem.rs` | storage | L | ~3,800-line monolith complicates review and change safety. | Extract modules: `object_io`, `multipart`, `encryption_io`, `listing`, `housekeeping`; no behavior change; tests pass. |
 | P2-02 | Reduce crate-level clippy allows | storage | M | Broad `#![allow(clippy::...)]` in `main.rs` / `lib.rs` hides issues. | Remove allows file-by-file; fix or locally allow with justification. |
-| P2-03 | Add `bun run check` to CI | ci | S | `svelte-check` exists in `ui/package.json` but CI only builds. | CI runs `bun run check` in `ui/`; TypeScript/Svelte errors block merge. |
+| ~~P2-03~~ | ~~Add `bun run check` to CI~~ | ci | S | Done — `bun run check` step in `.github/workflows/ci.yml` before frontend build. | — |
 | P2-04 | Unit test coverage report in CI | ci | S | Coverage is unknown; integration tests dominate. | `cargo llvm-cov` or `cargo tarpaulin` job publishes summary; set minimum threshold for `storage/crypto`, `auth`. |
 | P2-05 | Replace `unwrap()` in hot paths | storage | M | `unwrap`/`expect` in auth and storage error paths. | Audit and convert to `?` + proper `S3Error`/`StorageError` where user-visible. |
 | P2-06 | Console API integration tests | api | M | Console routes lack dedicated integration coverage vs S3. | Tests for login, rate limit, presign, bucket settings JSON API. |
@@ -126,7 +126,7 @@ Reference only — no backlog action unless regressions appear.
 
 ## Suggested sprint order
 
-**Sprint 1 (stabilize):** P0-01, P0-02, P2-03, P1-07  
+**Sprint 1 (stabilize):** ~~P0-01~~, ~~P0-02~~, ~~P2-03~~, ~~P1-07~~ ✓
 **Sprint 2 (harden):** P0-03, P1-01, P1-02, P0-04  
 **Sprint 3 (scale maintainability):** P2-01, P2-04, P0-05, P2-06  
 **Sprint 4 (erasure coding hardening):** P1-13, P2-11, P2-09, P2-10, P1-12  

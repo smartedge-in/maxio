@@ -38,6 +38,10 @@ jobs:
       - name: test
         run: cargo test --workspace --all-features
 
+      - name: Frontend typecheck
+        run: bun run check
+        working-directory: ui
+
       - name: Build frontend
         run: bun run build
         working-directory: ui

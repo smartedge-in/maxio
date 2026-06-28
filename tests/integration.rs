@@ -2268,6 +2268,32 @@ async fn test_presigned_get_object() {
 }
 
 #[tokio::test]
+async fn test_presigned_get_object_lowercase_signature_param() {
+    let (base_url, _tmp) = start_server().await;
+
+    s3_request("PUT", &format!("{}/presign-case-bucket", base_url), vec![]).await;
+    let body = b"case insensitive presign";
+    s3_request(
+        "PUT",
+        &format!("{}/presign-case-bucket/obj.txt", base_url),
+        body.to_vec(),
+    )
+    .await;
+
+    let presigned = presign_url(&base_url, "GET", "/presign-case-bucket/obj.txt", 300);
+    let lowercase = presigned.replace("X-Amz-Signature=", "x-amz-signature=");
+    assert_ne!(presigned, lowercase);
+
+    let resp = client().get(&lowercase).send().await.unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "lowercase x-amz-signature must be detected as presigned URL"
+    );
+    assert_eq!(resp.bytes().await.unwrap().as_ref(), body);
+}
+
+#[tokio::test]
 async fn test_presigned_put_object() {
     let (base_url, _tmp) = start_server().await;
 

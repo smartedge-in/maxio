@@ -92,6 +92,25 @@ pub fn verify_signature(
     constant_time_eq(computed.as_bytes(), parsed.signature.as_bytes())
 }
 
+/// True when the query string includes an `X-Amz-Signature` parameter (any casing).
+pub fn query_has_presigned_signature(query: &str) -> bool {
+    query.split('&').filter(|s| !s.is_empty()).any(|pair| {
+        pair.splitn(2, '=')
+            .next()
+            .is_some_and(|key| query_param_key_eq(key, "X-Amz-Signature"))
+    })
+}
+
+fn query_param_key_eq(key: &str, expected: &str) -> bool {
+    key.eq_ignore_ascii_case(expected)
+}
+
+fn is_signature_query_pair(pair: &str) -> bool {
+    pair.splitn(2, '=')
+        .next()
+        .is_some_and(|key| query_param_key_eq(key, "X-Amz-Signature"))
+}
+
 /// Parse presigned URL query parameters into auth components.
 /// Returns (ParsedAuth, timestamp, expires_seconds).
 pub fn parse_presigned_query(query: &str) -> Result<(ParsedAuth, String, u64), &'static str> {
@@ -106,14 +125,18 @@ pub fn parse_presigned_query(query: &str) -> Result<(ParsedAuth, String, u64), &
         let mut parts = pair.splitn(2, '=');
         let key = parts.next().unwrap_or("");
         let val = parts.next().unwrap_or("");
-        match key {
-            "X-Amz-Algorithm" => algorithm = Some(val),
-            "X-Amz-Credential" => credential = Some(val),
-            "X-Amz-Date" => date = Some(val),
-            "X-Amz-Expires" => expires = Some(val),
-            "X-Amz-SignedHeaders" => signed_headers = Some(val),
-            "X-Amz-Signature" => signature = Some(val),
-            _ => {}
+        if query_param_key_eq(key, "X-Amz-Algorithm") {
+            algorithm = Some(val);
+        } else if query_param_key_eq(key, "X-Amz-Credential") {
+            credential = Some(val);
+        } else if query_param_key_eq(key, "X-Amz-Date") {
+            date = Some(val);
+        } else if query_param_key_eq(key, "X-Amz-Expires") {
+            expires = Some(val);
+        } else if query_param_key_eq(key, "X-Amz-SignedHeaders") {
+            signed_headers = Some(val);
+        } else if query_param_key_eq(key, "X-Amz-Signature") {
+            signature = Some(val);
         }
     }
 
@@ -163,10 +186,10 @@ pub fn verify_presigned_signature(
     timestamp: &str,
     secret_key: &str,
 ) -> bool {
-    // Build canonical query string excluding X-Amz-Signature
+    // Build canonical query string excluding X-Amz-Signature (any parameter name casing).
     let filtered_qs: String = query_string
         .split('&')
-        .filter(|pair| !pair.starts_with("X-Amz-Signature="))
+        .filter(|pair| !is_signature_query_pair(pair))
         .collect::<Vec<_>>()
         .join("&");
 
@@ -337,4 +360,51 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= x ^ y;
     }
     diff == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_presigned_signature_param_case_insensitively() {
+        assert!(query_has_presigned_signature(
+            "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123"
+        ));
+        assert!(query_has_presigned_signature(
+            "x-amz-algorithm=AWS4-HMAC-SHA256&x-amz-signature=abc123"
+        ));
+        assert!(query_has_presigned_signature("X-AMZ-SIGNATURE=deadbeef"));
+        assert!(!query_has_presigned_signature(
+            "X-Amz-Algorithm=AWS4-HMAC-SHA256&prefix=X-Amz-Signature=not-a-param"
+        ));
+        assert!(!query_has_presigned_signature(""));
+    }
+
+    #[test]
+    fn parse_presigned_query_accepts_mixed_case_keys() {
+        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256\
+            &x-amz-credential=maxioadmin%2F20260101%2Fus-east-1%2Fs3%2Faws4_request\
+            &X-Amz-Date=20260101T000000Z\
+            &x-amz-expires=300\
+            &X-Amz-SignedHeaders=host\
+            &x-amz-signature=abcdef0123456789";
+        let (parsed, ts, expires) = parse_presigned_query(query).unwrap();
+        assert_eq!(parsed.access_key, "maxioadmin");
+        assert_eq!(parsed.region, "us-east-1");
+        assert_eq!(parsed.signature, "abcdef0123456789");
+        assert_eq!(ts, "20260101T000000Z");
+        assert_eq!(expires, 300);
+    }
+
+    #[test]
+    fn signature_filter_ignores_pair_name_casing() {
+        let qs = "X-Amz-Date=20260101T000000Z&x-amz-signature=abc&X-Amz-Expires=60";
+        let filtered: String = qs
+            .split('&')
+            .filter(|pair| !is_signature_query_pair(pair))
+            .collect::<Vec<_>>()
+            .join("&");
+        assert_eq!(filtered, "X-Amz-Date=20260101T000000Z&X-Amz-Expires=60");
+    }
 }
