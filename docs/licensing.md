@@ -36,10 +36,9 @@ runtime behavior. These are documented and ignored in `deny.toml`:
 | Advisory | Crate | Rationale |
 |----------|-------|-----------|
 | `RUSTSEC-2024-0384` | `instant` | Unmaintained; pulled in by `reed-solomon-erasure` → `parking_lot` 0.11 (Redox-only path) |
-| `RUSTSEC-2026-0097` | `rand` 0.10 | Unsound only when a custom `log` logger is installed; MaxIO does not register one |
 
-`cargo audit` prints these as **allowed warnings** (exit 0). Upgrade `rand` to ≥ 0.10.1 when
-the workspace dependency graph permits.
+`cargo audit` prints ignored advisories as **allowed warnings** (exit 0). Direct dependency
+`rand` is pinned to ≥ 0.10.1 (fixes `RUSTSEC-2026-0097` / GHSA-cq8v-f236-94qc).
 
 ### Recent dependency changes
 

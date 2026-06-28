@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Bumped direct dependency `rand` from `0.10.0` to `0.10.1` (fixes `RUSTSEC-2026-0097` / GHSA-cq8v-f236-94qc reported by Trivy and `cargo audit`).
 - Licensing: replaced MPL-2.0 `dirs` in `maxio-admin` with XDG/HOME config-dir resolution; switched `reqwest` from `rustls-tls` to `native-tls-vendored`; embedded UI fonts changed from OFL Geist to MIT Inter + JetBrains Mono; CI enforces permissive Rust licenses via `cargo-deny` (`deny.toml`, `docs/licensing.md`).
 - Three review/refactor cycles on P1 S3 code: shared virtual-host helpers, auth public-bypass constants, integration test helpers, expanded unit/integration tests, and ≥80% CI coverage floors on `virtual_host`, `credentials`, and `policy`.
 - P1 security & reliability: README and `docs/operations.md` document bind-address exposure risks and recommend `127.0.0.1` for dev (P1-04).

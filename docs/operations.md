@@ -457,10 +457,9 @@ make release
 
 ### Security scan notes
 
-Trivy may report a **LOW** `rand` advisory (`GHSA-cq8v-f236-94qc`, fixed in 0.10.1) and
-**MEDIUM** Dockerfile hints (`DS-0013`: prefer `WORKDIR` over `RUN cd …`). These do not fail
-`make ci` by default. See `docs/licensing.md` for the matching `cargo audit` / `cargo-deny`
-advisory policy.
+Trivy may report **MEDIUM** Dockerfile hints (`DS-0013`: prefer `WORKDIR` over `RUN cd …`).
+These do not fail `make ci` by default. See `docs/licensing.md` for the `cargo audit` /
+`cargo-deny` advisory policy.
 
 ## CI coverage
 
