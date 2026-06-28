@@ -1,3 +1,5 @@
+use std::sync::{Mutex, OnceLock};
+
 use axum::extract::State;
 use axum::http::{Method, Uri};
 use axum::response::Response;
@@ -7,6 +9,24 @@ use serde::Serialize;
 use crate::auth::principal::AuthPrincipal;
 use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
+
+static AUDIT_CAPTURE: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+/// Enables in-memory audit capture for integration tests. Returns the shared buffer.
+#[allow(dead_code)]
+pub fn enable_audit_capture() -> &'static Mutex<Vec<String>> {
+    AUDIT_CAPTURE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Drains captured audit JSON lines (test helper).
+#[allow(dead_code)]
+pub fn drain_audit_capture() -> Vec<String> {
+    let Some(lock) = AUDIT_CAPTURE.get() else {
+        return Vec::new();
+    };
+    let mut lines = lock.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *lines)
+}
 
 /// Structured audit record for mutating API actions (JSON log line).
 #[derive(Debug, Serialize)]
@@ -67,6 +87,11 @@ pub async fn audit_middleware(
     };
 
     if let Ok(line) = serde_json::to_string(&record) {
+        if let Some(lock) = AUDIT_CAPTURE.get()
+            && let Ok(mut lines) = lock.lock()
+        {
+            lines.push(line.clone());
+        }
         tracing::info!(target: "maxio_audit", "{line}");
     }
 
@@ -153,5 +178,27 @@ mod tests {
     fn mutating_methods_only() {
         assert!(is_mutating(&Method::DELETE));
         assert!(!is_mutating(&Method::GET));
+    }
+
+    #[test]
+    fn audit_record_serializes_required_fields() {
+        let record = AuditRecord {
+            timestamp: "2026-06-28T12:00:00Z".into(),
+            source: "s3",
+            action: "s3:PUT /photos/cat.jpg".into(),
+            method: "PUT".into(),
+            path: "/photos/cat.jpg".into(),
+            bucket: Some("photos".into()),
+            key: Some("cat.jpg".into()),
+            principal: "maxioadmin".into(),
+            client_ip: "127.0.0.1".into(),
+            status: 200,
+            outcome: "success",
+        };
+        let json: serde_json::Value = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["source"], "s3");
+        assert_eq!(json["principal"], "maxioadmin");
+        assert_eq!(json["bucket"], "photos");
+        assert_eq!(json["outcome"], "success");
     }
 }

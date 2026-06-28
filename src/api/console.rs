@@ -13,6 +13,7 @@ use futures::TryStreamExt;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
+use crate::audit::audit_middleware;
 use crate::auth::signature_v4;
 use crate::server::AppState;
 use crate::storage::filesystem::FilesystemStorage;
@@ -1135,6 +1136,10 @@ pub fn console_router(state: AppState) -> Router<AppState> {
 
     let protected = protected_limited
         .merge(protected_streaming)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            audit_middleware,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             console_csrf_middleware,

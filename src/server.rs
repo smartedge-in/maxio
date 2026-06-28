@@ -50,10 +50,15 @@ pub struct AppState {
 
 pub fn build_router(state: AppState) -> Router {
     // CORS outermost so OPTIONS preflight is answered before SigV4 auth.
+    // Audit runs after auth on each route group so `AuthPrincipal` is populated.
     let s3_routes = s3_router()
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             virtual_host_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            audit_middleware,
         ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -65,6 +70,10 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     let admin_routes = crate::api::admin::router()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            audit_middleware,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::api::admin::admin_rate_limit_middleware,
@@ -89,10 +98,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ui/", get(ui_handler))
         .route("/ui/{*path}", get(ui_handler))
         .merge(s3_routes)
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            audit_middleware,
-        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             metrics_middleware,

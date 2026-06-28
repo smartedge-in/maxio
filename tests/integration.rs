@@ -7873,3 +7873,176 @@ async fn test_metrics_endpoint_disabled_by_default() {
     // Without MAXIO_METRICS_ENABLED, /metrics is handled as an S3 bucket path (auth required).
     assert_eq!(resp.status(), 403);
 }
+
+#[tokio::test]
+async fn test_metrics_records_upload_bytes() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let mut config = default_test_config(data_dir);
+    config.metrics_enabled = true;
+    let base_url = spawn_test_server(storage, config).await;
+
+    s3_request(
+        "PUT",
+        &format!("{base_url}/audit-metrics-bucket"),
+        Vec::new(),
+    )
+    .await;
+
+    let body = b"metrics-upload-payload";
+    let resp = s3_request(
+        "PUT",
+        &format!("{base_url}/audit-metrics-bucket/object.bin"),
+        body.to_vec(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+
+    let client = reqwest::Client::new();
+    let metrics = client
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains(&format!("maxio_upload_bytes_total {}", body.len())),
+        "expected upload byte counter, got:\n{metrics}"
+    );
+}
+
+#[tokio::test]
+async fn test_metrics_dedicated_port() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let mut config = default_test_config(data_dir);
+    config.metrics_enabled = true;
+
+    let main_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let main_addr = main_listener.local_addr().unwrap();
+    config.port = main_addr.port();
+
+    let metrics_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let metrics_addr = metrics_listener.local_addr().unwrap();
+    config.metrics_port = metrics_addr.port();
+
+    let credentials = Arc::new(
+        maxio::auth::credentials::CredentialStore::load(&config.data_dir, &config)
+            .await
+            .unwrap(),
+    );
+    let state = server::new_app_state(
+        storage,
+        Arc::new(config.clone()),
+        Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
+        credentials,
+        Some(main_addr.port()),
+    );
+
+    let main_app = server::build_router(state.clone());
+    let metrics_app = server::metrics_router(state);
+
+    tokio::spawn(async move {
+        axum::serve(
+            main_listener,
+            main_app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    tokio::spawn(async move {
+        axum::serve(metrics_listener, metrics_app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("http://{metrics_addr}/metrics"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("maxio_uptime_seconds"));
+}
+
+#[tokio::test]
+async fn test_audit_log_captures_s3_principal_and_object() {
+    maxio::audit::enable_audit_capture();
+    let _ = maxio::audit::drain_audit_capture();
+
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let mut config = default_test_config(data_dir);
+    config.audit_log = true;
+    let base_url = spawn_test_server(storage, config).await;
+
+    s3_request("PUT", &format!("{base_url}/audit-bucket"), Vec::new()).await;
+    let _ = maxio::audit::drain_audit_capture();
+
+    let resp = s3_request(
+        "PUT",
+        &format!("{base_url}/audit-bucket/tracked.txt"),
+        b"audit-body".to_vec(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+
+    let lines = maxio::audit::drain_audit_capture();
+    assert_eq!(lines.len(), 1, "expected one object PUT audit line");
+    let record: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+    assert_eq!(record["source"], "s3");
+    assert_eq!(record["principal"], ACCESS_KEY);
+    assert_eq!(record["bucket"], "audit-bucket");
+    assert_eq!(record["key"], "tracked.txt");
+    assert_eq!(record["outcome"], "success");
+    assert_eq!(record["status"], 200);
+}
+
+#[tokio::test]
+async fn test_audit_log_skips_get_requests() {
+    maxio::audit::enable_audit_capture();
+    let _ = maxio::audit::drain_audit_capture();
+
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let mut config = default_test_config(data_dir);
+    config.audit_log = true;
+    let base_url = spawn_test_server(storage, config).await;
+
+    s3_request("PUT", &format!("{base_url}/audit-get-bucket"), Vec::new()).await;
+
+    let put = s3_request(
+        "PUT",
+        &format!("{base_url}/audit-get-bucket/obj.txt"),
+        b"x".to_vec(),
+    )
+    .await;
+    assert_eq!(put.status(), 200);
+    let _ = maxio::audit::drain_audit_capture();
+
+    let get = s3_request(
+        "GET",
+        &format!("{base_url}/audit-get-bucket/obj.txt"),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(get.status(), 200);
+
+    let lines = maxio::audit::drain_audit_capture();
+    assert!(
+        lines.is_empty(),
+        "GET requests must not emit audit records, got: {lines:?}"
+    );
+}

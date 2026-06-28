@@ -10,6 +10,7 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::auth::principal::AuthPrincipal;
 use crate::config::Config;
 use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
@@ -35,7 +36,9 @@ pub async fn admin_auth_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    if !verify_admin_auth(&state.config, &state.credentials, request.headers()) {
+    let Some(principal) =
+        admin_principal(&state.config, &state.credentials, request.headers())
+    else {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({
@@ -44,7 +47,11 @@ pub async fn admin_auth_middleware(
             })),
         )
             .into_response();
-    }
+    };
+    let mut request = request;
+    request.extensions_mut().insert(AuthPrincipal {
+        access_key: principal,
+    });
     next.run(request).await
 }
 
@@ -69,23 +76,21 @@ pub async fn admin_rate_limit_middleware(
     next.run(request).await
 }
 
-fn verify_admin_auth(
+/// Returns the audit principal when admin auth succeeds.
+fn admin_principal(
     config: &Config,
     credentials: &crate::auth::credentials::CredentialStore,
     headers: &HeaderMap,
-) -> bool {
-    let Some(auth) = headers
+) -> Option<String> {
+    let auth = headers
         .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-    else {
-        return false;
-    };
+        .and_then(|v| v.to_str().ok())?;
 
     if let Some(token) = auth.strip_prefix("Bearer ")
         && !config.admin_token.is_empty()
         && token == config.admin_token
     {
-        return true;
+        return Some("admin:bearer".into());
     }
 
     if let Some(encoded) = auth.strip_prefix("Basic ")
@@ -94,12 +99,17 @@ fn verify_admin_auth(
         && let Some((user, pass)) = creds.split_once(':')
     {
         if let Some(cred) = credentials.lookup(user) {
-            return pass == cred.secret_key;
+            if pass == cred.secret_key {
+                return Some(user.to_string());
+            }
+            return None;
         }
-        return user == config.access_key && pass == config.secret_key;
+        if user == config.access_key && pass == config.secret_key {
+            return Some(user.to_string());
+        }
     }
 
-    false
+    None
 }
 
 #[derive(Serialize)]
@@ -453,41 +463,46 @@ mod tests {
     #[test]
     fn accepts_matching_bearer_token() {
         let config = test_config();
-        assert!(verify_admin_auth(
-            &config,
-            &test_credentials(&config),
-            &headers_with("Bearer secret-token")
-        ));
+        assert_eq!(
+            admin_principal(
+                &config,
+                &test_credentials(&config),
+                &headers_with("Bearer secret-token")
+            )
+            .as_deref(),
+            Some("admin:bearer")
+        );
     }
 
     #[test]
     fn rejects_wrong_bearer_token() {
         let config = test_config();
-        assert!(!verify_admin_auth(
+        assert!(admin_principal(
             &config,
             &test_credentials(&config),
             &headers_with("Bearer wrong-token")
-        ));
+        )
+        .is_none());
     }
 
     #[test]
     fn accepts_basic_access_secret() {
         let config = test_config();
         let encoded = B64.encode("adminuser:adminpass");
-        assert!(verify_admin_auth(
-            &config,
-            &test_credentials(&config),
-            &headers_with(&format!("Basic {encoded}"))
-        ));
+        assert_eq!(
+            admin_principal(
+                &config,
+                &test_credentials(&config),
+                &headers_with(&format!("Basic {encoded}"))
+            )
+            .as_deref(),
+            Some("adminuser")
+        );
     }
 
     #[test]
     fn rejects_missing_auth() {
         let config = test_config();
-        assert!(!verify_admin_auth(
-            &config,
-            &test_credentials(&config),
-            &HeaderMap::new()
-        ));
+        assert!(admin_principal(&config, &test_credentials(&config), &HeaderMap::new()).is_none());
     }
 }

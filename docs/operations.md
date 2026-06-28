@@ -494,7 +494,9 @@ curl -sS http://127.0.0.1:9000/metrics | head
 
 Enable with `MAXIO_AUDIT_LOG=true` (or `--audit-log`). MaxIO emits one JSON object per line on the `maxio_audit` tracing target for mutating requests (`PUT`, `POST`, `DELETE`, `PATCH`) on S3, console (`/api/`), and admin (`/api/admin/v1/`) routes.
 
-Fields: `timestamp`, `source` (`s3` | `console` | `admin`), `action`, `method`, `path`, `bucket`, `key`, `principal` (SigV4 access key when authenticated), `client_ip`, `status`, `outcome` (`success` | `failure`).
+Fields: `timestamp`, `source` (`s3` | `console` | `admin`), `action`, `method`, `path`, `bucket`, `key`, `principal` (SigV4 access key for S3; `admin:bearer` or Basic access key for admin API; `console` for authenticated console routes), `client_ip`, `status`, `outcome` (`success` | `failure`).
+
+Audit middleware runs after route authentication so S3 requests include the verified access key in `principal`.
 
 Pipe stderr through your log agent or set a JSON filter on `target=maxio_audit`:
 
