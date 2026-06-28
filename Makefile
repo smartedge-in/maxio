@@ -13,12 +13,13 @@ MAKEFLAGS     += --no-builtin-rules
 # -----------------------------------------------------------------------------
 # Tooling
 # -----------------------------------------------------------------------------
-CARGO           ?= cargo
+CARGO_HOME      ?= $(HOME)/.cargo
+BUN_INSTALL     ?= $(HOME)/.bun
+export PATH     := $(CARGO_HOME)/bin:$(BUN_INSTALL)/bin:$(PATH)
+CARGO           := $(firstword $(shell command -v cargo 2>/dev/null) $(CARGO_HOME)/bin/cargo)
+RUSTUP          := $(firstword $(shell command -v rustup 2>/dev/null) $(CARGO_HOME)/bin/rustup)
 TRIVY           ?= trivy
 DOCKER          ?= docker
-RUSTUP          ?= rustup
-BUN_INSTALL     ?= $(HOME)/.bun
-export PATH     := $(BUN_INSTALL)/bin:$(PATH)
 BUN             := $(shell command -v bun 2>/dev/null)
 HAS_BUN         := $(if $(BUN),1,)
 
@@ -367,38 +368,45 @@ deps=(root or {}).get('dependencies',[]); \
 		" 2>/dev/null \
 		|| $(CARGO) tree --depth 1
 
-install-tools: ## Install required developer and security tooling
+install-tools: ## Install required developer and security tooling (do not use sudo)
+	@if [ -n "$${SUDO_UID:-}" ] || [ "$$(id -u)" -eq 0 ]; then \
+		printf "$(COLOR_RED)error: do not run 'make install-tools' with sudo.$(COLOR_RESET)\n" >&2; \
+		printf "$(COLOR_DIM)Rust/cargo tools install per-user under $$HOME/.cargo (run as your normal user).$(COLOR_RESET)\n" >&2; \
+		printf "$(COLOR_DIM)For system-wide Trivy only: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin$(COLOR_RESET)\n" >&2; \
+		exit 1; \
+	fi
+	@test -x "$(RUSTUP)" || { \
+		printf "$(COLOR_RED)error: rustup not found at $(RUSTUP)$(COLOR_RESET)\n" >&2; \
+		printf "$(COLOR_DIM)Install Rust: https://rustup.rs/  then re-run make install-tools$(COLOR_RESET)\n" >&2; \
+		exit 1; \
+	}
 	$(call log,Installing Rust toolchain components)
-	$(RUSTUP) component add rustfmt clippy llvm-tools-preview rust-src
+	"$(RUSTUP)" component add rustfmt clippy llvm-tools-preview rust-src
 	$(call log,Installing bun (frontend toolchain))
 	@if command -v bun >/dev/null 2>&1; then \
 		printf "$(COLOR_GREEN)bun already installed: $$(bun --version)$(COLOR_RESET)\n"; \
-	else \
-		command -v unzip >/dev/null 2>&1 || { \
-			printf "$(COLOR_RED)error: unzip required to install bun.$(COLOR_RESET)\n" >&2; \
-			printf "$(COLOR_DIM)  Debian/Ubuntu: apt install unzip$(COLOR_RESET)\n" >&2; \
-			printf "$(COLOR_DIM)  macOS: brew install unzip$(COLOR_RESET)\n" >&2; \
-			exit 1; \
-		}; \
+	elif command -v unzip >/dev/null 2>&1; then \
 		curl -fsSL https://bun.sh/install | bash; \
 		printf "$(COLOR_GREEN)bun installed to $(BUN_INSTALL)/bin/bun$(COLOR_RESET)\n"; \
+	else \
+		printf "$(COLOR_YELLOW)warning: skipping bun install (unzip not found).$(COLOR_RESET)\n"; \
+		printf "$(COLOR_DIM)  Install unzip for frontend builds, or use SKIP_FRONTEND=1 for Rust-only CI.$(COLOR_RESET)\n"; \
 	fi
 	$(call log,Installing cargo extensions)
 	@command -v cargo-audit >/dev/null 2>&1 \
-		|| $(CARGO) install cargo-audit --locked
+		|| "$(CARGO)" install cargo-audit --locked
 	@command -v cargo-deny >/dev/null 2>&1 \
-		|| $(CARGO) install cargo-deny --locked
+		|| "$(CARGO)" install cargo-deny --locked
 	@command -v cargo-llvm-cov >/dev/null 2>&1 \
-		|| $(CARGO) install cargo-llvm-cov --locked
+		|| "$(CARGO)" install cargo-llvm-cov --locked
 	$(call log,Checking Trivy installation)
 	@if command -v $(TRIVY) >/dev/null 2>&1; then \
 		printf "$(COLOR_GREEN)Trivy already installed: $$($(TRIVY) --version | head -1)$(COLOR_RESET)\n"; \
 	else \
-		printf "$(COLOR_YELLOW)Trivy not found. Install using one of:$(COLOR_RESET)\n"; \
+		printf "$(COLOR_YELLOW)warning: Trivy not found (required for make trivy-* / full CI).$(COLOR_RESET)\n"; \
 		printf "  $(COLOR_CYAN)Linux (deb/rpm):$(COLOR_RESET) https://aquasecurity.github.io/trivy/latest/getting-started/installation/\n"; \
 		printf "  $(COLOR_CYAN)macOS (Homebrew):$(COLOR_RESET) brew install trivy\n"; \
-		printf "  $(COLOR_CYAN)Script (Linux/macOS):$(COLOR_RESET) curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin\n"; \
-		exit 1; \
+		printf "  $(COLOR_CYAN)System-wide script:$(COLOR_RESET) curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin\n"; \
 	fi
 	@printf "$(COLOR_GREEN)All developer tools are ready.$(COLOR_RESET)\n"
 
@@ -415,8 +423,11 @@ help: ## Show available targets and descriptions
 	@printf "  $(COLOR_CYAN)TRIVY_CACHE_DIR$(COLOR_RESET) = $(TRIVY_CACHE_DIR)\n"
 	@printf "  $(COLOR_CYAN)SKIP_FRONTEND$(COLOR_RESET)   = $(SKIP_FRONTEND) (auto 1 when bun missing)\n"
 	@printf "  $(COLOR_CYAN)HAS_BUN$(COLOR_RESET)         = $(if $(HAS_BUN),yes,no) ($(BUN))\n"
+	@printf "  $(COLOR_CYAN)CARGO$(COLOR_RESET)           = $(CARGO)\n"
+	@printf "  $(COLOR_CYAN)RUSTUP$(COLOR_RESET)          = $(RUSTUP)\n"
 	@printf "  $(COLOR_CYAN)DENY_FLAGS$(COLOR_RESET)        = $(DENY_FLAGS) (e.g. licenses)\n"
 	@printf "\n$(COLOR_BOLD)Examples$(COLOR_RESET)\n\n"
+	@printf "  make install-tools   # run as normal user, not sudo\n"
 	@printf "  make ci\n"
 	@printf "  make test SKIP_FRONTEND=1\n"
 	@printf "  make image IMAGE_TAG=$(PROJECT)-v0.4.2\n"
