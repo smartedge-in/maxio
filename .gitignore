@@ -6,3 +6,6 @@
 
 /ui/build
 /ui/.svelte-kit
+
+# Generated at CI/runtime by `make sbom` (CycloneDX); not checked in.
+sbom.json
