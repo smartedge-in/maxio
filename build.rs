@@ -129,7 +129,7 @@ fn emit_package_version() {
 }
 
 fn is_semver(version: &str) -> bool {
-    let mut parts = version.splitn(2, |c| c == '-' || c == '+');
+    let mut parts = version.splitn(2, ['-', '+']);
     let core = parts.next().unwrap_or("");
     let mut nums = core.split('.');
     let major = nums
