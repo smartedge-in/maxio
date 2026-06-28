@@ -132,9 +132,15 @@ fn is_semver(version: &str) -> bool {
     let mut parts = version.splitn(2, |c| c == '-' || c == '+');
     let core = parts.next().unwrap_or("");
     let mut nums = core.split('.');
-    let major = nums.next().filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
-    let minor = nums.next().filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
-    let patch = nums.next().filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    let major = nums
+        .next()
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    let minor = nums
+        .next()
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    let patch = nums
+        .next()
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
     major.is_some() && minor.is_some() && patch.is_some() && nums.next().is_none()
 }
 
