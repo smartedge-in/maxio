@@ -90,6 +90,16 @@ define require_cmd
 	}
 endef
 
+# Install a cargo extension on demand (audit, deny, llvm-cov, etc.).
+define ensure_cargo_ext
+	@if command -v cargo-$(1) >/dev/null 2>&1; then \
+		:; \
+	else \
+		printf "$(COLOR_YELLOW)installing cargo-$(1)...$(COLOR_RESET)\n"; \
+		$(CARGO) install cargo-$(1) --locked; \
+	fi
+endef
+
 # =============================================================================
 # Primary pipeline
 # =============================================================================
@@ -145,19 +155,19 @@ test: ## Run workspace unit and integration tests
 
 coverage: ## Generate LLVM code-coverage report
 	$(call log,Running cargo llvm-cov)
-	$(call require_cmd,cargo-llvm-cov)
+	$(call ensure_cargo_ext,llvm-cov)
 	@mkdir -p "$(COVERAGE_DIR)"
 	$(CARGO) llvm-cov $(COVERAGE_FLAGS)
 	@printf "$(COLOR_GREEN)Coverage report written to $(COVERAGE_DIR)/$(COLOR_RESET)\n"
 
 audit: ## Audit dependencies for known security vulnerabilities
 	$(call log,Running cargo audit)
-	$(call require_cmd,cargo-audit)
+	$(call ensure_cargo_ext,audit)
 	$(CARGO) audit
 
 deny: ## Validate dependency licenses and policy (cargo-deny)
 	$(call log,Running cargo deny check)
-	$(call require_cmd,cargo-deny)
+	$(call ensure_cargo_ext,deny)
 	$(CARGO) deny check $(DENY_FLAGS)
 
 doc: ## Build Rust API documentation (no dependencies)
