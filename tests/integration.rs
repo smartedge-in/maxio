@@ -3451,25 +3451,208 @@ async fn test_ec_bitrot_detection() {
     let chunk_path = tmp.path().join("buckets/testbucket/corrupt.bin.ec/000000");
     std::fs::write(&chunk_path, vec![0xFF; 1024]).unwrap();
 
-    // GET should fail — either a 500 response or a connection error
-    // (the error may occur mid-stream after headers are sent)
-    let url = format!("{}/testbucket/corrupt.bin", base_url);
-    let result = s3_request_result("GET", &url, vec![]).await;
-    match result {
-        Ok(resp) => {
-            // If we get a response, reading the body should fail or status should be 500
-            if resp.status() == 200 {
-                let body_result = resp.bytes().await;
-                assert!(
-                    body_result.is_err() || body_result.unwrap() != vec![0xAA; 2048],
-                    "Should not return original uncorrupted data"
-                );
-            }
-        }
-        Err(_) => {
-            // Connection error is expected — chunk verification failed mid-stream
-        }
-    }
+    let resp = s3_request(
+        "GET",
+        &format!("{}/testbucket/corrupt.bin", base_url),
+        vec![],
+    )
+    .await;
+    assert_eq!(resp.status(), 500);
+    let xml = resp.text().await.unwrap();
+    assert!(xml.contains("InternalError"), "unexpected body: {xml}");
+}
+
+#[tokio::test]
+async fn test_multipart_complete_ec() {
+    let (base_url, tmp) = start_server_ec().await;
+    s3_request("PUT", &format!("{}/ec-mp", base_url), vec![]).await;
+
+    let create = s3_request(
+        "POST",
+        &format!("{}/ec-mp/large.bin?uploads=", base_url),
+        vec![],
+    )
+    .await;
+    let upload_id = extract_xml_tag(&create.text().await.unwrap(), "UploadId").unwrap();
+
+    let p1 = vec![b'm'; 5 * 1024 * 1024];
+    let p2 = b"ec-tail".to_vec();
+    let r1 = s3_request(
+        "PUT",
+        &format!(
+            "{}/ec-mp/large.bin?partNumber=1&uploadId={}",
+            base_url, upload_id
+        ),
+        p1.clone(),
+    )
+    .await;
+    let e1 = r1.headers().get("etag").unwrap().to_str().unwrap().to_string();
+    let r2 = s3_request(
+        "PUT",
+        &format!(
+            "{}/ec-mp/large.bin?partNumber=2&uploadId={}",
+            base_url, upload_id
+        ),
+        p2.clone(),
+    )
+    .await;
+    let e2 = r2.headers().get("etag").unwrap().to_str().unwrap().to_string();
+
+    let complete_xml = format!(
+        "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>{}</ETag></Part></CompleteMultipartUpload>",
+        e1, e2
+    );
+    let complete = s3_request(
+        "POST",
+        &format!("{}/ec-mp/large.bin?uploadId={}", base_url, upload_id),
+        complete_xml.into_bytes(),
+    )
+    .await;
+    assert_eq!(complete.status(), 200);
+
+    let ec_dir = tmp.path().join("buckets/ec-mp/large.bin.ec");
+    assert!(ec_dir.is_dir(), "multipart complete should write EC chunks");
+
+    let get = s3_request("GET", &format!("{}/ec-mp/large.bin", base_url), vec![]).await;
+    assert_eq!(get.status(), 200);
+    let body = get.bytes().await.unwrap();
+    let mut expected = p1;
+    expected.extend_from_slice(&p2);
+    assert_eq!(body.as_ref(), expected.as_slice());
+}
+
+#[tokio::test]
+async fn test_multipart_complete_ec_sse_s3() {
+    let (base_url, tmp) = start_server_ec().await;
+    s3_request("PUT", &format!("{}/ec-mp-enc", base_url), vec![]).await;
+
+    let create = s3_request_with_headers(
+        "POST",
+        &format!("{}/ec-mp-enc/secret.bin?uploads=", base_url),
+        vec![],
+        vec![("x-amz-server-side-encryption", "AES256")],
+    )
+    .await;
+    let upload_id = extract_xml_tag(&create.text().await.unwrap(), "UploadId").unwrap();
+
+    let part = vec![b'x'; 6000];
+    let r1 = s3_request_with_headers(
+        "PUT",
+        &format!(
+            "{}/ec-mp-enc/secret.bin?partNumber=1&uploadId={}",
+            base_url, upload_id
+        ),
+        part.clone(),
+        vec![("x-amz-server-side-encryption", "AES256")],
+    )
+    .await;
+    let e1 = r1.headers().get("etag").unwrap().to_str().unwrap().to_string();
+
+    let complete_xml = format!(
+        "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{}</ETag></Part></CompleteMultipartUpload>",
+        e1
+    );
+    let complete = s3_request(
+        "POST",
+        &format!("{}/ec-mp-enc/secret.bin?uploadId={}", base_url, upload_id),
+        complete_xml.into_bytes(),
+    )
+    .await;
+    assert_eq!(complete.status(), 200);
+
+    assert!(
+        tmp.path()
+            .join("buckets/ec-mp-enc/secret.bin.ec")
+            .is_dir()
+    );
+
+    let get = s3_request("GET", &format!("{}/ec-mp-enc/secret.bin", base_url), vec![]).await;
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.bytes().await.unwrap().as_ref(), part.as_slice());
+}
+
+#[tokio::test]
+async fn test_copy_object_ec_same_bucket() {
+    let (base_url, tmp) = start_server_ec().await;
+    s3_request("PUT", &format!("{}/ec-copy", base_url), vec![]).await;
+    s3_request(
+        "PUT",
+        &format!("{}/ec-copy/src.bin", base_url),
+        vec![0xCD; 4096],
+    )
+    .await;
+
+    let resp = s3_request_with_headers(
+        "PUT",
+        &format!("{}/ec-copy/dst.bin", base_url),
+        vec![],
+        vec![("x-amz-copy-source", "/ec-copy/src.bin")],
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+
+    let ec_dir = tmp.path().join("buckets/ec-copy/dst.bin.ec");
+    assert!(ec_dir.is_dir(), "copy destination should be EC-chunked");
+
+    let get = s3_request("GET", &format!("{}/ec-copy/dst.bin", base_url), vec![]).await;
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.bytes().await.unwrap().as_ref(), &vec![0xCD; 4096]);
+}
+
+#[tokio::test]
+async fn test_copy_object_ec_cross_bucket() {
+    let (base_url, tmp) = start_server_ec().await;
+    s3_request("PUT", &format!("{}/ec-src", base_url), vec![]).await;
+    s3_request("PUT", &format!("{}/ec-dst", base_url), vec![]).await;
+    s3_request(
+        "PUT",
+        &format!("{}/ec-src/file.bin", base_url),
+        b"ec cross".to_vec(),
+    )
+    .await;
+
+    let resp = s3_request_with_headers(
+        "PUT",
+        &format!("{}/ec-dst/file.bin", base_url),
+        vec![],
+        vec![("x-amz-copy-source", "/ec-src/file.bin")],
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert!(tmp.path().join("buckets/ec-dst/file.bin.ec").is_dir());
+
+    let get = s3_request("GET", &format!("{}/ec-dst/file.bin", base_url), vec![]).await;
+    assert_eq!(get.bytes().await.unwrap().as_ref(), b"ec cross");
+}
+
+#[tokio::test]
+async fn test_copy_object_ec_sse_s3() {
+    let (base_url, tmp) = start_server_ec().await;
+    s3_request("PUT", &format!("{}/ec-copy-enc", base_url), vec![]).await;
+    s3_request_with_headers(
+        "PUT",
+        &format!("{}/ec-copy-enc/plain.bin", base_url),
+        b"encrypt me".to_vec(),
+        vec![("x-amz-server-side-encryption", "AES256")],
+    )
+    .await;
+
+    let resp = s3_request_with_headers(
+        "PUT",
+        &format!("{}/ec-copy-enc/copy.bin", base_url),
+        vec![],
+        vec![
+            ("x-amz-copy-source", "/ec-copy-enc/plain.bin"),
+            ("x-amz-server-side-encryption", "AES256"),
+        ],
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert!(tmp.path().join("buckets/ec-copy-enc/copy.bin.ec").is_dir());
+
+    let get = s3_request("GET", &format!("{}/ec-copy-enc/copy.bin", base_url), vec![]).await;
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.bytes().await.unwrap().as_ref(), b"encrypt me");
 }
 
 #[tokio::test]
@@ -3825,23 +4008,11 @@ async fn test_parity_too_many_failures() {
         std::fs::remove_file(&chunk_path).unwrap();
     }
 
-    // The server will return an error or drop the connection when RS recovery fails.
-    // Since the object is streamed, the error may manifest as a connection reset
-    // rather than a clean HTTP error status.
-    let result =
-        s3_request_result("GET", &format!("{}/parity-test/file.bin", base_url), vec![]).await;
-    match result {
-        Err(_) => {} // Connection error — expected
-        Ok(resp) => {
-            // Either a server error status, or streaming started but body will be incomplete
-            if resp.status() == 200 {
-                let body_result = resp.bytes().await;
-                assert!(body_result.is_err() || body_result.unwrap().len() != 350);
-            } else {
-                assert!(resp.status().is_server_error());
-            }
-        }
-    }
+    let resp =
+        s3_request("GET", &format!("{}/parity-test/file.bin", base_url), vec![]).await;
+    assert_eq!(resp.status(), 500);
+    let xml = resp.text().await.unwrap();
+    assert!(xml.contains("InternalError"), "unexpected body: {xml}");
 }
 
 #[tokio::test]

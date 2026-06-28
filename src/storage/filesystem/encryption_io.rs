@@ -401,7 +401,8 @@ impl FilesystemStorage {
                 let frame_size = enc_meta.chunk_size as usize;
                 let plaintext_size = meta.size;
                 let aad_builder = object_aad_builder(bucket, key, meta.version_id.as_deref());
-                let ct_reader = VerifiedChunkReader::new(ver_ec_dir, manifest);
+                let mut ct_reader = VerifiedChunkReader::new(ver_ec_dir, manifest);
+                preflight_chunk_reader(&mut ct_reader)?;
                 let decryptor = FrameDecryptor::new(
                     Box::pin(ct_reader),
                     &dek,
@@ -411,7 +412,8 @@ impl FilesystemStorage {
                 );
                 return Ok((Box::pin(decryptor), meta));
             }
-            let reader = VerifiedChunkReader::new(ver_ec_dir, manifest);
+            let mut reader = VerifiedChunkReader::new(ver_ec_dir, manifest);
+            preflight_chunk_reader(&mut reader)?;
             return Ok((Box::pin(reader), meta));
         }
 

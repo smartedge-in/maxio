@@ -803,7 +803,7 @@ pub async fn get_object(
             .map_err(|e| match e {
                 StorageError::NotFound(_) => S3Error::no_such_key(&key),
                 StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
-                StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
+                StorageError::IntegrityError(msg) => S3Error::internal(msg),
                 _ => S3Error::internal(e),
             })?;
 
@@ -855,6 +855,7 @@ pub async fn get_object(
                     .map_err(|e| match e {
                         StorageError::NotFound(_) => S3Error::no_such_key(&key),
                         StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
+                        StorageError::IntegrityError(msg) => S3Error::internal(msg),
                         _ => S3Error::internal(e),
                     })?;
 
@@ -894,7 +895,7 @@ pub async fn get_object(
                 StorageError::NotFound(_) => S3Error::no_such_key(&key),
                 StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
                 StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
-                StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
+                StorageError::IntegrityError(msg) => S3Error::internal(msg),
                 _ => S3Error::internal(e),
             })?
     } else {
@@ -906,7 +907,7 @@ pub async fn get_object(
                 StorageError::NotFound(_) => S3Error::no_such_key(&key),
                 StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
                 StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
-                StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
+                StorageError::IntegrityError(msg) => S3Error::internal(msg),
                 _ => S3Error::internal(e),
             })?
     };

@@ -53,8 +53,8 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
-| P1-12 | Clean S3 errors on EC read failure | storage | M | When Reed-Solomon recovery fails or a chunk checksum mismatches without recoverable parity, reads often fail mid-stream (connection reset) instead of returning a structured S3/XML error. | `GetObject` / range reads return a deterministic HTTP error (e.g. 500 + `InternalError` or dedicated code) when chunk verification or RS reconstruction fails; integration test for `test_parity_too_many_failures`-style scenario asserts status/body, not only connection drop. |
-| P1-13 | EC corruption tests in CI | ci | S | `aws-cli` job starts MaxIO without `--erasure-coding`, so `tests/aws_cli_test.sh` EC corruption checks are skipped (`INFO: erasure coding corruption tests skipped`). | Main-branch CI runs `aws_cli_test.sh` against a server with `--erasure-coding` (and optionally `--parity-shards`); corruption and recovery assertions execute, not skip. |
+| ~~P1-12~~ | ~~Clean S3 errors on EC read failure~~ | storage | M | Done — `VerifiedChunkReader::preflight()` before streaming; `IntegrityError` → HTTP 500 `InternalError`; tests assert XML body. | — |
+| ~~P1-13~~ | ~~EC corruption tests in CI~~ | ci | S | Done — `aws-cli` job starts MaxIO with `--erasure-coding`; corruption checks in `aws_cli_test.sh` run, not skip. | — |
 
 ---
 
@@ -68,9 +68,9 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | ~~P2-04~~ | ~~Unit test coverage report in CI~~ | ci | S | Done — `coverage` CI job with `cargo llvm-cov --summary-only`; floors: `storage/crypto.rs` ≥80% lines, `auth/signature_v4.rs` ≥25% lines. | — |
 | P2-05 | Replace `unwrap()` in hot paths | storage | M | `unwrap`/`expect` in auth and storage error paths. | Audit and convert to `?` + proper `S3Error`/`StorageError` where user-visible. |
 | ~~P2-06~~ | ~~Console API integration tests~~ | api | M | Done — integration tests for login failure, login rate limit, auth check/logout, list buckets, versioning/public settings, protected-route auth gate (presign/upload/settings covered by existing tests). | — |
-| P2-09 | Multipart + EC integration tests | storage | M | `complete_multipart_chunked` / `complete_multipart_chunked_encrypted` exist but multipart integration tests use the default non-EC server. | Tests under `start_server_ec()` / `start_server_ec_parity()`: create upload → upload parts → complete → GET roundtrip; SSE-S3 multipart variant covered. |
-| P2-10 | CopyObject + EC integration tests | storage | S | Copy rewrites via `put_object` (chunks on EC-enabled servers) but no dedicated EC copy coverage. | With EC enabled: copy same-bucket and cross-bucket; destination is chunked on disk; GET roundtrip passes; SSE-S3 copy paths included. |
-| P2-11 | Document EC operational limits | docs | S | Server-wide `--erasure-coding` toggle, parity required for recovery, GF(2⁸) 255-shard cap, and single-node scope are implicit in code but not summarized for operators. | `docs/operations.md` (or README) section: when to enable parity, max shards formula, no per-bucket EC, no recovery without parity, link to config flags. |
+| ~~P2-09~~ | ~~Multipart + EC integration tests~~ | storage | M | Done — `test_multipart_complete_ec` and `test_multipart_complete_ec_sse_s3` under `start_server_ec()`. | — |
+| ~~P2-10~~ | ~~CopyObject + EC integration tests~~ | storage | S | Done — same-bucket, cross-bucket, and SSE-S3 copy tests with EC enabled; `.ec` dir + GET roundtrip verified. | — |
+| ~~P2-11~~ | ~~Document EC operational limits~~ | docs | S | Done — `docs/operations.md` erasure coding section (flags, parity, 255-shard cap, single-node scope, read errors). | — |
 
 ---
 
@@ -129,7 +129,7 @@ Reference only — no backlog action unless regressions appear.
 **Sprint 1 (stabilize):** ~~P0-01~~, ~~P0-02~~, ~~P2-03~~, ~~P1-07~~ ✓
 **Sprint 2 (harden):** ~~P0-03~~, ~~P1-01~~, ~~P1-02~~, ~~P0-04~~ ✓
 **Sprint 3 (scale maintainability):** ~~P2-01~~, ~~P2-04~~, ~~P0-05~~, ~~P2-06~~ ✓
-**Sprint 4 (erasure coding hardening):** P1-13, P2-11, P2-09, P2-10, P1-12  
+**Sprint 4 (erasure coding hardening):** ~~P1-13~~, ~~P2-11~~, ~~P2-09~~, ~~P2-10~~, ~~P1-12~~ ✓
 **Sprint 5 (ops tooling):** P2-13 (admin API), then P2-12 (CLI: profiles → remote status/info/doctor → housekeeping; local keyring rotate last)
 
 ---

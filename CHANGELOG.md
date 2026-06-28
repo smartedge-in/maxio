@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sprint 4 (erasure coding): `VerifiedChunkReader::preflight()` validates the first required chunk before streaming EC reads; failures map to HTTP 500 S3 `InternalError` XML (P1-12).
+- Sprint 4 (erasure coding): `aws-cli` CI job starts MaxIO with `--erasure-coding` so corruption tests in `aws_cli_test.sh` execute (P1-13).
+- Sprint 4 (erasure coding): integration tests for multipart+EC (plain and SSE-S3) and CopyObject+EC (same/cross-bucket, SSE-S3) (P2-09, P2-10).
+- Sprint 4 (erasure coding): `docs/operations.md` erasure coding section — server-wide toggle, parity, GF(2⁸) 255-shard cap, single-node scope (P2-11).
+- Unit tests for `VerifiedChunkReader::preflight()` in `storage/chunk_reader.rs`.
+
 - Sprint 3 (maintainability): split `src/storage/filesystem.rs` into `filesystem/{mod,common,object_io,multipart,encryption_io,listing,housekeeping}.rs` (P2-01).
 - Sprint 3 (maintainability): CI `coverage` job — `cargo llvm-cov` summary plus line-coverage floors for `storage/crypto.rs` (80%) and `auth/signature_v4.rs` (25%) (P2-04).
 - Sprint 3 (maintainability): console API integration tests — login failure/rate-limit, auth check/logout, list buckets, versioning/public settings, protected-route gate (P2-06).

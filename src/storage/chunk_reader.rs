@@ -90,6 +90,17 @@ impl VerifiedChunkReader {
         }
     }
 
+    /// Verify the first chunk required for this read before streaming starts.
+    /// Returns an error when chunk verification or RS reconstruction fails so
+    /// callers can respond with a structured HTTP error instead of aborting
+    /// mid-stream after headers are sent.
+    pub fn preflight(&mut self) -> io::Result<()> {
+        if matches!(self.state, ReaderState::Done) {
+            return Ok(());
+        }
+        self.load_chunk_sync()
+    }
+
     /// Load a chunk from disk, verify its checksum, and store it in the buffer.
     /// Falls back to Reed-Solomon reconstruction if the chunk is corrupt/missing
     /// and parity shards are available.
@@ -312,5 +323,66 @@ impl AsyncRead for VerifiedChunkReader {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{ChunkInfo, ChunkKind, ChunkManifest};
+    use tempfile::TempDir;
+
+    fn write_chunk(path: &std::path::Path, data: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, data).unwrap();
+    }
+
+    #[test]
+    fn preflight_succeeds_when_first_chunk_is_valid() {
+        let tmp = TempDir::new().unwrap();
+        let data = b"hello chunk";
+        let sha256 = hex::encode(Sha256::digest(data));
+        write_chunk(&tmp.path().join("000000"), data);
+        let manifest = ChunkManifest {
+            version: 1,
+            chunk_size: 1024,
+            total_size: data.len() as u64,
+            chunk_count: 1,
+            chunks: vec![ChunkInfo {
+                index: 0,
+                size: data.len() as u64,
+                sha256,
+                kind: ChunkKind::Data,
+            }],
+            parity_shards: None,
+            shard_size: None,
+            plaintext_size: None,
+        };
+        let mut reader = VerifiedChunkReader::new(tmp.path().to_path_buf(), manifest);
+        assert!(reader.preflight().is_ok());
+    }
+
+    #[test]
+    fn preflight_fails_on_checksum_mismatch_without_parity() {
+        let tmp = TempDir::new().unwrap();
+        write_chunk(&tmp.path().join("000000"), b"corrupt");
+        let manifest = ChunkManifest {
+            version: 1,
+            chunk_size: 1024,
+            total_size: 7,
+            chunk_count: 1,
+            chunks: vec![ChunkInfo {
+                index: 0,
+                size: 7,
+                sha256: "00".repeat(32),
+                kind: ChunkKind::Data,
+            }],
+            parity_shards: None,
+            shard_size: None,
+            plaintext_size: None,
+        };
+        let mut reader = VerifiedChunkReader::new(tmp.path().to_path_buf(), manifest);
+        let err = reader.preflight().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }

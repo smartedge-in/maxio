@@ -98,6 +98,8 @@ jobs:
             --data-dir "$DATA_DIR" \
             --port "$PORT" \
             --address 127.0.0.1 \
+            --erasure-coding \
+            --chunk-size 1048576 \
             --allow-insecure-dev &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT

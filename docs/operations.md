@@ -98,6 +98,38 @@ export MAXIO_MIN_FREE_DISK_BYTES=10737418240
 
 When `Content-Length` is present, the limit is enforced before streaming begins. Without `Content-Length`, enforcement happens as bytes are read.
 
+## Erasure coding (single-node)
+
+Erasure coding is **server-wide** — there is no per-bucket toggle on a single instance. When enabled, new objects are stored as fixed-size chunks under `{key}.ec/` with a `manifest.json` sidecar and per-chunk SHA-256 checksums.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `MAXIO_ERASURE_CODING` / `--erasure-coding` | `false` | Enable chunked storage layout |
+| `MAXIO_CHUNK_SIZE` / `--chunk-size` | `10485760` (10 MiB) | Data chunk size in bytes |
+| `MAXIO_PARITY_SHARDS` / `--parity-shards` | `0` | Reed-Solomon parity shards per object (`0` = checksum-only, no recovery) |
+
+**Operational limits**
+
+- **Single-node only** — EC protects against bitrot and missing/corrupt chunks on one host; it is not replication or multi-node federation.
+- **No per-bucket EC** — all new writes on an EC-enabled server use the chunked layout; existing flat objects remain readable until rewritten.
+- **Parity required for recovery** — without `--parity-shards`, corrupt or missing chunks fail reads with S3 `InternalError` (HTTP 500). With parity, MaxIO attempts Reed-Solomon reconstruction when a data chunk fails its checksum.
+- **GF(2⁸) shard cap** — `data_chunks + parity_shards` must not exceed **255**. If an object would exceed this, increase `--chunk-size` (fewer data chunks) or reduce parity.
+- **Read errors** — chunk verification and unrecoverable RS failures return structured S3 XML (`InternalError`) before the response body streams, rather than dropping the connection mid-read.
+
+Example — checksum-only EC (detect corruption, no recovery):
+
+```bash
+maxio --data-dir /data --erasure-coding --chunk-size 10485760
+```
+
+Example — EC with two parity shards per object (recover up to two missing/corrupt data chunks per stripe):
+
+```bash
+maxio --data-dir /data --erasure-coding --chunk-size 1048576 --parity-shards 2
+```
+
+The main-branch `aws-cli` CI job runs `tests/aws_cli_test.sh` against a server with `--erasure-coding` so on-disk corruption checks are not skipped.
+
 ## Docker
 
 ```bash

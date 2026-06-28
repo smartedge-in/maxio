@@ -1,4 +1,5 @@
 use super::*;
+use std::io;
 
 /// Validate that an object key does not contain path traversal components.
 pub(super) fn validate_key(key: &str) -> Result<(), StorageError> {
@@ -193,6 +194,14 @@ pub(super) fn reject_sse_c_on_plaintext(
         ));
     }
     Ok(())
+}
+
+pub(super) fn map_chunk_read_error(err: io::Error) -> StorageError {
+    StorageError::IntegrityError(err.to_string())
+}
+
+pub(super) fn preflight_chunk_reader(reader: &mut VerifiedChunkReader) -> Result<(), StorageError> {
+    reader.preflight().map_err(map_chunk_read_error)
 }
 
 pub(super) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
