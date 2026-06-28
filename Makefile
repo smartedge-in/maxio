@@ -38,7 +38,7 @@ IMAGE_REF       := $(IMAGE_NAME):$(IMAGE_TAG)
 SBOM_FILE       ?= sbom.json
 SARIF_FILE      ?= trivy-results.sarif
 REPORT_FILE     ?= trivy-report.json
-TRIVY_CACHE_DIR ?= .trivy-cache
+TRIVY_CACHE_DIR ?= $(or $(TMPDIR),/tmp)/$(PROJECT)-trivy-cache
 COVERAGE_DIR    ?= coverage
 REPORT_DIR      ?= reports
 
@@ -128,6 +128,8 @@ ci: ## Run full CI pipeline in order (stops on first failure)
 	$(MAKE) --no-print-directory sbom
 	$(MAKE) --no-print-directory trivy-sbom
 	$(MAKE) --no-print-directory doc
+	$(call log,Freeing debug build artifacts before release)
+	@$(CARGO) clean
 	$(MAKE) --no-print-directory release
 	$(MAKE) --no-print-directory image
 	$(MAKE) --no-print-directory trivy-image
