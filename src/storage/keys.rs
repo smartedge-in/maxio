@@ -224,6 +224,36 @@ impl Keyring {
     }
 }
 
+// ── Metadata (no secrets) ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyMetadata {
+    pub id: String,
+    pub created_at: String,
+    pub active: bool,
+}
+
+/// List key ids and metadata from the on-disk keyring file (never raw key material).
+pub async fn list_metadata(data_dir: &str) -> anyhow::Result<Vec<KeyMetadata>> {
+    let file_path = format!("{}/.maxio-keys.json", data_dir);
+    let data = match fs::read_to_string(&file_path).await {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let kr: KeyringFile = serde_json::from_str(&data)
+        .map_err(|e| anyhow::anyhow!("Failed to parse keyring file: {}", e))?;
+    Ok(kr
+        .keys
+        .into_iter()
+        .map(|e| KeyMetadata {
+            id: e.id,
+            created_at: e.created_at,
+            active: e.active,
+        })
+        .collect())
+}
+
 // ── Rotation ──────────────────────────────────────────────────────────────────
 
 /// Rotate the keyring file: generate a new 32-byte master key, mark it active,

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sprint 5 (ops tooling): authenticated admin HTTP API at `/api/admin/v1/*` — Bearer `MAXIO_ADMIN_TOKEN` or Basic access/secret auth, per-IP rate limiting, endpoints for status, info, doctor, buckets, keyring metadata, and on-demand housekeeping (P2-13).
+- Sprint 5 (ops tooling): `maxio-admin` CLI — remote-first commands via admin API; local `doctor --data-dir` and `keyring rotate`; profiles, `--json`, human tables; documented in `docs/operations.md` (P2-12).
+- Admin API integration tests (auth failure, Bearer/Basic success, JSON schema checks).
+- `maxio-admin` unit tests for auth header selection and config parsing.
+- `keys::list_metadata()` and storage helpers for admin info/doctor endpoints.
+
 - Sprint 4 (erasure coding): `VerifiedChunkReader::preflight()` validates the first required chunk before streaming EC reads; failures map to HTTP 500 S3 `InternalError` XML (P1-12).
 - Sprint 4 (erasure coding): `aws-cli` CI job starts MaxIO with `--erasure-coding` so corruption tests in `aws_cli_test.sh` execute (P1-13).
 - Sprint 4 (erasure coding): integration tests for multipart+EC (plain and SSE-S3) and CopyObject+EC (same/cross-bucket, SSE-S3) (P2-09, P2-10).

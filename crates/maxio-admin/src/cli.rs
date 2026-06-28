@@ -47,8 +47,12 @@ pub enum Command {
     /// Disk, counts, and active server config (remote)
     Info,
 
-    /// Preflight checks: readiness, disk reserve, keyring (remote)
-    Doctor,
+    /// Preflight checks: readiness, disk reserve, keyring (remote or local with --data-dir)
+    Doctor {
+        /// Offline checks against a data directory (no network)
+        #[arg(long, env = "MAXIO_DATA_DIR")]
+        data_dir: Option<String>,
+    },
 
     /// Bucket administration (remote)
     #[command(subcommand)]
@@ -123,7 +127,10 @@ impl Cli {
             }
             Command::Status => commands::status::run(build_context(profile, endpoint, json, config).await?).await,
             Command::Info => commands::info::run(build_context(profile, endpoint, json, config).await?).await,
-            Command::Doctor => commands::doctor::run(build_context(profile, endpoint, json, config).await?).await,
+            Command::Doctor { data_dir } => {
+                commands::doctor::run(data_dir, build_context(profile, endpoint, json, config).await?)
+                    .await
+            }
             Command::Buckets(cmd) => {
                 commands::buckets::run(cmd, build_context(profile, endpoint, json, config).await?).await
             }

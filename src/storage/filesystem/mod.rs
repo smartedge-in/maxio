@@ -108,6 +108,14 @@ impl FilesystemStorage {
         })
     }
 
+    pub fn data_root(&self) -> &Path {
+        &self.data_root
+    }
+
+    pub fn keyring(&self) -> &Arc<Keyring> {
+        &self.keyring
+    }
+
     pub async fn check_readiness(&self) -> Result<(), String> {
         if !fs::try_exists(&self.data_root)
             .await

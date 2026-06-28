@@ -80,6 +80,75 @@ The built-in `maxio healthcheck` subcommand defaults to `/healthz`. Point it at 
 maxio healthcheck --url http://127.0.0.1:9000/readyz
 ```
 
+## Admin API and `maxio-admin` CLI
+
+MaxIO exposes a versioned admin HTTP API at `/api/admin/v1/*` for remote operations (status, disk usage, doctor checks, housekeeping, keyring metadata). **Use TLS in production** — terminate HTTPS at your reverse proxy and restrict network access to the admin paths.
+
+### Authentication
+
+| Method | When to use |
+|--------|-------------|
+| `Authorization: Bearer <token>` | Preferred — set `MAXIO_ADMIN_TOKEN` on the server and `admin_token` in the CLI profile |
+| `Authorization: Basic <base64(access:secret)>` | Fallback — same credentials as S3 (`MAXIO_ACCESS_KEY` / `MAXIO_SECRET_KEY`) |
+
+Requests without valid credentials receive HTTP `401`. The API is rate-limited per client IP (`MAXIO_ADMIN_RATE_MAX`, default 120 requests per 60 seconds).
+
+Server configuration:
+
+```bash
+export MAXIO_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export MAXIO_ADMIN_RATE_MAX=120
+export MAXIO_ADMIN_RATE_WINDOW_SECS=60
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/admin/v1/status` | Liveness + readiness summary, version, uptime |
+| `GET` | `/api/admin/v1/info` | Data directory, disk usage, bucket/object counts, active config |
+| `GET` | `/api/admin/v1/doctor` | Readiness, disk reserve, keyring checks |
+| `GET` | `/api/admin/v1/buckets` | Bucket list with object counts |
+| `GET` | `/api/admin/v1/buckets/{name}` | Single bucket metadata |
+| `GET` | `/api/admin/v1/keyring` | Key ids and metadata (never raw key material) |
+| `POST` | `/api/admin/v1/housekeeping/run` | On-demand stale-multipart and temp-file sweep |
+
+Example (behind nginx TLS termination):
+
+```bash
+curl -sS -H "Authorization: Bearer $MAXIO_ADMIN_TOKEN" \
+  https://maxio.example.com/api/admin/v1/status | jq .
+```
+
+### `maxio-admin` CLI
+
+Build from the repository root:
+
+```bash
+cargo build -p maxio-admin
+cp crates/maxio-admin/config.example.toml ~/.config/maxio/config.toml
+# Edit admin_token and endpoint for your profile
+```
+
+| Command | Scope | Description |
+|---------|-------|-------------|
+| `maxio-admin status` | remote | Health + readiness |
+| `maxio-admin info` | remote | Disk, counts, server config |
+| `maxio-admin doctor` | remote | Preflight checks |
+| `maxio-admin doctor --data-dir /data` | **local** | Offline doctor (no network) |
+| `maxio-admin buckets list` | remote | Bucket inventory |
+| `maxio-admin buckets head <name>` | remote | Single bucket |
+| `maxio-admin housekeeping run` | remote | Trigger maintenance sweep |
+| `maxio-admin keyring list` | remote | Keyring metadata |
+| `maxio-admin keyring rotate --data-dir /data` | **local** | Rotate on-disk keyring |
+
+Global flags: `--profile`, `--endpoint`, `--json`, `--config` (default `~/.config/maxio/config.toml`). Environment overrides: `MAXIO_ADMIN_PROFILE`, `MAXIO_ADMIN_ENDPOINT`, `MAXIO_ADMIN_CONFIG`.
+
+```bash
+export MAXIO_ADMIN_ENDPOINT=https://maxio.example.com
+maxio-admin --profile prod --json doctor
+```
+
 ## Upload quotas and disk reserve
 
 Optional limits protect against oversized uploads and disk exhaustion:

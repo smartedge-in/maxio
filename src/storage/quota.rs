@@ -76,9 +76,8 @@ impl QuotaLimits {
     }
 }
 
-/// Best-effort free bytes on the filesystem containing `path`.
 #[cfg(unix)]
-pub fn available_disk_bytes(path: &Path) -> Option<u64> {
+fn statvfs_bytes(path: &Path) -> Option<libc::statvfs> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
@@ -88,12 +87,33 @@ pub fn available_disk_bytes(path: &Path) -> Option<u64> {
     if rc != 0 {
         return None;
     }
-    let stat = unsafe { stat.assume_init() };
+    Some(unsafe { stat.assume_init() })
+}
+
+/// Best-effort free bytes on the filesystem containing `path`.
+#[cfg(unix)]
+pub fn available_disk_bytes(path: &Path) -> Option<u64> {
+    let stat = statvfs_bytes(path)?;
     Some(stat.f_bavail as u64 * stat.f_frsize as u64)
 }
 
 #[cfg(not(unix))]
 pub fn available_disk_bytes(_path: &Path) -> Option<u64> {
+    None
+}
+
+/// Best-effort `(total_bytes, available_bytes)` for the filesystem containing `path`.
+#[cfg(unix)]
+pub fn disk_space_bytes(path: &Path) -> Option<(u64, u64)> {
+    let stat = statvfs_bytes(path)?;
+    let frsize = stat.f_frsize as u64;
+    let total = stat.f_blocks as u64 * frsize;
+    let available = stat.f_bavail as u64 * frsize;
+    Some((total, available))
+}
+
+#[cfg(not(unix))]
+pub fn disk_space_bytes(_path: &Path) -> Option<(u64, u64)> {
     None
 }
 

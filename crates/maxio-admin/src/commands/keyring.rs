@@ -2,7 +2,8 @@ use crate::cli::KeyringCommand;
 use crate::client::AdminSession;
 use crate::commands::remote::run_remote;
 use crate::error::Result;
-use crate::output::emit_message;
+use crate::output::emit;
+use maxio::storage::keys;
 use std::path::PathBuf;
 
 pub async fn run(
@@ -26,17 +27,17 @@ pub async fn run(
             .await
         }
         KeyringCommand::Rotate { data_dir } => {
-            emit_message(
-                json,
-                &format!(
-                    "keyring rotate is local-only (filesystem access required).\n\
-                     Stub: run `maxio keyring rotate --data-dir {}` until this command \
-                     is wired to offline keyring helpers (P2-12).",
-                    data_dir
-                ),
-            );
+            let result = keys::rotate(&data_dir).await?;
+            let value = serde_json::json!({
+                "status": "rotated",
+                "data_dir": data_dir,
+                "new_active_id": result.new_active_id,
+                "previous_active_id": result.previous_active_id,
+                "total_keys": result.total_keys,
+                "message": "Restart the server to encrypt new objects with the new active key."
+            });
+            emit(json, &value)?;
             Ok(())
         }
     }
 }
-

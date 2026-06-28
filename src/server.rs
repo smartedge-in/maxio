@@ -10,7 +10,8 @@ use crate::api::router::s3_router;
 use crate::auth::middleware::auth_middleware;
 use crate::config::Config;
 use crate::embedded::ui_handler;
-use crate::rate_limit::{LoginRateLimiter, S3RateLimiter};
+use crate::rate_limit::{AdminRateLimiter, LoginRateLimiter, S3RateLimiter};
+use std::time::Instant;
 use crate::storage::filesystem::FilesystemStorage;
 
 /// Content-Security-Policy for all HTTP responses.
@@ -25,6 +26,8 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub login_rate_limiter: Arc<LoginRateLimiter>,
     pub s3_rate_limiter: Arc<S3RateLimiter>,
+    pub admin_rate_limiter: Arc<AdminRateLimiter>,
+    pub started_at: Instant,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -38,8 +41,18 @@ pub fn build_router(state: AppState) -> Router {
             cors_middleware,
         ));
 
+    let admin_routes = crate::api::admin::router()
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::api::admin::admin_rate_limit_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::api::admin::admin_auth_middleware,
+        ));
+
     Router::new()
-        .nest("/api/admin/v1", crate::api::admin::router())
+        .nest("/api/admin/v1", admin_routes)
         .nest("/api", console_router(state.clone()))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))

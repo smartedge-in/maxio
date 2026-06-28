@@ -22,6 +22,7 @@ type HmacSha256 = Hmac<Sha256>;
 const ACCESS_KEY: &str = "maxioadmin";
 const SECRET_KEY: &str = "maxioadmin";
 const REGION: &str = "us-east-1";
+const ADMIN_TOKEN: &str = "test-admin-token";
 
 fn unlimited_quota() -> QuotaLimits {
     QuotaLimits::from_config(0, 0)
@@ -49,6 +50,9 @@ fn default_test_config(data_dir: String) -> Config {
         s3_rate_auth_window_secs: 300,
         s3_rate_put_max: 0,
         s3_rate_put_window_secs: 60,
+        admin_token: ADMIN_TOKEN.to_string(),
+        admin_rate_max: 120,
+        admin_rate_window_secs: 60,
     }
 }
 
@@ -83,6 +87,11 @@ async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> S
             config.s3_rate_put_max,
             config.s3_rate_put_window_secs,
         )),
+        admin_rate_limiter: Arc::new(maxio::rate_limit::AdminRateLimiter::from_config(
+            config.admin_rate_max,
+            config.admin_rate_window_secs,
+        )),
+        started_at: std::time::Instant::now(),
     };
 
     let app = server::build_router(state);
@@ -7279,4 +7288,124 @@ async fn test_ec_plus_encryption_chunk_swap_rejected() {
             );
         }
     }
+}
+
+async fn admin_get(base_url: &str, path: &str, token: Option<&str>) -> reqwest::Response {
+    let mut req = client().get(format!("{base_url}/api/admin/v1{path}"));
+    if let Some(token) = token {
+        req = req.header("authorization", format!("Bearer {token}"));
+    }
+    req.send().await.unwrap()
+}
+
+async fn admin_post(base_url: &str, path: &str, token: Option<&str>) -> reqwest::Response {
+    let mut req = client().post(format!("{base_url}/api/admin/v1{path}"));
+    if let Some(token) = token {
+        req = req.header("authorization", format!("Bearer {token}"));
+    }
+    req.send().await.unwrap()
+}
+
+#[tokio::test]
+async fn test_admin_api_requires_auth() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = admin_get(&base_url, "/status", None).await;
+    assert_eq!(resp.status(), 401);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"], "unauthorized");
+}
+
+#[tokio::test]
+async fn test_admin_api_status_with_bearer_token() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = admin_get(&base_url, "/status", Some(ADMIN_TOKEN)).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["healthz"], "ok");
+    assert_eq!(body["readyz"], "ok");
+    assert!(body["version"].is_string());
+    assert!(body["uptime_secs"].as_u64().is_some());
+}
+
+#[tokio::test]
+async fn test_admin_api_status_with_basic_auth() {
+    let (base_url, _tmp) = start_server().await;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{ACCESS_KEY}:{SECRET_KEY}"));
+    let resp = client()
+        .get(format!("{base_url}/api/admin/v1/status"))
+        .header("authorization", format!("Basic {encoded}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_admin_api_info_and_doctor() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/admin-test-bucket"), vec![]).await;
+    s3_request(
+        "PUT",
+        &format!("{base_url}/admin-test-bucket/hello.txt"),
+        b"hello".to_vec(),
+    )
+    .await;
+
+    let info = admin_get(&base_url, "/info", Some(ADMIN_TOKEN)).await;
+    assert_eq!(info.status(), 200);
+    let info_body: serde_json::Value = info.json().await.unwrap();
+    assert!(info_body["data_dir"].is_string());
+    assert!(info_body["bucket_count"].as_u64().unwrap() >= 1);
+    assert!(info_body["object_count"].as_u64().unwrap() >= 1);
+    assert_eq!(info_body["config"]["region"], REGION);
+
+    let doctor = admin_get(&base_url, "/doctor", Some(ADMIN_TOKEN)).await;
+    assert_eq!(doctor.status(), 200);
+    let doctor_body: serde_json::Value = doctor.json().await.unwrap();
+    assert_eq!(doctor_body["ok"], true);
+    assert!(doctor_body["checks"].as_array().unwrap().len() >= 3);
+}
+
+#[tokio::test]
+async fn test_admin_api_buckets_and_keyring() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/keyring-bucket"), vec![]).await;
+
+    let buckets = admin_get(&base_url, "/buckets", Some(ADMIN_TOKEN)).await;
+    assert_eq!(buckets.status(), 200);
+    let buckets_body: serde_json::Value = buckets.json().await.unwrap();
+    let names: Vec<_> = buckets_body["buckets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"keyring-bucket"));
+
+    let head = admin_get(&base_url, "/buckets/keyring-bucket", Some(ADMIN_TOKEN)).await;
+    assert_eq!(head.status(), 200);
+    let head_body: serde_json::Value = head.json().await.unwrap();
+    assert_eq!(head_body["bucket"]["name"], "keyring-bucket");
+
+    let keyring = admin_get(&base_url, "/keyring", Some(ADMIN_TOKEN)).await;
+    assert_eq!(keyring.status(), 200);
+    let keyring_body: serde_json::Value = keyring.json().await.unwrap();
+    assert!(keyring_body["active_id"].is_string());
+    let keys = keyring_body["keys"].as_array().unwrap();
+    assert!(!keys.is_empty());
+    for key in keys {
+        assert!(key.get("key_b64").is_none());
+        assert!(key["id"].is_string());
+    }
+}
+
+#[tokio::test]
+async fn test_admin_api_housekeeping_run() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = admin_post(&base_url, "/housekeeping/run", Some(ADMIN_TOKEN)).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["stale_after_days"], 7);
+    assert!(body["uploads_removed"].as_u64().is_some());
+    assert!(body["temp_files_removed"].as_u64().is_some());
 }

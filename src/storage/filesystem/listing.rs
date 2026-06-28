@@ -1,6 +1,18 @@
 use super::*;
 
 impl FilesystemStorage {
+    pub async fn count_bucket_objects(&self, bucket: &str) -> Result<u64, StorageError> {
+        Ok(self.list_objects(bucket, "").await?.len() as u64)
+    }
+
+    pub async fn count_all_objects(&self) -> Result<u64, StorageError> {
+        let mut total = 0u64;
+        for bucket in self.list_buckets().await? {
+            total += self.count_bucket_objects(&bucket.name).await?;
+        }
+        Ok(total)
+    }
+
     pub async fn list_buckets(&self) -> Result<Vec<BucketMeta>, StorageError> {
         let mut buckets = Vec::new();
         let mut entries = fs::read_dir(&self.buckets_dir).await?;

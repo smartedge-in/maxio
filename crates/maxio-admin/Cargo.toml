@@ -17,9 +17,14 @@ path = "src/main.rs"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
+maxio = { path = "../.." }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+base64 = "0.22"
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
 toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

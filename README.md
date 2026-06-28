@@ -146,6 +146,9 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | `MAXIO_S3_RATE_PUT_WINDOW_SECS` | `--s3-rate-put-window-secs` | `60` | Sliding window for S3 PUT rate limit (seconds) |
 | `MAXIO_HEALTHCHECK_URL` | `healthcheck --url` | `http://127.0.0.1:9000/healthz` | Healthcheck endpoint URL; default port follows `MAXIO_PORT` when set |
 | `MAXIO_HEALTHCHECK_TIMEOUT_MS` | `healthcheck --timeout-ms` | `2000` | Healthcheck connect/read timeout in milliseconds |
+| `MAXIO_ADMIN_TOKEN` | `--admin-token` | _(empty)_ | Bearer token for `/api/admin/v1` admin API (empty disables Bearer auth; Basic access/secret still works) |
+| `MAXIO_ADMIN_RATE_MAX` | `--admin-rate-max` | `120` | Max admin API requests per client IP per window (`0` = disabled) |
+| `MAXIO_ADMIN_RATE_WINDOW_SECS` | `--admin-rate-window-secs` | `60` | Sliding window for admin API rate limit (seconds) |
 
 ### Health endpoints
 

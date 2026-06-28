@@ -177,6 +177,11 @@ async fn main() -> anyhow::Result<()> {
             config.s3_rate_put_max,
             config.s3_rate_put_window_secs,
         )),
+        admin_rate_limiter: Arc::new(rate_limit::AdminRateLimiter::from_config(
+            config.admin_rate_max,
+            config.admin_rate_window_secs,
+        )),
+        started_at: std::time::Instant::now(),
     };
 
     // Background housekeeping: abort stale multipart uploads (>7 days) and

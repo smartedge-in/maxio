@@ -108,6 +108,18 @@ pub struct Config {
     /// Sliding window for S3 PUT rate limit, in seconds.
     #[arg(long, env = "MAXIO_S3_RATE_PUT_WINDOW_SECS", default_value = "60")]
     pub s3_rate_put_window_secs: u64,
+
+    /// Bearer token for `/api/admin/v1` (empty = Bearer auth disabled; Basic access/secret still accepted).
+    #[arg(long, env = "MAXIO_ADMIN_TOKEN", default_value = "")]
+    pub admin_token: String,
+
+    /// Max admin API requests per client IP per window (0 = disabled).
+    #[arg(long, env = "MAXIO_ADMIN_RATE_MAX", default_value = "120")]
+    pub admin_rate_max: u32,
+
+    /// Sliding window for admin API rate limit, in seconds.
+    #[arg(long, env = "MAXIO_ADMIN_RATE_WINDOW_SECS", default_value = "60")]
+    pub admin_rate_window_secs: u64,
 }
 
 #[cfg(test)]

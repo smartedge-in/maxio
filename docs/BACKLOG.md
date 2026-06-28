@@ -78,8 +78,8 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
-| P2-13 | Authenticated admin API (remote ops) | api | L | **Scaffolding:** `/api/admin/v1/*` routes exist in `src/api/admin.rs` but return `501` without auth. Remote administration still needs real handlers beyond S3, console UI, and public `/healthz`/`/readyz`. | Versioned admin HTTP API (e.g. `/api/admin/v1/…`) protected by admin credentials (dedicated token or scoped use of access/secret with `MAXIO_ADMIN` role — design doc required). Endpoints at minimum: **GET /status** (healthz + readyz + version + uptime), **GET /info** (data-dir path, disk free/used, bucket/object counts, active config: EC, quotas, region), **GET /doctor** (readiness + disk reserve + keyring usable), **POST /housekeeping/run** (on-demand stale-multipart/temp sweep), **GET /keyring** (ids + metadata, never raw keys). TLS documented as required for production; rate-limited; mutating calls audit-logged when P2-08 lands. Integration tests for auth failure, success paths, and JSON schema stability. |
-| P2-12 | MaxIO admin / ops CLI (remote-first) | ops | XL | **Scaffolding:** `crates/maxio-admin` binary with command stubs + profile config; server exposes `/api/admin/v1/*` 501 stubs. The `maxio` binary still only has `healthcheck` and local `keyring`. | **`maxio-admin` CLI is remote-first** (finish P2-12) — every inspect/manage command targets a running instance via **P2-13 admin API** using named **profiles** (`endpoint`, TLS, admin credentials, timeout). Commands: `admin status`, `admin info`, `admin doctor`, `admin buckets list|head`, `admin housekeeping run`, `admin keyring list` (remote metadata). **Local-only** commands (explicit `--data-dir`, no network): `admin keyring rotate`, offline `doctor` for air-gapped recovery. Supports multiple profiles (`prod`, `staging`), `--json` + human tables, config file (`~/.config/maxio/config.toml`), env overrides. Does **not** replace `mc`/AWS CLI for object put/get. Documented in `docs/operations.md` with remote examples (including behind reverse proxy). CLI integration tests against live test server + admin API; contract tests for JSON output. **Blocked on P2-13** for remote paths. |
+| ~~P2-13~~ | ~~Authenticated admin API (remote ops)~~ | api | L | Done — `/api/admin/v1/*` with Bearer token or Basic access/secret auth, per-IP rate limiting, JSON handlers for status/info/doctor/buckets/keyring/housekeeping; integration tests. | — |
+| ~~P2-12~~ | ~~MaxIO admin / ops CLI (remote-first)~~ | ops | XL | Done — `maxio-admin` remote commands via P2-13 API; local `doctor --data-dir` and `keyring rotate`; profiles, `--json`, docs in `docs/operations.md`. | — |
 
 ---
 
@@ -130,7 +130,7 @@ Reference only — no backlog action unless regressions appear.
 **Sprint 2 (harden):** ~~P0-03~~, ~~P1-01~~, ~~P1-02~~, ~~P0-04~~ ✓
 **Sprint 3 (scale maintainability):** ~~P2-01~~, ~~P2-04~~, ~~P0-05~~, ~~P2-06~~ ✓
 **Sprint 4 (erasure coding hardening):** ~~P1-13~~, ~~P2-11~~, ~~P2-09~~, ~~P2-10~~, ~~P1-12~~ ✓
-**Sprint 5 (ops tooling):** P2-13 (admin API), then P2-12 (CLI: profiles → remote status/info/doctor → housekeeping; local keyring rotate last)
+**Sprint 5 (ops tooling):** ~~P2-13~~ (admin API), ~~P2-12~~ (CLI: profiles → remote status/info/doctor → housekeeping; local keyring rotate) ✓
 
 ---
 

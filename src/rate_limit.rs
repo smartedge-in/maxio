@@ -115,6 +115,24 @@ impl Default for LoginRateLimiter {
     }
 }
 
+/// Admin API rate limiter (counts every authenticated request).
+pub struct AdminRateLimiter {
+    inner: SlidingWindowLimiter,
+}
+
+impl AdminRateLimiter {
+    pub fn from_config(max: u32, window_secs: u64) -> Self {
+        Self {
+            inner: SlidingWindowLimiter::new(max, window_secs),
+        }
+    }
+
+    /// Returns `Some(retry_after_secs)` if the IP is rate-limited, `None` if allowed.
+    pub fn check_and_increment(&self, ip: &str) -> Option<u64> {
+        self.inner.try_acquire(ip)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,10 +2,6 @@
 
 Remote-first operations CLI for [MaxIO](https://github.com/coollabsio/maxio) instances.
 
-## Status
-
-**Scaffolding / stubs** — commands are wired to `/api/admin/v1/…` on the server. The server returns `501 Not Implemented` until [P2-13](../../docs/BACKLOG.md) lands; the CLI prints a stub JSON/human response when the API is unavailable.
-
 ## Build
 
 From the repository root:
@@ -22,6 +18,8 @@ maxio-admin config path
 cp crates/maxio-admin/config.example.toml ~/.config/maxio/config.toml
 ```
 
+Set `admin_token` to match the server's `MAXIO_ADMIN_TOKEN`, or provide `access_key` / `secret_key` for Basic auth fallback.
+
 ## Commands
 
 | Command | Scope | Description |
@@ -29,11 +27,12 @@ cp crates/maxio-admin/config.example.toml ~/.config/maxio/config.toml
 | `status` | remote | Health + readiness summary |
 | `info` | remote | Disk, counts, server config |
 | `doctor` | remote | Preflight checks |
+| `doctor --data-dir <path>` | **local** | Offline doctor (no network) |
 | `buckets list` | remote | Bucket inventory |
 | `buckets head <name>` | remote | Single bucket metadata |
 | `housekeeping run` | remote | On-demand maintenance sweep |
 | `keyring list` | remote | Keyring metadata (no secrets) |
-| `keyring rotate --data-dir` | **local** | Stub — use `maxio keyring rotate` for now |
+| `keyring rotate --data-dir <path>` | **local** | Rotate on-disk SSE-S3 keyring |
 
 Global flags: `--profile`, `--endpoint`, `--json`, `--config`.
 
@@ -41,5 +40,9 @@ Global flags: `--profile`, `--endpoint`, `--json`, `--config`.
 
 ```bash
 export MAXIO_ADMIN_ENDPOINT=http://127.0.0.1:9000
+export MAXIO_ADMIN_TOKEN=your-admin-token
 maxio-admin --json status
+maxio-admin doctor --data-dir ./data
 ```
+
+See [docs/operations.md](../../docs/operations.md) for TLS, authentication, and production deployment guidance.
