@@ -7,13 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Licensing: replaced MPL-2.0 `dirs` in `maxio-admin` with XDG/HOME config-dir resolution; switched `reqwest` from `rustls-tls` to `native-tls-vendored`; embedded UI fonts changed from OFL Geist to MIT Inter + JetBrains Mono; CI enforces permissive Rust licenses via `cargo-deny` (`deny.toml`, `docs/licensing.md`).
-- Three review/refactor cycles on P1 S3 code: shared virtual-host helpers, auth public-bypass constants, integration test helpers, expanded unit/integration tests, and ≥80% CI coverage floors on `virtual_host`, `credentials`, and `policy`.
-
 ### Added
 
+- Production GNU **Makefile** with a full local validation pipeline (`make ci` / `make all`): fmt, check, clippy, test, coverage, `cargo audit`, `cargo deny`, Trivy filesystem/secret/config/license scans, CycloneDX SBOM, doc, release build, Docker image, and Trivy image scan.
+- `make install-tools` — installs Rust toolchain components, `cargo-audit` / `cargo-deny` / `cargo-llvm-cov`, bun (when `unzip` is available), and Trivy to `~/.local/bin` (run as a normal user, not `sudo`).
+- `make deny-all` — full `cargo deny check` (licenses, advisories, bans, sources); `make deny` defaults to licenses only (matches GitHub Actions).
 - P1 S3 compatibility: virtual-hosted-style requests — `Host: bucket.{server_host}` with `MAXIO_SERVER_HOST` / `--server-host`; handler dispatch + SigV4 client-path verification (P1-09).
 - P1 S3 compatibility: multi-credential store — bootstrap env keys plus optional `<data-dir>/.maxio-credentials.json` for additional access/secret pairs (P1-10 phase 1).
 - P1 S3 compatibility: bucket policy v1 — `PUT/GET/DELETE ?policy` with Allow/`Principal:*` subset for `s3:GetObject` and `s3:ListBucket` (P1-11).
@@ -24,11 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - P1 security & reliability: optional `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` for distributed console login rate limiting across replicas (P1-06).
 - P1 security & reliability: `/healthz?verbose=1` returns JSON subsystem metrics — disk free %, active multipart uploads, housekeeping lag, readyz (P1-08).
 - Unit and integration tests for trusted proxy, verbose healthz, and session credential invalidation.
-
-### Changed
-
-- P1 security & reliability: README and `docs/operations.md` document bind-address exposure risks and recommend `127.0.0.1` for dev (P1-04).
-
 - Sprint 5 (ops tooling): authenticated admin HTTP API at `/api/admin/v1/*` — Bearer `MAXIO_ADMIN_TOKEN` or Basic access/secret auth, per-IP rate limiting, endpoints for status, info, doctor, buckets, keyring metadata, and on-demand housekeeping (P2-13).
 - Sprint 5 (ops tooling): `maxio-admin` CLI — remote-first commands via admin API; local `doctor --data-dir` and `keyring rotate`; profiles, `--json`, human tables; documented in `docs/operations.md` (P2-12).
 - Admin API integration tests (auth failure, Bearer/Basic success, JSON schema checks).
@@ -55,7 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: `bun run check` (svelte-check) in pull-request checks before frontend build (P2-03).
 - `maxio-admin` workspace crate — remote-first ops CLI scaffolding (`status`, `info`, `doctor`, `buckets`, `housekeeping`, `keyring`) with profile config and stub responses until P2-13 admin API is implemented.
 - Server stub routes at `/api/admin/v1/*` returning `501 Not Implemented` (P2-13 placeholder).
-
 - Storage-aware `/readyz` readiness probe: verifies the data directory exists, is writable (write probe), and the SSE-S3 keyring has at least one key. Returns `503 Service Unavailable` when storage is not usable.
 - Configurable upload quotas via `MAXIO_MAX_OBJECT_BYTES` / `--max-object-bytes` (default `0` = unlimited). Oversized uploads are rejected with S3 `EntityTooLarge` (HTTP 400).
 - Configurable disk reserve via `MAXIO_MIN_FREE_DISK_BYTES` / `--min-free-disk-bytes` (default `0` = disabled). New uploads are rejected with `InsufficientStorage` (HTTP 507) when free space on the data volume falls below the reserve.
@@ -70,6 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Licensing: replaced MPL-2.0 `dirs` in `maxio-admin` with XDG/HOME config-dir resolution; switched `reqwest` from `rustls-tls` to `native-tls-vendored`; embedded UI fonts changed from OFL Geist to MIT Inter + JetBrains Mono; CI enforces permissive Rust licenses via `cargo-deny` (`deny.toml`, `docs/licensing.md`).
+- Three review/refactor cycles on P1 S3 code: shared virtual-host helpers, auth public-bypass constants, integration test helpers, expanded unit/integration tests, and ≥80% CI coverage floors on `virtual_host`, `credentials`, and `policy`.
+- P1 security & reliability: README and `docs/operations.md` document bind-address exposure risks and recommend `127.0.0.1` for dev (P1-04).
+- CORS middleware reordered — `OPTIONS` preflight runs before SigV4 auth so browser clients receive CORS headers on unauthenticated preflight requests.
+- SSE read path: `FrameDecryptor::preflight()` validates the first encrypted frame before streaming the response body; sidecar integrity errors map to HTTP 400, EC chunk corruption to HTTP 500.
+- `make ci` runs `cargo clean` after `doc` and before `release` to drop debug artifacts and avoid disk exhaustion on small root volumes.
+- Trivy vulnerability DB cache defaults to `/tmp/maxio-trivy-cache` instead of the repository tree.
+- `build.rs` falls back gracefully when bun is missing (`SKIP_FRONTEND=1`); `make ci` auto-enables `SKIP_FRONTEND` when bun is not on `PATH`.
 - `/readyz` no longer returns `200` unconditionally; it reflects actual storage readiness.
 - S3 and console upload paths pass `Content-Length` (when present) into storage for early quota validation.
 - Upload error mapping consolidated through `storage::map_upload_error()` for consistent S3 XML responses.
@@ -78,8 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### CI
 
 - Re-enabled `cargo test --all --all-features` in the pull-request checks workflow (removed in `1aa9fa5`).
+- GitHub Actions **License audit** job runs `cargo deny check licenses`; local `make deny` matches this default.
+- `deny.toml` ignores transitive `RUSTSEC-2024-0384` (`instant` via `reed-solomon-erasure`) and `RUSTSEC-2026-0097` (`rand` unsound with custom logger — not used in MaxIO); `cargo audit` reports the same advisories as allowed warnings.
+- `make ci` extends GitHub Actions with coverage, Trivy, SBOM, release build, and container image validation (requires Docker for `image` / `trivy-image`).
 
 ### Docs
 
 - README configuration table: `MAXIO_MAX_OBJECT_BYTES`, `MAXIO_MIN_FREE_DISK_BYTES`, and health endpoint behavior (`/healthz` vs `/readyz`).
 - README link to `docs/operations.md`.
+- `docs/operations.md` — local CI workflow (`make ci`), tool installation, and disk-space guidance for full pipeline runs.
+- `docs/licensing.md` — `make deny` / `make deny-all`, advisory policy, and trimmed SPDX allow-list.
+- `CLAUDE.md` — Makefile targets and extended validation pipeline.

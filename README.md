@@ -61,13 +61,24 @@ After optimization (MaxIO >= 0.3.2)
 ### Build from Source
 
 ```bash
-# Build frontend (optional — cargo build also builds and embeds it)
-# Build binary (build.rs runs the UI build and embeds it)
-cargo build --release
+# One-time developer tooling (cargo-deny, Trivy, bun, etc.)
+make install-tools
+
+# Release binary (build.rs embeds the UI when bun is available)
+make release
 
 # Run
 ./target/release/maxio --data-dir ./data --port 9000
 ```
+
+For the full local validation pipeline (tests, coverage, license audit, Trivy, SBOM, release):
+
+```bash
+make ci
+```
+
+See [docs/operations.md](docs/operations.md#local-ci-and-validation-make-ci) for disk-space
+requirements and stages that need Docker or bun.
 
 ### Docker
 
@@ -242,5 +253,5 @@ See [CLAUDE.md](CLAUDE.md) for the full development workflow, architecture detai
 [Apache-2.0](LICENSE)
 
 Third-party dependency and embedded-asset licensing policy is documented in
-[docs/licensing.md](docs/licensing.md). CI runs `cargo deny check` against a permissive
-license allow-list.
+[docs/licensing.md](docs/licensing.md). CI runs `cargo deny check licenses` (local:
+`make deny`); full policy including advisories: `make deny-all`.

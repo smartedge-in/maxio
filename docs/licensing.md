@@ -15,10 +15,33 @@ We avoid copyleft (GPL/AGPL/LGPL), weak copyleft (MPL-2.0), and non-standard lic
 
 ## Rust dependencies
 
-CI runs [`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny) against
-[`deny.toml`](../deny.toml) on every push and pull request.
+CI and local `make deny` run [`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny)
+against [`deny.toml`](../deny.toml) with **licenses only** (`cargo deny check licenses`).
+A full graph check — advisories, duplicate crates, sources — is available via `make deny-all`.
 
-### Recent changes
+### SPDX allow-list
+
+`deny.toml` allows only licenses present in the production dependency graph:
+
+- Apache-2.0, MIT, BSD-3-Clause, Unicode-3.0
+
+Other common permissive identifiers (ISC, Zlib, BSD-2-Clause, CC0-1.0, 0BSD) are acceptable
+in principle but are not listed until a dependency actually requires them.
+
+### Advisory policy
+
+`make deny-all` and `cargo audit` may report transitive advisories that do not affect MaxIO
+runtime behavior. These are documented and ignored in `deny.toml`:
+
+| Advisory | Crate | Rationale |
+|----------|-------|-----------|
+| `RUSTSEC-2024-0384` | `instant` | Unmaintained; pulled in by `reed-solomon-erasure` → `parking_lot` 0.11 (Redox-only path) |
+| `RUSTSEC-2026-0097` | `rand` 0.10 | Unsound only when a custom `log` logger is installed; MaxIO does not register one |
+
+`cargo audit` prints these as **allowed warnings** (exit 0). Upgrade `rand` to ≥ 0.10.1 when
+the workspace dependency graph permits.
+
+### Recent dependency changes
 
 | Change | Rationale |
 |--------|-----------|
@@ -43,11 +66,17 @@ Embedded fonts (MIT):
 ## Verifying locally
 
 ```bash
-# Install cargo-deny (once)
-cargo install cargo-deny
+# Install developer tooling (cargo-deny, cargo-audit, Trivy, etc.)
+make install-tools
 
-# License audit (workspace, all features)
-cargo deny check
+# License audit — same as GitHub Actions (default)
+make deny
+
+# Full cargo-deny graph (licenses + advisories + bans + sources)
+make deny-all
+
+# RustSec advisory scan (may show allowed warnings for ignored advisories)
+make audit
 
 # Inspect a crate's license
 cargo metadata --format-version 1 | jq '.packages[] | select(.name=="<crate>") | .license'

@@ -392,6 +392,69 @@ Restore by stopping MaxIO, restoring the directory tree, and starting again. Buc
 
 `MAXIO_DEFAULT_BUCKETS` creates buckets on startup (comma-separated). Invalid names are skipped. Provisioning is idempotent.
 
+## Local CI and validation (`make ci`)
+
+The repository root **Makefile** runs an extended validation pipeline beyond GitHub Actions.
+Use it before release builds or when validating security and licensing locally.
+
+### One-time setup
+
+```bash
+# Run as your normal user — do not use sudo (rustup/cargo install per-user)
+make install-tools
+```
+
+This installs Rust components (`rustfmt`, `clippy`, `llvm-tools-preview`), `cargo-audit`,
+`cargo-deny`, `cargo-llvm-cov`, bun (when `unzip` is available), and Trivy to `~/.local/bin`.
+
+### Full pipeline
+
+```bash
+make ci          # same as make all — stops on first failure
+```
+
+Stages (in order): `fmt` → `check` → `lint` → `test` → `coverage` → `audit` → `deny` →
+Trivy filesystem/secret/config/license scans → SBOM → `trivy-sbom` → `doc` → `cargo clean` →
+`release` → `image` → `trivy-image`.
+
+**Partial runs** — invoke individual targets, e.g. `make test`, `make deny-all`, `make trivy-fs-critical`.
+
+**Without bun** — when bun is not on `PATH`, `SKIP_FRONTEND=1` is set automatically and the
+embedded UI build is skipped (minimal stub UI in release binaries). Install bun via
+`make install-tools` for a full console build.
+
+**Without Docker** — `image` and `trivy-image` fail if Docker is not installed; earlier stages
+still run. Skip container steps with:
+
+```bash
+make fmt check lint test coverage audit deny trivy-fs release
+```
+
+### Disk space
+
+A full `make ci` on a single 20 GiB root volume needs roughly **10+ GiB** free at peak:
+debug `target/` from test/coverage/doc (~5–6 GiB), Trivy DB (~100 MiB), then release compile.
+
+The Makefile mitigates exhaustion on small disks:
+
+- Trivy cache defaults to `/tmp/maxio-trivy-cache` (tmpfs), not the repo tree
+- `cargo clean` runs after `doc` and before `release` to drop debug artifacts
+
+If a release build fails with `No space left on device`:
+
+```bash
+cargo clean
+rm -rf /tmp/maxio-trivy-cache
+make release
+```
+
+### Security scan notes
+
+Trivy may report a **LOW** `rand` advisory (`GHSA-cq8v-f236-94qc`, fixed in 0.10.1) and
+**MEDIUM** Dockerfile hints (`DS-0013`: prefer `WORKDIR` over `RUN cd …`). These do not fail
+`make ci` by default. See `docs/licensing.md` for the matching `cargo audit` / `cargo-deny`
+advisory policy.
+
 ## CI coverage
 
 Pull requests run a `coverage` job that prints a `cargo llvm-cov` summary for library unit tests and enforces line-coverage floors via `scripts/check-coverage-floors.sh`:

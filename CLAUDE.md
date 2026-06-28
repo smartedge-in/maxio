@@ -13,13 +13,33 @@ Always spell the product name **MaxIO** (capital M, capital I, capital O). Never
 ## Build & Run
 
 ```bash
-# Build frontend (optional — cargo build also builds and embeds it)
-# Build binary (build.rs runs the UI build and embeds it)
-cargo build --release
+make install-tools   # once — rustfmt/clippy, cargo-audit/deny/llvm-cov, bun, Trivy
+make release
 ./target/release/maxio --data-dir ./data --port 9000
 ```
 
 Environment variables: `MAXIO_PORT`, `MAXIO_ADDRESS`, `MAXIO_DATA_DIR`, `MAXIO_ACCESS_KEY` (aliases: `MINIO_ROOT_USER`, `MINIO_ACCESS_KEY`), `MAXIO_SECRET_KEY` (aliases: `MINIO_ROOT_PASSWORD`, `MINIO_SECRET_KEY`), `MAXIO_REGION` (aliases: `MINIO_REGION_NAME`, `MINIO_REGION`)
+
+## Makefile CI pipeline
+
+The root `Makefile` mirrors and extends GitHub Actions validation. Default goal is `help`.
+
+| Target | Purpose |
+|--------|---------|
+| `make ci` / `make all` | Full pipeline (fmt → release → Docker image scan) |
+| `make test` | `cargo test --workspace --all-features` |
+| `make lint` | Clippy with `-D warnings` |
+| `make coverage` | HTML report under `coverage/` |
+| `make deny` | `cargo deny check licenses` (CI default) |
+| `make deny-all` | Full cargo-deny (licenses, advisories, bans, sources) |
+| `make audit` | `cargo audit` (ignored transitive advisories = allowed warnings) |
+| `make trivy-fs` | Trivy vuln/secret/misconfig filesystem scan |
+| `make release` | Optimized binaries in `target/release/` |
+
+Run `make install-tools` as a **normal user** (not `sudo`). Without bun, `SKIP_FRONTEND=1` is
+auto-set. Without Docker, skip `image` / `trivy-image`. On disks under ~20 GiB, ensure several
+GB free before `make ci` — the pipeline runs `cargo clean` before `release`. Details:
+`docs/operations.md`.
 
 ## Production Build
 
@@ -238,10 +258,20 @@ aws --endpoint-url http://localhost:9000 s3 rb s3://test-bucket
 
 ```bash
 # Unit + integration tests (no server needed)
-cargo test
+make test
+# or: cargo test --workspace --all-features
 
 # AWS CLI integration tests (requires running server)
 ./tests/aws_cli_test.sh
+```
+
+### License and security checks
+
+```bash
+make deny          # licenses (CI)
+make deny-all      # full cargo-deny graph
+make audit         # RustSec advisories
+make trivy-fs      # Trivy filesystem scan
 ```
 
 ### Benchmarking (MaxIO vs MinIO)
