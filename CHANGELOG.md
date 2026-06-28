@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sprint 3 (maintainability): split `src/storage/filesystem.rs` into `filesystem/{mod,common,object_io,multipart,encryption_io,listing,housekeeping}.rs` (P2-01).
+- Sprint 3 (maintainability): CI `coverage` job — `cargo llvm-cov` summary plus line-coverage floors for `storage/crypto.rs` (80%) and `auth/signature_v4.rs` (25%) (P2-04).
+- Sprint 3 (maintainability): console API integration tests — login failure/rate-limit, auth check/logout, list buckets, versioning/public settings, protected-route gate (P2-06).
+- Unit test for `validate_key()` in `storage/filesystem/common.rs`.
+
 - Sprint 2 (harden): S3 API rate limiting — configurable per-IP limits on auth failures (`MAXIO_S3_RATE_AUTH_MAX`, `MAXIO_S3_RATE_AUTH_WINDOW_SECS`, default 60 per 5 min) and PUT requests (`MAXIO_S3_RATE_PUT_MAX`, `MAXIO_S3_RATE_PUT_WINDOW_SECS`, default disabled); returns HTTP 429 with `Retry-After` and S3 `SlowDown` XML (P1-01).
 - Sprint 2 (harden): tightened Content-Security-Policy — inline theme script moved to `ui/static/theme-init.js`; `script-src 'self'` without `'unsafe-inline'`; Svelte inline styles documented as remaining `'unsafe-inline'` exception (P1-02).
 - Shared `rate_limit` module (`SlidingWindowLimiter`, `S3RateLimiter`, `LoginRateLimiter`) with unit tests.

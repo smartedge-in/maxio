@@ -206,6 +206,17 @@ Restore by stopping MaxIO, restoring the directory tree, and starting again. Buc
 
 `MAXIO_DEFAULT_BUCKETS` creates buckets on startup (comma-separated). Invalid names are skipped. Provisioning is idempotent.
 
+## CI coverage
+
+Pull requests run a `coverage` job that prints a `cargo llvm-cov` summary for library unit tests and enforces line-coverage floors via `scripts/check-coverage-floors.sh`:
+
+| Module | Minimum line coverage |
+|--------|----------------------|
+| `src/storage/crypto.rs` | 80% |
+| `src/auth/signature_v4.rs` | 25% |
+
+Integration tests are excluded from these thresholds; they remain the primary S3 compatibility gate.
+
 ## Monitoring recommendations
 
 - Alert on `/readyz` returning 503

@@ -62,12 +62,12 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
-| P2-01 | Split `filesystem.rs` | storage | L | ~3,800-line monolith complicates review and change safety. | Extract modules: `object_io`, `multipart`, `encryption_io`, `listing`, `housekeeping`; no behavior change; tests pass. |
+| ~~P2-01~~ | ~~Split `filesystem.rs`~~ | storage | L | Done — `src/storage/filesystem/` with `mod.rs`, `common.rs`, `object_io`, `multipart`, `encryption_io`, `listing`, `housekeeping`; behavior unchanged. | — |
 | P2-02 | Reduce crate-level clippy allows | storage | M | Broad `#![allow(clippy::...)]` in `main.rs` / `lib.rs` hides issues. | Remove allows file-by-file; fix or locally allow with justification. |
 | ~~P2-03~~ | ~~Add `bun run check` to CI~~ | ci | S | Done — `bun run check` step in `.github/workflows/ci.yml` before frontend build. | — |
-| P2-04 | Unit test coverage report in CI | ci | S | Coverage is unknown; integration tests dominate. | `cargo llvm-cov` or `cargo tarpaulin` job publishes summary; set minimum threshold for `storage/crypto`, `auth`. |
+| ~~P2-04~~ | ~~Unit test coverage report in CI~~ | ci | S | Done — `coverage` CI job with `cargo llvm-cov --summary-only`; floors: `storage/crypto.rs` ≥80% lines, `auth/signature_v4.rs` ≥25% lines. | — |
 | P2-05 | Replace `unwrap()` in hot paths | storage | M | `unwrap`/`expect` in auth and storage error paths. | Audit and convert to `?` + proper `S3Error`/`StorageError` where user-visible. |
-| P2-06 | Console API integration tests | api | M | Console routes lack dedicated integration coverage vs S3. | Tests for login, rate limit, presign, bucket settings JSON API. |
+| ~~P2-06~~ | ~~Console API integration tests~~ | api | M | Done — integration tests for login failure, login rate limit, auth check/logout, list buckets, versioning/public settings, protected-route auth gate (presign/upload/settings covered by existing tests). | — |
 | P2-09 | Multipart + EC integration tests | storage | M | `complete_multipart_chunked` / `complete_multipart_chunked_encrypted` exist but multipart integration tests use the default non-EC server. | Tests under `start_server_ec()` / `start_server_ec_parity()`: create upload → upload parts → complete → GET roundtrip; SSE-S3 multipart variant covered. |
 | P2-10 | CopyObject + EC integration tests | storage | S | Copy rewrites via `put_object` (chunks on EC-enabled servers) but no dedicated EC copy coverage. | With EC enabled: copy same-bucket and cross-bucket; destination is chunked on disk; GET roundtrip passes; SSE-S3 copy paths included. |
 | P2-11 | Document EC operational limits | docs | S | Server-wide `--erasure-coding` toggle, parity required for recovery, GF(2⁸) 255-shard cap, and single-node scope are implicit in code but not summarized for operators. | `docs/operations.md` (or README) section: when to enable parity, max shards formula, no per-bucket EC, no recovery without parity, link to config flags. |
@@ -128,7 +128,7 @@ Reference only — no backlog action unless regressions appear.
 
 **Sprint 1 (stabilize):** ~~P0-01~~, ~~P0-02~~, ~~P2-03~~, ~~P1-07~~ ✓
 **Sprint 2 (harden):** ~~P0-03~~, ~~P1-01~~, ~~P1-02~~, ~~P0-04~~ ✓
-**Sprint 3 (scale maintainability):** P2-01, P2-04, P0-05, P2-06  
+**Sprint 3 (scale maintainability):** ~~P2-01~~, ~~P2-04~~, ~~P0-05~~, ~~P2-06~~ ✓
 **Sprint 4 (erasure coding hardening):** P1-13, P2-11, P2-09, P2-10, P1-12  
 **Sprint 5 (ops tooling):** P2-13 (admin API), then P2-12 (CLI: profiles → remote status/info/doctor → housekeeping; local keyring rotate last)
 

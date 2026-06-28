@@ -2552,6 +2552,181 @@ async fn console_login(base_url: &str) -> String {
 }
 
 #[tokio::test]
+async fn test_console_login_invalid_credentials() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = client()
+        .post(format!("{}/api/auth/login", base_url))
+        .json(&serde_json::json!({"accessKey": "wrong", "secretKey": "wrong"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"], "Invalid credentials");
+}
+
+#[tokio::test]
+async fn test_console_login_rate_limit() {
+    let (base_url, _tmp) = start_server().await;
+    for _ in 0..10 {
+        let resp = client()
+            .post(format!("{}/api/auth/login", base_url))
+            .json(&serde_json::json!({"accessKey": "bad", "secretKey": "bad"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 401);
+    }
+    let resp = client()
+        .post(format!("{}/api/auth/login", base_url))
+        .json(&serde_json::json!({"accessKey": "bad", "secretKey": "bad"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 429);
+    assert!(resp.headers().contains_key("retry-after"));
+}
+
+#[tokio::test]
+async fn test_console_auth_check_and_logout() {
+    let (base_url, _tmp) = start_server().await;
+
+    let resp = client()
+        .get(format!("{}/api/auth/check", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
+
+    let session = console_login(&base_url).await;
+    let resp = client()
+        .get(format!("{}/api/auth/check", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["ok"], true);
+
+    let resp = client()
+        .post(format!("{}/api/auth/logout", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Client drops the cleared cookie after logout (stateless HMAC tokens are not
+    // server-revoked; only the Set-Cookie max-age=0 response matters).
+    let resp = client()
+        .get(format!("{}/api/auth/check", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
+}
+
+#[tokio::test]
+async fn test_console_list_buckets() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{}/console-list-a", base_url), vec![]).await;
+    s3_request("PUT", &format!("{}/console-list-b", base_url), vec![]).await;
+
+    let session = console_login(&base_url).await;
+    let resp = client()
+        .get(format!("{}/api/buckets", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let names: Vec<&str> = body["buckets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"console-list-a"));
+    assert!(names.contains(&"console-list-b"));
+}
+
+#[tokio::test]
+async fn test_console_bucket_versioning_and_public_settings() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{}/console-settings", base_url), vec![]).await;
+    let session = console_login(&base_url).await;
+
+    let resp = client()
+        .get(format!("{}/api/buckets/console-settings/versioning", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.json::<serde_json::Value>().await.unwrap()["enabled"], false);
+
+    let resp = client()
+        .put(format!("{}/api/buckets/console-settings/versioning", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .json(&serde_json::json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let resp = client()
+        .get(format!("{}/api/buckets/console-settings/versioning", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.json::<serde_json::Value>().await.unwrap()["enabled"], true);
+
+    let resp = client()
+        .get(format!("{}/api/buckets/console-settings/public", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let public = resp.json::<serde_json::Value>().await.unwrap();
+    assert_eq!(public["read"], false);
+    assert_eq!(public["list"], false);
+
+    let resp = client()
+        .put(format!("{}/api/buckets/console-settings/public", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .json(&serde_json::json!({"read": true, "list": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let resp = client()
+        .get(format!("{}/api/buckets/console-settings/public", base_url))
+        .header("cookie", format!("maxio_session={}", session))
+        .send()
+        .await
+        .unwrap();
+    let public = resp.json::<serde_json::Value>().await.unwrap();
+    assert_eq!(public["read"], true);
+    assert_eq!(public["list"], true);
+}
+
+#[tokio::test]
+async fn test_console_protected_route_requires_auth() {
+    let (base_url, _tmp) = start_server().await;
+    let resp = client()
+        .get(format!("{}/api/buckets", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
+}
+
+#[tokio::test]
 async fn test_console_mutation_allows_dev_loopback_origin_via_vite_proxy() {
     let (base_url, _tmp) = start_server().await;
     let session = console_login(&base_url).await;
