@@ -174,10 +174,14 @@ async fn main() -> anyhow::Result<()> {
     );
     let credentials =
         Arc::new(auth::credentials::CredentialStore::load(&config.data_dir, &config).await?);
-    if credentials.len() > 1 {
+    if !credentials.is_empty() && credentials.len() > 1 {
         tracing::info!(
             "S3 credentials: {} access key(s) loaded (bootstrap + .maxio-credentials.json)",
             credentials.len()
+        );
+        tracing::debug!(
+            access_keys = ?credentials.list_access_keys(),
+            "loaded S3 access keys"
         );
     }
 

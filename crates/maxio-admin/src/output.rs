@@ -23,7 +23,7 @@ pub fn emit_stub(json_mode: bool, command: &str, endpoint: &str, profile: &str) 
 
 pub fn emit_message(json_mode: bool, message: &str) {
     if json_mode {
-        println!("{}", serde_json::json!({ "message": message }).to_string());
+        println!("{}", serde_json::json!({ "message": message }));
     } else {
         println!("{message}");
     }
@@ -47,7 +47,7 @@ fn print_human(value: &Value) {
     }
 
     if let Some(buckets) = value.get("buckets").and_then(|b| b.as_array()) {
-        println!("{:<24}  {:>8}  {}", "BUCKET", "OBJECTS", "CREATED");
+        println!("{:<24}  {:>8}  CREATED", "BUCKET", "OBJECTS");
         for bucket in buckets {
             println!(
                 "{:<24}  {:>8}  {}",

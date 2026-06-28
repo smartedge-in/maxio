@@ -95,7 +95,7 @@ pub fn verify_signature(
 /// True when the query string includes an `X-Amz-Signature` parameter (any casing).
 pub fn query_has_presigned_signature(query: &str) -> bool {
     query.split('&').filter(|s| !s.is_empty()).any(|pair| {
-        pair.splitn(2, '=')
+        pair.split('=')
             .next()
             .is_some_and(|key| query_param_key_eq(key, "X-Amz-Signature"))
     })
@@ -106,7 +106,7 @@ fn query_param_key_eq(key: &str, expected: &str) -> bool {
 }
 
 fn is_signature_query_pair(pair: &str) -> bool {
-    pair.splitn(2, '=')
+    pair.split('=')
         .next()
         .is_some_and(|key| query_param_key_eq(key, "X-Amz-Signature"))
 }

@@ -91,20 +91,20 @@ impl AdminSession {
 
     fn auth_headers(&self) -> reqwest::header::HeaderMap {
         let mut headers = reqwest::header::HeaderMap::new();
-        if let Some(token) = &self.profile.admin_token {
-            if !token.is_empty() {
-                if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
-                    headers.insert(reqwest::header::AUTHORIZATION, v);
-                    return headers;
-                }
-            }
+        if let Some(token) = &self.profile.admin_token
+            && !token.is_empty()
+            && let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+        {
+            headers.insert(reqwest::header::AUTHORIZATION, v);
+            return headers;
         }
-        if let (Some(access), Some(secret)) = (&self.profile.access_key, &self.profile.secret_key) {
-            if !access.is_empty() && !secret.is_empty() {
-                let encoded = B64.encode(format!("{access}:{secret}"));
-                if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Basic {encoded}")) {
-                    headers.insert(reqwest::header::AUTHORIZATION, v);
-                }
+        if let (Some(access), Some(secret)) = (&self.profile.access_key, &self.profile.secret_key)
+            && !access.is_empty()
+            && !secret.is_empty()
+        {
+            let encoded = B64.encode(format!("{access}:{secret}"));
+            if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Basic {encoded}")) {
+                headers.insert(reqwest::header::AUTHORIZATION, v);
             }
         }
         headers

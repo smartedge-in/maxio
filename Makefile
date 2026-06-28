@@ -8,7 +8,7 @@ SHELL         := /bin/bash
 .SHELLFLAGS   := -eu -o pipefail -c
 .ONESHELL:
 MAKEFLAGS     += --no-builtin-rules
-.DEFAULT_GOAL := all
+.DEFAULT_GOAL := help
 
 # -----------------------------------------------------------------------------
 # Tooling
@@ -394,7 +394,7 @@ install-tools: ## Install required developer and security tooling
 
 help: ## Show available targets and descriptions
 	@printf "$(COLOR_BOLD)Available Targets$(COLOR_RESET)\n\n"
-	@printf "$(COLOR_DIM)Usage: make <target>  |  default: make all$(COLOR_RESET)\n\n"
+	@printf "$(COLOR_DIM)Usage: make <target>  |  default: make help$(COLOR_RESET)\n\n"
 	@grep -hE '^[a-zA-Z][a-zA-Z0-9_.-]*:.*## ' $(MAKEFILE_LIST) \
 		| sort -u \
 		| awk 'BEGIN {FS = ":.*## "}; {printf "  $(COLOR_GREEN)make %-22s$(COLOR_RESET) %s\n", $$1, $$2}'

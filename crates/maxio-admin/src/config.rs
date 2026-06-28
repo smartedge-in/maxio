@@ -65,10 +65,10 @@ impl ConfigFile {
 
 /// Resolves the platform user config directory without pulling in `dirs` (MPL-2.0).
 pub fn user_config_dir() -> Option<PathBuf> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return Some(PathBuf::from(xdg));
-        }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg.is_empty()
+    {
+        return Some(PathBuf::from(xdg));
     }
 
     #[cfg(windows)]

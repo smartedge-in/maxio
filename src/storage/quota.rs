@@ -90,7 +90,7 @@ fn statvfs_bytes(path: &Path) -> Option<libc::statvfs> {
 #[cfg(unix)]
 pub fn available_disk_bytes(path: &Path) -> Option<u64> {
     let stat = statvfs_bytes(path)?;
-    Some(stat.f_bavail as u64 * stat.f_frsize as u64)
+    Some(stat.f_bavail * stat.f_frsize)
 }
 
 #[cfg(not(unix))]
@@ -102,9 +102,9 @@ pub fn available_disk_bytes(_path: &Path) -> Option<u64> {
 #[cfg(unix)]
 pub fn disk_space_bytes(path: &Path) -> Option<(u64, u64)> {
     let stat = statvfs_bytes(path)?;
-    let frsize = stat.f_frsize as u64;
-    let total = stat.f_blocks as u64 * frsize;
-    let available = stat.f_bavail as u64 * frsize;
+    let frsize = stat.f_frsize;
+    let total = stat.f_blocks * frsize;
+    let available = stat.f_bavail * frsize;
     Some((total, available))
 }
 

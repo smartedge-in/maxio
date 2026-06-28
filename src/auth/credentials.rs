@@ -80,6 +80,10 @@ impl CredentialStore {
         self.by_access_key.values().filter(|c| c.enabled).count()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     #[cfg(test)]
     pub fn from_single(access_key: &str, secret_key: &str) -> Self {
         let mut by_access_key = HashMap::new();
@@ -147,6 +151,7 @@ mod tests {
         let store = CredentialStore::load(dir, &test_config()).await.unwrap();
         assert!(store.lookup("primary").is_some());
         assert!(store.lookup("user2").is_some());
+        assert!(!store.is_empty());
         assert_eq!(store.len(), 2);
     }
 
