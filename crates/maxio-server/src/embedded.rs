@@ -3,7 +3,7 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 
 #[derive(Embed)]
-#[folder = "ui/build"]
+#[folder = "../../ui/build"]
 struct UiAssets;
 
 pub async fn ui_handler(uri: Uri) -> Response {

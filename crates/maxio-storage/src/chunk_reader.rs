@@ -321,7 +321,7 @@ impl AsyncRead for VerifiedChunkReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{ChunkInfo, ChunkKind, ChunkManifest};
+    use crate::{ChunkInfo, ChunkKind, ChunkManifest};
     use tempfile::TempDir;
 
     fn write_chunk(path: &std::path::Path, data: &[u8]) {

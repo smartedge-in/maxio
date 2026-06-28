@@ -424,8 +424,8 @@ impl FilesystemStorage {
 
     pub async fn put_bucket_policy(&self, bucket: &str, policy: &str) -> Result<(), StorageError> {
         validate_bucket_name(bucket)?;
-        let effects = crate::storage::policy::evaluate_v1_policy(bucket, policy)
-            .map_err(StorageError::InvalidKey)?;
+        let effects =
+            crate::policy::evaluate_v1_policy(bucket, policy).map_err(StorageError::InvalidKey)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -499,7 +499,7 @@ impl FilesystemStorage {
     pub async fn put_bucket_cors(
         &self,
         bucket: &str,
-        rules: Vec<crate::storage::CorsRule>,
+        rules: Vec<crate::CorsRule>,
     ) -> Result<(), StorageError> {
         validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
@@ -519,7 +519,7 @@ impl FilesystemStorage {
     pub async fn get_bucket_cors(
         &self,
         bucket: &str,
-    ) -> Result<Option<Vec<crate::storage::CorsRule>>, StorageError> {
+    ) -> Result<Option<Vec<crate::CorsRule>>, StorageError> {
         validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {

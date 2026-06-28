@@ -213,7 +213,7 @@ pub(super) fn preflight_chunk_reader(reader: &mut VerifiedChunkReader) -> Result
 }
 
 pub(super) async fn preflight_frame_decryptor(
-    decryptor: &mut crate::storage::crypto::FrameDecryptor,
+    decryptor: &mut crate::crypto::FrameDecryptor,
 ) -> Result<(), StorageError> {
     decryptor
         .preflight()
@@ -464,7 +464,7 @@ pub(super) async fn remove_dir_all_if_exists(path: &Path) -> Result<(), StorageE
 #[cfg(test)]
 mod tests {
     use super::validate_key;
-    use crate::storage::StorageError;
+    use crate::StorageError;
 
     #[test]
     fn validate_key_rejects_traversal_and_reserved_segments() {

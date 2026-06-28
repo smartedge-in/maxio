@@ -28,8 +28,8 @@ require_min() {
   echo "coverage floor ok: $file ${actual}% >= ${min}% lines"
 }
 
-require_min storage/crypto.rs 80
-require_min auth/signature_v4.rs 25
-require_min api/virtual_host.rs 80
-require_min auth/credentials.rs 80
-require_min storage/policy.rs 80
+require_min crates/maxio-storage/src/crypto.rs 80
+require_min crates/maxio-server/src/auth/signature_v4.rs 25
+require_min crates/maxio-server/src/api/virtual_host.rs 80
+require_min crates/maxio-server/src/auth/credentials.rs 80
+require_min crates/maxio-storage/src/policy.rs 80

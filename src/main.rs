@@ -1,21 +1,7 @@
-mod api;
-mod audit;
-mod auth;
-mod config;
-mod embedded;
-mod error;
-mod metrics;
-mod proxy;
-mod rate_limit;
-mod server;
-mod storage;
-mod version;
-mod xml;
-
 use clap::Parser;
 use clap::Subcommand;
-use config::Config;
 use http::Uri;
+use maxio::{auth, config::Config, rate_limit, server, storage};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;

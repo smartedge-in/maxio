@@ -381,6 +381,21 @@ impl S3Error {
     }
 }
 
+/// Map storage failures from upload paths to S3 XML errors.
+pub fn map_storage_upload_error(err: maxio_storage::StorageError) -> S3Error {
+    match err {
+        maxio_storage::StorageError::ObjectTooLarge { max } => S3Error::entity_too_large(max),
+        maxio_storage::StorageError::InsufficientStorage(msg) => {
+            S3Error::insufficient_storage(&msg)
+        }
+        maxio_storage::StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
+        maxio_storage::StorageError::ChecksumMismatch(_) => S3Error::bad_checksum("x-amz-checksum"),
+        maxio_storage::StorageError::EncryptionError(msg) => S3Error::invalid_argument(&msg),
+        maxio_storage::StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
+        other => S3Error::internal(other),
+    }
+}
+
 impl IntoResponse for S3Error {
     fn into_response(self) -> Response {
         let resource = self.resource.as_deref().unwrap_or("");

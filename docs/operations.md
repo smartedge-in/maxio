@@ -467,8 +467,11 @@ Pull requests run a `coverage` job that prints a `cargo llvm-cov` summary for li
 
 | Module | Minimum line coverage |
 |--------|----------------------|
-| `src/storage/crypto.rs` | 80% |
-| `src/auth/signature_v4.rs` | 25% |
+| `crates/maxio-storage/src/crypto.rs` | 80% |
+| `crates/maxio-server/src/auth/signature_v4.rs` | 25% |
+| `crates/maxio-server/src/api/virtual_host.rs` | 80% |
+| `crates/maxio-server/src/auth/credentials.rs` | 80% |
+| `crates/maxio-storage/src/policy.rs` | 80% |
 
 Integration tests are excluded from these thresholds; they remain the primary S3 compatibility gate.
 

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/maxio-admin"]
+members = [".", "crates/maxio-storage", "crates/maxio-server", "crates/maxio-admin"]
 resolver = "2"
 
 [workspace.package]
@@ -20,57 +20,37 @@ description = "S3-compatible object storage server — single-binary replacement
 keywords = ["s3", "object-storage", "minio", "storage", "server"]
 categories = ["web-programming::http-server", "filesystem"]
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "maxio"
+path = "src/main.rs"
+
 [dependencies]
-# HTTP server
+maxio-server = { path = "crates/maxio-server" }
+maxio-storage = { path = "crates/maxio-storage" }
+
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace"] }
-hyper = "1"
 http = "1"
-bytes = "1"
-
-# XML
-quick-xml = { version = "0.37", features = ["serialize"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Auth / crypto
-hmac = "0.12"
-sha2 = "0.10"
-hex = "0.4"
-
-# Logging
+clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Config
-clap = { version = "4", features = ["derive", "env"] }
-
-# Utilities
-uuid = { version = "1", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
-md-5 = "0.10"
-crc32fast = "1"
-crc32c = "0.6"
-sha1 = "0.10"
-percent-encoding = "2"
-thiserror = "2"
 anyhow = "1"
-tokio-util = { version = "0.7", features = ["io"] }
-futures = "0.3"
-base64 = "0.22"
-
-# Embedded UI assets
-rust-embed = "8"
-mime_guess = "2"
-rand = "0.10.1"
-reed-solomon-erasure = "6"
-aes-gcm = "0.10"
-zeroize = { version = "1", features = ["derive"] }
-libc = "0.2"
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = "1"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls-vendored"] }
 tempfile = "3"
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+md-5 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+crc32fast = "1"
+crc32c = "0.6"
+percent-encoding = "2"

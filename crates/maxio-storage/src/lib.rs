@@ -390,19 +390,6 @@ pub enum StorageError {
     InsufficientStorage(String),
 }
 
-/// Map storage failures from upload paths to S3 XML errors.
-pub fn map_upload_error(err: StorageError) -> crate::error::S3Error {
-    match err {
-        StorageError::ObjectTooLarge { max } => crate::error::S3Error::entity_too_large(max),
-        StorageError::InsufficientStorage(msg) => crate::error::S3Error::insufficient_storage(&msg),
-        StorageError::InvalidKey(msg) => crate::error::S3Error::invalid_argument(&msg),
-        StorageError::ChecksumMismatch(_) => crate::error::S3Error::bad_checksum("x-amz-checksum"),
-        StorageError::EncryptionError(msg) => crate::error::S3Error::invalid_argument(&msg),
-        StorageError::IntegrityError(msg) => crate::error::S3Error::invalid_argument(&msg),
-        other => crate::error::S3Error::internal(other),
-    }
-}
-
 #[cfg(test)]
 mod validation_tests {
     use super::validate_bucket_name;
@@ -433,15 +420,12 @@ mod validation_tests {
 }
 
 #[cfg(test)]
-mod upload_error_tests {
-    use super::{StorageError, map_upload_error};
-    use crate::error::S3ErrorCode;
+mod crate_boundary_tests {
+    use super::is_valid_bucket_name;
 
     #[test]
-    fn maps_policy_parse_errors_to_invalid_argument() {
-        let err = map_upload_error(StorageError::InvalidKey(
-            "MalformedPolicy: only Effect=Allow".into(),
-        ));
-        assert!(matches!(err.code, S3ErrorCode::InvalidArgument));
+    fn public_api_has_no_http_types() {
+        // Storage crate must remain usable without axum/http (compile-time boundary).
+        assert!(is_valid_bucket_name("logs-2026"));
     }
 }

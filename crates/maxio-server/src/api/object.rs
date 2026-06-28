@@ -348,7 +348,7 @@ pub async fn put_object(
             declared_size,
         )
         .await
-        .map_err(crate::storage::map_upload_error)?;
+        .map_err(crate::error::map_storage_upload_error)?;
 
     if state.config.metrics_enabled {
         state.metrics.record_upload_bytes(result.size);
@@ -593,7 +593,7 @@ async fn copy_object(
             Some(src_meta.size),
         )
         .await
-        .map_err(crate::storage::map_upload_error)?;
+        .map_err(crate::error::map_storage_upload_error)?;
 
     // Get destination metadata for LastModified
     let dst_meta = state

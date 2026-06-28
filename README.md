@@ -177,7 +177,16 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 
 See [docs/operations.md](docs/operations.md) for production deployment, TLS, backups, and Kubernetes examples. S3 routing, policies, and multi-key auth are documented in [docs/s3-compatibility.md](docs/s3-compatibility.md).
 
-Run `cargo test -p maxio --lib` for unit tests and `scripts/check-coverage-floors.sh` after `cargo llvm-cov --lib --summary-only` to verify per-module coverage floors.
+### Workspace crates
+
+| Crate | Path | Role |
+|-------|------|------|
+| `maxio` | `.` | Single-binary entry point; re-exports server + storage |
+| `maxio-server` | `crates/maxio-server/` | HTTP/S3 API, auth, console, embedded UI |
+| `maxio-storage` | `crates/maxio-storage/` | Filesystem object storage, encryption, keyring |
+| `maxio-admin` | `crates/maxio-admin/` | Remote administration CLI |
+
+Run `cargo test --workspace --all-features` for the full suite. Per-module coverage floors are checked with `scripts/check-coverage-floors.sh` after `cargo llvm-cov --workspace --lib --summary-only`.
 
 ## Usage
 

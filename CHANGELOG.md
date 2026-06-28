@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Workspace crate split (P3-04): `crates/maxio-storage` (filesystem-backed object storage) and `crates/maxio-server` (Axum S3/console/admin API, embedded UI); root `maxio` package is a thin facade re-exporting both crates for a stable public API.
+- Crate-boundary unit tests in `maxio-storage`, `maxio-server`, and root `maxio` facade; coverage floor paths updated for the new layout.
 - Prometheus metrics (`MAXIO_METRICS_ENABLED`, optional `MAXIO_METRICS_PORT`): `GET /metrics` with request counters, latency sum/count, SlowDown total, upload bytes, uptime, disk free/total, active multipart uploads.
 - Structured audit log (`MAXIO_AUDIT_LOG`): JSON lines on `target=maxio_audit` for mutating S3/console/admin actions (principal, bucket, key, status, outcome).
 - Integration tests for metrics upload-byte counter, dedicated metrics port, and audit log principal/object capture.
@@ -67,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Workspace crate split (P3-04): `map_storage_upload_error()` moved to `maxio-server::error`; UI embed/build pipeline moved to `maxio-server/build.rs`.
 - Removed crate-level `#![allow(clippy::…)]` from `lib.rs` / `main.rs`; fixed mechanical clippy lints workspace-wide.
 - Replaced `unwrap`/`expect` in auth HMAC and storage hot paths with `StorageError` / `IntegrityError` returns.
 - Audit middleware runs after per-route auth so `AuthPrincipal` (SigV4 access key) is recorded; admin API sets principal for Bearer/Basic auth.

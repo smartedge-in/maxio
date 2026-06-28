@@ -103,16 +103,32 @@ This runs both processes concurrently (Ctrl+C kills both):
 
 ## Architecture
 
-### Module Layout
+### Workspace Layout
 
-- `src/main.rs` — entry point, config, server start, graceful shutdown
-- `src/config.rs` — CLI args + env vars via clap derive
-- `src/server.rs` — Axum router construction, AppState, middleware wiring
-- `src/error.rs` — S3Error with XML error response rendering
-- `src/auth/` — AWS Signature V4 verification + Axum middleware
-- `src/api/` — S3 API handlers (bucket.rs, object.rs, multipart.rs, list.rs, router.rs, console.rs)
-- `src/storage/` — Filesystem storage (buckets as dirs, objects as files, JSON sidecar metadata)
-- `src/xml/` — S3 XML response types (serde + quick-xml)
+| Crate | Path | Responsibility |
+|-------|------|----------------|
+| `maxio` | `.` | Facade + `maxio` binary (`src/main.rs`); re-exports `maxio-server` and `maxio-storage` |
+| `maxio-server` | `crates/maxio-server/` | Axum router, S3/console/admin API, auth, metrics, audit, embedded UI |
+| `maxio-storage` | `crates/maxio-storage/` | Filesystem storage, crypto, keyring, bucket policy parser, quotas |
+| `maxio-admin` | `crates/maxio-admin/` | Remote ops CLI |
+
+### Module Layout (`maxio-server`)
+
+- `config.rs` — CLI args + env vars via clap derive
+- `server.rs` — Axum router construction, AppState, middleware wiring
+- `error.rs` — S3Error with XML error response rendering; `map_storage_upload_error()`
+- `auth/` — AWS Signature V4 verification + Axum middleware
+- `api/` — S3 API handlers (bucket.rs, object.rs, multipart.rs, list.rs, router.rs, console.rs)
+- `xml/` — S3 XML response types (serde + quick-xml)
+- `embedded.rs` — `rust-embed` UI assets from `../../ui/build`
+
+### Module Layout (`maxio-storage`)
+
+- `filesystem/` — Buckets as dirs, objects as files, JSON sidecar metadata
+- `crypto.rs` — SSE-S3/SSE-C frame encryption
+- `keys.rs` — Master key keyring
+- `policy.rs` — Bucket policy v1 parser/evaluator
+- `quota.rs` — Object size and free-disk enforcement
 
 ### Key Design Decisions
 
