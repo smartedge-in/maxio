@@ -22,6 +22,28 @@ use crate::xml::{
 
 use super::multipart;
 
+/// True when `IntegrityError` reflects tampered object metadata (sidecar MAC),
+/// not on-disk chunk corruption or EC reconstruction failure.
+fn is_sidecar_integrity_violation(msg: &str) -> bool {
+    msg.contains("sidecar_mac") || msg.contains("encryption metadata")
+}
+
+/// Map storage read/decrypt failures to client-visible S3 errors.
+fn map_read_object_err(err: StorageError, key: &str) -> S3Error {
+    match err {
+        StorageError::NotFound(_) => S3Error::no_such_key(key),
+        StorageError::VersionNotFound(id) => S3Error::no_such_version(&id),
+        StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
+        StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
+        StorageError::EncryptionError(msg) => S3Error::invalid_argument(&msg),
+        StorageError::IntegrityError(msg) if is_sidecar_integrity_violation(&msg) => {
+            S3Error::invalid_argument(&msg)
+        }
+        StorageError::IntegrityError(msg) => S3Error::internal(msg),
+        other => S3Error::internal(other),
+    }
+}
+
 /// Parse SSE request headers into an EncryptionRequest + optional customer key.
 /// Returns `Ok(None)` if no SSE headers are present.
 pub(crate) fn extract_sse_request(
@@ -777,11 +799,7 @@ pub async fn get_object(
             .storage
             .head_object(&bucket, &key)
             .await
-            .map_err(|e| match e {
-                StorageError::NotFound(_) => S3Error::no_such_key(&key),
-                StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
-                _ => S3Error::internal(e),
-            })?;
+            .map_err(|e| map_read_object_err(e, &key))?;
         let part_sizes = meta
             .part_sizes
             .as_ref()
@@ -800,12 +818,7 @@ pub async fn get_object(
             .storage
             .get_object_range(&bucket, &key, offset, length, customer_key)
             .await
-            .map_err(|e| match e {
-                StorageError::NotFound(_) => S3Error::no_such_key(&key),
-                StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
-                StorageError::IntegrityError(msg) => S3Error::internal(msg),
-                _ => S3Error::internal(e),
-            })?;
+            .map_err(|e| map_read_object_err(e, &key))?;
 
         let stream = ReaderStream::with_capacity(reader, 256 * 1024);
         let body = Body::from_stream(stream);
@@ -831,11 +844,7 @@ pub async fn get_object(
             .storage
             .head_object(&bucket, &key)
             .await
-            .map_err(|e| match e {
-                StorageError::NotFound(_) => S3Error::no_such_key(&key),
-                StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
-                _ => S3Error::internal(e),
-            })?;
+            .map_err(|e| map_read_object_err(e, &key))?;
 
         // Evaluate conditional headers before streaming any bytes
         if let Some(result) = check_conditions(&headers, &meta) {
@@ -852,12 +861,7 @@ pub async fn get_object(
                     .storage
                     .get_object_range(&bucket, &key, start, length, customer_key)
                     .await
-                    .map_err(|e| match e {
-                        StorageError::NotFound(_) => S3Error::no_such_key(&key),
-                        StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
-                        StorageError::IntegrityError(msg) => S3Error::internal(msg),
-                        _ => S3Error::internal(e),
-                    })?;
+                    .map_err(|e| map_read_object_err(e, &key))?;
 
                 let stream = ReaderStream::with_capacity(reader, 256 * 1024);
                 let body = Body::from_stream(stream);
@@ -890,26 +894,13 @@ pub async fn get_object(
             .storage
             .get_object_version(&bucket, &key, version_id, customer_key)
             .await
-            .map_err(|e| match e {
-                StorageError::VersionNotFound(_) => S3Error::no_such_version(version_id),
-                StorageError::NotFound(_) => S3Error::no_such_key(&key),
-                StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
-                StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
-                StorageError::IntegrityError(msg) => S3Error::internal(msg),
-                _ => S3Error::internal(e),
-            })?
+            .map_err(|e| map_read_object_err(e, &key))?
     } else {
         state
             .storage
             .get_object(&bucket, &key, customer_key)
             .await
-            .map_err(|e| match e {
-                StorageError::NotFound(_) => S3Error::no_such_key(&key),
-                StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
-                StorageError::DecryptionError(msg) => S3Error::invalid_argument(&msg),
-                StorageError::IntegrityError(msg) => S3Error::internal(msg),
-                _ => S3Error::internal(e),
-            })?
+            .map_err(|e| map_read_object_err(e, &key))?
     };
 
     // Evaluate conditional headers before opening the stream

@@ -46,10 +46,11 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
+    // CORS outermost so OPTIONS preflight is answered before SigV4 auth.
     let s3_routes = s3_router()
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            cors_middleware,
+            virtual_host_middleware,
         ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -57,7 +58,7 @@ pub fn build_router(state: AppState) -> Router {
         ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            virtual_host_middleware,
+            cors_middleware,
         ));
 
     let admin_routes = crate::api::admin::router()
