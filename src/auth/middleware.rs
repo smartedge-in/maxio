@@ -209,20 +209,8 @@ async fn is_public_bypass_allowed(
         _ => return false,
     }
 
-    // Reject mutating sub-resource queries that could trigger a POST-like action on GET.
-    for forbidden in [
-        "delete",
-        "uploads",
-        "tagging",
-        "versioning",
-        "cors",
-        "encryption",
-        "policy",
-        "acl",
-    ] {
-        if has_query_key(query, forbidden) {
-            return false;
-        }
+    if query_has_forbidden_public_subresource(query) {
+        return false;
     }
 
     let (bucket, rest) = if let Some(host) = host {
@@ -270,6 +258,18 @@ async fn is_public_bypass_allowed(
     }
 }
 
+/// Sub-resource query keys that must never bypass authentication on GET/HEAD.
+const PUBLIC_BYPASS_FORBIDDEN_QUERY_KEYS: &[&str] = &[
+    "delete",
+    "uploads",
+    "tagging",
+    "versioning",
+    "cors",
+    "encryption",
+    "policy",
+    "acl",
+];
+
 fn has_query_key(query: &str, key: &str) -> bool {
     for pair in query.split('&') {
         let name = pair.split('=').next().unwrap_or("");
@@ -278,6 +278,12 @@ fn has_query_key(query: &str, key: &str) -> bool {
         }
     }
     false
+}
+
+fn query_has_forbidden_public_subresource(query: &str) -> bool {
+    PUBLIC_BYPASS_FORBIDDEN_QUERY_KEYS
+        .iter()
+        .any(|key| has_query_key(query, key))
 }
 
 fn auth_failure(state: &AppState, client_ip: &str, err: S3Error) -> S3Error {
@@ -363,4 +369,23 @@ async fn handle_presigned(
     tracing::debug!("Presigned signature verification OK");
     let response = next.run(request).await;
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_query_key_is_case_insensitive() {
+        assert!(has_query_key("Policy=1&foo=bar", "policy"));
+        assert!(has_query_key("POLICY", "policy"));
+        assert!(!has_query_key("foo=bar", "policy"));
+    }
+
+    #[test]
+    fn forbidden_subresource_queries_block_public_bypass() {
+        assert!(query_has_forbidden_public_subresource("policy"));
+        assert!(query_has_forbidden_public_subresource("uploads&prefix=a"));
+        assert!(!query_has_forbidden_public_subresource("prefix=a&delimiter=/"));
+    }
 }

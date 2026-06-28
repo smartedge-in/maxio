@@ -435,3 +435,17 @@ mod validation_tests {
         assert!(validate_bucket_name("prod-logs.2026").is_ok());
     }
 }
+
+#[cfg(test)]
+mod upload_error_tests {
+    use super::{map_upload_error, StorageError};
+    use crate::error::S3ErrorCode;
+
+    #[test]
+    fn maps_policy_parse_errors_to_invalid_argument() {
+        let err = map_upload_error(StorageError::InvalidKey(
+            "MalformedPolicy: only Effect=Allow".into(),
+        ));
+        assert!(matches!(err.code, S3ErrorCode::InvalidArgument));
+    }
+}

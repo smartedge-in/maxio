@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::fs;
 
-const CREDENTIALS_FILE: &str = ".maxio-credentials.json";
+/// On-disk filename for additional S3/console credentials (inside `MAXIO_DATA_DIR`).
+pub const CREDENTIALS_FILENAME: &str = ".maxio-credentials.json";
+const CREDENTIALS_FILE: &str = CREDENTIALS_FILENAME;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CredentialEntry {

@@ -94,6 +94,12 @@ aws --endpoint-url http://localhost:9000 s3api put-bucket-policy --bucket photos
 
 v1 supports only Allow + `Principal:*` + `s3:GetObject` / `s3:ListBucket`. See `docs/plans/2026-06-28-bucket-policy-evaluation.md`.
 
+## Testing S3 compatibility features
+
+Unit tests cover virtual-host parsing, credential store loading, and policy evaluation (`cargo test -p maxio --lib`). Integration tests exercise virtual-hosted PUT/GET, secondary credentials, and bucket policy CRUD (`cargo test -p maxio --test integration virtual_host secondary bucket_policy`).
+
+CI enforces **≥80% line coverage** on `api/virtual_host.rs`, `auth/credentials.rs`, and `storage/policy.rs` via `scripts/check-coverage-floors.sh`.
+
 ## SSE-S3 keyring backup
 
 On first boot without `MAXIO_MASTER_KEY`, MaxIO creates `<data-dir>/.maxio-keys.json`. **Back up this file** with your data directory. Loss of all keyring keys makes SSE-S3 encrypted objects unrecoverable.

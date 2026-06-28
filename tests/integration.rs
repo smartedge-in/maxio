@@ -7625,65 +7625,13 @@ async fn test_secondary_credential_can_authenticate() {
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
 
     let url = format!("{base_url}/alt-bucket");
-    let now = chrono::Utc::now();
-    let date_stamp = now.format("%Y%m%d").to_string();
-    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-    let host_header = format!(
-        "127.0.0.1:{}",
-        reqwest::Url::parse(&base_url).unwrap().port().unwrap()
-    );
-    let payload_hash = hex::encode(Sha256::digest(&[] as &[u8]));
-    let mut headers = vec![
-        ("host".to_string(), host_header),
-        ("x-amz-date".to_string(), amz_date.clone()),
-        ("x-amz-content-sha256".to_string(), payload_hash.clone()),
-    ];
-    headers.sort_by(|a, b| a.0.cmp(&b.0));
-    let signed_headers_str = headers.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(";");
-    let canonical_headers: String = headers
-        .iter()
-        .map(|(k, v)| format!("{}:{}\n", k, v.trim()))
-        .collect();
-    let canonical_request = format!(
-        "PUT\n/alt-bucket\n\n{}\n{}\n{}",
-        canonical_headers, signed_headers_str, payload_hash
-    );
-    let scope = format!("{}/{}/s3/aws4_request", date_stamp, REGION);
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        amz_date,
-        scope,
-        hex::encode(Sha256::digest(canonical_request.as_bytes()))
-    );
-    let key = format!("AWS4{}", "altsecret");
-    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).unwrap();
-    mac.update(date_stamp.as_bytes());
-    let date_key = mac.finalize().into_bytes();
-    let mut mac = HmacSha256::new_from_slice(&date_key).unwrap();
-    mac.update(REGION.as_bytes());
-    let date_region_key = mac.finalize().into_bytes();
-    let mut mac = HmacSha256::new_from_slice(&date_region_key).unwrap();
-    mac.update(b"s3");
-    let date_region_service_key = mac.finalize().into_bytes();
-    let mut mac = HmacSha256::new_from_slice(&date_region_service_key).unwrap();
-    mac.update(b"aws4_request");
-    let signing_key = mac.finalize().into_bytes();
-    let mut mac = HmacSha256::new_from_slice(&signing_key).unwrap();
-    mac.update(string_to_sign.as_bytes());
-    let signature = hex::encode(mac.finalize().into_bytes());
-    let auth = format!(
-        "AWS4-HMAC-SHA256 Credential=altuser/{scope}, SignedHeaders={signed_headers_str}, Signature={signature}"
-    );
-    let resp = client()
-        .put(&url)
-        .header("authorization", auth)
-        .header("x-amz-date", amz_date)
-        .header("x-amz-content-sha256", payload_hash)
-        .header("host", headers[0].1.clone())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
+    let mut headers: Vec<(String, String)> = Vec::new();
+    sign_request_with_creds("PUT", &url, &mut headers, &[], None, "altuser", "altsecret");
+    let mut req = client().put(&url);
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 200);
 }
 
 #[tokio::test]
@@ -7725,4 +7673,71 @@ async fn test_bucket_policy_public_read_via_get_object() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "open");
+}
+
+#[tokio::test]
+async fn test_bucket_policy_get_and_delete() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/pol-get"), vec![]).await;
+
+    let policy = r#"{
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::pol-get"
+        }]
+    }"#;
+
+    let put_url = format!("{base_url}/pol-get?policy");
+    let mut headers: Vec<(String, String)> = Vec::new();
+    sign_request("PUT", &put_url, &mut headers, policy.as_bytes());
+    let mut put = client().put(&put_url);
+    for (k, v) in &headers {
+        put = put.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(put.body(policy).send().await.unwrap().status(), 204);
+
+    let get_url = format!("{base_url}/pol-get?policy");
+    let mut get_headers: Vec<(String, String)> = Vec::new();
+    sign_request("GET", &get_url, &mut get_headers, &[]);
+    let mut get = client().get(&get_url);
+    for (k, v) in &get_headers {
+        get = get.header(k.as_str(), v.as_str());
+    }
+    let body = get.send().await.unwrap().text().await.unwrap();
+    assert!(body.contains("s3:ListBucket"));
+
+    let del_url = format!("{base_url}/pol-get?policy");
+    let mut del_headers: Vec<(String, String)> = Vec::new();
+    sign_request("DELETE", &del_url, &mut del_headers, &[]);
+    let mut del = client().delete(&del_url);
+    for (k, v) in &del_headers {
+        del = del.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(del.send().await.unwrap().status(), 204);
+
+    let mut again_headers: Vec<(String, String)> = Vec::new();
+    sign_request("GET", &get_url, &mut again_headers, &[]);
+    let mut again = client().get(&get_url);
+    for (k, v) in &again_headers {
+        again = again.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(again.send().await.unwrap().status(), 404);
+}
+
+#[tokio::test]
+async fn test_bucket_policy_malformed_rejected() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/bad-pol"), vec![]).await;
+
+    let policy = r#"{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bad-pol/*"}]}"#;
+    let url = format!("{base_url}/bad-pol?policy");
+    let mut headers: Vec<(String, String)> = Vec::new();
+    sign_request("PUT", &url, &mut headers, policy.as_bytes());
+    let mut req = client().put(&url);
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.body(policy).send().await.unwrap().status(), 400);
 }
