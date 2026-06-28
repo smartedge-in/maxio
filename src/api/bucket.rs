@@ -3,9 +3,12 @@ use std::collections::HashMap;
 use axum::{
     body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Response,
+    Extension,
 };
+
+use super::virtual_host::{virtual_host_object_key, VirtualHostContext};
 
 use crate::error::S3Error;
 use crate::server::AppState;
@@ -65,6 +68,7 @@ pub async fn create_bucket(
         encryption_config: None,
         public_read: false,
         public_list: false,
+        bucket_policy: None,
     };
 
     let created = state
@@ -113,6 +117,9 @@ pub async fn delete_bucket(
     if params.contains_key("encryption") {
         return delete_bucket_encryption(state, bucket).await;
     }
+    if params.contains_key("policy") {
+        return delete_bucket_policy(state, bucket).await;
+    }
     match state.storage.delete_bucket(&bucket).await {
         Ok(true) => Ok(Response::builder()
             .status(StatusCode::NO_CONTENT)
@@ -126,10 +133,31 @@ pub async fn delete_bucket(
 
 pub async fn handle_bucket_put(
     State(state): State<AppState>,
-    Path(bucket): Path<String>,
+    Path(_path_bucket): Path<String>,
     Query(params): Query<HashMap<String, String>>,
+    vhost: Option<Extension<VirtualHostContext>>,
+    headers: HeaderMap,
     body: Body,
 ) -> Result<Response<Body>, S3Error> {
+    if params.is_empty() {
+        if let Some(Extension(ctx)) = &vhost {
+            if let Some(key) = virtual_host_object_key(&ctx.signature_path) {
+                return super::object::put_object(
+                    State(state),
+                    Path((ctx.bucket.clone(), key.to_string())),
+                    Query(HashMap::new()),
+                    headers,
+                    body,
+                )
+                .await;
+            }
+        }
+    }
+
+    let bucket = vhost
+        .map(|Extension(ctx)| ctx.bucket)
+        .unwrap_or(_path_bucket);
+
     if params.contains_key("versioning") {
         return put_bucket_versioning(State(state), Path(bucket), body).await;
     }
@@ -138,6 +166,9 @@ pub async fn handle_bucket_put(
     }
     if params.contains_key("encryption") {
         return put_bucket_encryption(state, bucket, body).await;
+    }
+    if params.contains_key("policy") {
+        return put_bucket_policy(state, bucket, body).await;
     }
     create_bucket(State(state), Path(bucket)).await
 }
@@ -410,6 +441,94 @@ async fn delete_bucket_encryption(
         .status(StatusCode::NO_CONTENT)
         .body(Body::empty())
         .unwrap())
+}
+
+async fn put_bucket_policy(
+    state: AppState,
+    bucket: String,
+    body: Body,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    let body_bytes = axum::body::to_bytes(body, 1024 * 1024)
+        .await
+        .map_err(S3Error::internal)?;
+    let policy = String::from_utf8(body_bytes.to_vec()).map_err(|e| S3Error::internal(e))?;
+
+    state
+        .storage
+        .put_bucket_policy(&bucket, &policy)
+        .await
+        .map_err(map_policy_storage_error)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .body(Body::empty())
+        .unwrap())
+}
+
+pub async fn get_bucket_policy(
+    state: AppState,
+    bucket: String,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    let policy = state
+        .storage
+        .get_bucket_policy(&bucket)
+        .await
+        .map_err(S3Error::internal)?;
+    let policy = policy.ok_or_else(S3Error::no_such_bucket_policy)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(policy))
+        .unwrap())
+}
+
+async fn delete_bucket_policy(
+    state: AppState,
+    bucket: String,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    match state.storage.get_bucket_policy(&bucket).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return Err(S3Error::no_such_bucket_policy()),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    state
+        .storage
+        .delete_bucket_policy(&bucket)
+        .await
+        .map_err(S3Error::internal)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .body(Body::empty())
+        .unwrap())
+}
+
+fn map_policy_storage_error(err: StorageError) -> S3Error {
+    match err {
+        StorageError::InvalidKey(msg) => S3Error::malformed_policy(msg),
+        StorageError::NotFound(name) => S3Error::no_such_bucket(&name),
+        other => S3Error::internal(other),
+    }
 }
 
 fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {

@@ -5,6 +5,7 @@ use axum::{
 };
 use chrono::{NaiveDateTime, Utc};
 
+use crate::api::virtual_host::{extract_virtual_bucket, host_header_value, VirtualHostContext};
 use crate::error::S3Error;
 use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
@@ -37,9 +38,24 @@ pub async fn auth_middleware(
 
     let has_auth_header = request.headers().get("authorization").is_some();
 
+    let host = host_header_value(request.headers());
+
+    let signature_path = request
+        .extensions()
+        .get::<VirtualHostContext>()
+        .map(|ctx| ctx.signature_path.as_str());
+
     // Anonymous public-bucket access: no auth header, safe method, bucket flagged public.
     if !has_auth_header
-        && is_public_bypass_allowed(&state, &method, request.uri().path(), &query).await
+        && is_public_bypass_allowed(
+            &state,
+            &method,
+            request.uri().path(),
+            &query,
+            host.as_deref(),
+            signature_path,
+        )
+        .await
     {
         tracing::debug!(
             "Public bucket bypass for {} {}",
@@ -75,13 +91,13 @@ pub async fn auth_middleware(
         parsed.signed_headers
     );
 
-    if !signature_v4::constant_time_eq(
-        parsed.access_key.as_bytes(),
-        state.config.access_key.as_bytes(),
-    ) {
-        tracing::debug!("Access key mismatch");
-        return Err(auth_failure(&state, &client_ip, S3Error::invalid_access_key()));
-    }
+    let secret_key = match lookup_secret_key(&state, &parsed.access_key) {
+        Ok(secret) => secret,
+        Err(e) => {
+            tracing::debug!("Access key mismatch");
+            return Err(auth_failure(&state, &client_ip, e));
+        }
+    };
 
     if !signature_v4::constant_time_eq(parsed.region.as_bytes(), state.config.region.as_bytes()) {
         tracing::debug!("Region mismatch");
@@ -119,7 +135,11 @@ pub async fn auth_middleware(
         ));
     }
 
-    let path = request.uri().path().to_string();
+    let path = request
+        .extensions()
+        .get::<VirtualHostContext>()
+        .map(|ctx| ctx.signature_path.clone())
+        .unwrap_or_else(|| request.uri().path().to_string());
 
     tracing::debug!("Verifying signature for {} {} ?{}", method, path, query);
 
@@ -133,7 +153,7 @@ pub async fn auth_middleware(
         &query,
         request.headers(),
         &parsed,
-        &state.config.secret_key,
+        secret_key,
     );
 
     if !valid {
@@ -145,6 +165,14 @@ pub async fn auth_middleware(
     let response = next.run(request).await;
     tracing::debug!("{} {} -> {}", method, uri, response.status());
     Ok(response)
+}
+
+fn lookup_secret_key<'a>(state: &'a AppState, access_key: &str) -> Result<&'a str, S3Error> {
+    state
+        .credentials
+        .lookup(access_key)
+        .map(|c| c.secret_key.as_str())
+        .ok_or_else(S3Error::invalid_access_key)
 }
 
 fn redact_header_value(name: &str) -> &'static str {
@@ -169,7 +197,14 @@ fn redact_header_value(name: &str) -> &'static str {
 ///   - For object path: `public_read` must be true.
 ///   - Query must not contain mutating sub-resources (`delete`, `uploads`, `tagging`,
 ///     `versioning`, `cors`, `encryption`, `policy`, `acl`).
-async fn is_public_bypass_allowed(state: &AppState, method: &str, path: &str, query: &str) -> bool {
+async fn is_public_bypass_allowed(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    query: &str,
+    host: Option<&str>,
+    signature_path: Option<&str>,
+) -> bool {
     match method {
         "GET" | "HEAD" | "OPTIONS" => {}
         _ => return false,
@@ -191,21 +226,36 @@ async fn is_public_bypass_allowed(state: &AppState, method: &str, path: &str, qu
         }
     }
 
-    let trimmed = path.trim_start_matches('/');
-    if trimmed.is_empty() {
-        return false; // root listing always requires auth
-    }
-
-    let (bucket, rest) = match trimmed.split_once('/') {
-        Some((b, r)) => (b, r),
-        None => (trimmed, ""),
+    let (bucket, rest) = if let Some(host) = host {
+        if let Some(bucket) = extract_virtual_bucket(host, &state.server_host) {
+            let object_path = signature_path.unwrap_or(path);
+            let rest = object_path.trim_start_matches('/');
+            (bucket, rest.to_string())
+        } else if path == "/" || path.is_empty() {
+            return false;
+        } else {
+            let trimmed = path.trim_start_matches('/');
+            match trimmed.split_once('/') {
+                Some((b, r)) => (b.to_string(), r.to_string()),
+                None => (trimmed.to_string(), String::new()),
+            }
+        }
+    } else {
+        let trimmed = path.trim_start_matches('/');
+        if trimmed.is_empty() {
+            return false;
+        }
+        match trimmed.split_once('/') {
+            Some((b, r)) => (b.to_string(), r.to_string()),
+            None => (trimmed.to_string(), String::new()),
+        }
     };
 
     if bucket.is_empty() {
         return false;
     }
 
-    let (public_read, public_list) = match state.storage.get_bucket_public(bucket).await {
+    let (public_read, public_list) = match state.storage.get_bucket_public(&bucket).await {
         Ok(v) => v,
         Err(_) => return false,
     };
@@ -251,12 +301,8 @@ async fn handle_presigned(
     let (parsed, timestamp, expires_secs) = signature_v4::parse_presigned_query(query)
         .map_err(|e| auth_failure(state, client_ip, S3Error::access_denied(e)))?;
 
-    if !signature_v4::constant_time_eq(
-        parsed.access_key.as_bytes(),
-        state.config.access_key.as_bytes(),
-    ) {
-        return Err(auth_failure(state, client_ip, S3Error::invalid_access_key()));
-    }
+    let secret_key = lookup_secret_key(state, &parsed.access_key)
+        .map_err(|e| auth_failure(state, client_ip, e))?;
 
     if !signature_v4::constant_time_eq(parsed.region.as_bytes(), state.config.region.as_bytes()) {
         return Err(auth_failure(
@@ -289,7 +335,11 @@ async fn handle_presigned(
         ));
     }
 
-    let path = request.uri().path().to_string();
+    let path = request
+        .extensions()
+        .get::<VirtualHostContext>()
+        .map(|ctx| ctx.signature_path.clone())
+        .unwrap_or_else(|| request.uri().path().to_string());
 
     tracing::debug!(
         "Verifying presigned signature for {} {} ?{}",
@@ -305,7 +355,7 @@ async fn handle_presigned(
         request.headers(),
         &parsed,
         &timestamp,
-        &state.config.secret_key,
+        secret_key,
     );
 
     if !valid {

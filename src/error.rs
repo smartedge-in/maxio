@@ -34,6 +34,8 @@ pub enum S3ErrorCode {
     InsufficientStorage,
     ExpiredPresignedUrl,
     NoSuchCORSConfiguration,
+    NoSuchBucketPolicy,
+    MalformedPolicy,
     PreconditionFailed,
     SignatureDoesNotMatch,
     InvalidEncryptionAlgorithm,
@@ -66,6 +68,8 @@ impl S3ErrorCode {
             Self::ExpiredPresignedUrl => "AccessDenied",
             Self::PreconditionFailed => "PreconditionFailed",
             Self::NoSuchCORSConfiguration => "NoSuchCORSConfiguration",
+            Self::NoSuchBucketPolicy => "NoSuchBucketPolicy",
+            Self::MalformedPolicy => "MalformedPolicy",
             Self::SignatureDoesNotMatch => "SignatureDoesNotMatch",
             Self::InvalidEncryptionAlgorithm => "InvalidEncryptionAlgorithmError",
             Self::ServerSideEncryptionConfigurationNotFound => {
@@ -86,7 +90,9 @@ impl S3ErrorCode {
             | Self::NoSuchUpload
             | Self::NoSuchVersion
             | Self::NoSuchCORSConfiguration
+            | Self::NoSuchBucketPolicy
             | Self::ServerSideEncryptionConfigurationNotFound => StatusCode::NOT_FOUND,
+            Self::MalformedPolicy => StatusCode::BAD_REQUEST,
             Self::BucketAlreadyOwnedByYou | Self::BucketNotEmpty => StatusCode::CONFLICT,
             Self::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
             Self::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
@@ -314,6 +320,24 @@ impl S3Error {
         Self {
             code: S3ErrorCode::NoSuchCORSConfiguration,
             message: "The CORS configuration does not exist".into(),
+            resource: None,
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn no_such_bucket_policy() -> Self {
+        Self {
+            code: S3ErrorCode::NoSuchBucketPolicy,
+            message: "The bucket policy does not exist".into(),
+            resource: None,
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn malformed_policy(msg: impl Into<String>) -> Self {
+        Self {
+            code: S3ErrorCode::MalformedPolicy,
+            message: msg.into(),
             resource: None,
             retry_after_secs: None,
         }

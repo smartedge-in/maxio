@@ -172,10 +172,25 @@ async fn main() -> anyhow::Result<()> {
         rate_limit::LoginRateLimiter::from_config(config.login_rate_limit_redis_url.as_deref())
             .await?,
     );
+    let credentials = Arc::new(
+        auth::credentials::CredentialStore::load(&config.data_dir, &config).await?,
+    );
+    if credentials.len() > 1 {
+        tracing::info!(
+            "S3 credentials: {} access key(s) loaded (bootstrap + .maxio-credentials.json)",
+            credentials.len()
+        );
+    }
+
+    let addr = format!("{}:{}", config.address, config.port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let listen_port = listener.local_addr()?.port();
     let state = server::new_app_state(
         Arc::new(storage),
         Arc::new(config.clone()),
         login_rate_limiter,
+        credentials,
+        Some(listen_port),
     );
 
     // Background housekeeping: abort stale multipart uploads (>7 days) and
@@ -205,9 +220,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = server::build_router(state);
-
-    let addr = format!("{}:{}", config.address, config.port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
     if config.access_key == "maxioadmin" && config.secret_key == "maxioadmin" {
         tracing::warn!(
             "WARNING: Using default credentials because insecure development mode is enabled."

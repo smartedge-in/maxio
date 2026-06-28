@@ -4,8 +4,11 @@ use axum::{
     body::Body,
     extract::{Path, Query, State},
     response::Response,
+    Extension,
 };
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
+
+use super::virtual_host::{virtual_host_object_key, VirtualHostContext};
 
 use super::multipart;
 use crate::error::S3Error;
@@ -15,9 +18,29 @@ use crate::xml::{response::to_xml, types::*};
 
 pub async fn handle_bucket_get(
     State(state): State<AppState>,
-    Path(bucket): Path<String>,
+    Path(path_bucket): Path<String>,
     Query(params): Query<HashMap<String, String>>,
+    vhost: Option<Extension<VirtualHostContext>>,
+    headers: HeaderMap,
 ) -> Result<Response<Body>, S3Error> {
+    if params.is_empty() {
+        if let Some(Extension(ctx)) = &vhost {
+            if let Some(key) = virtual_host_object_key(&ctx.signature_path) {
+                return super::object::get_object(
+                    State(state),
+                    Path((ctx.bucket.clone(), key.to_string())),
+                    Query(HashMap::new()),
+                    headers,
+                )
+                .await;
+            }
+        }
+    }
+
+    let bucket = vhost
+        .map(|Extension(ctx)| ctx.bucket)
+        .unwrap_or(path_bucket);
+
     tracing::debug!("GET /{} params={:?}", bucket, params);
 
     match state.storage.head_bucket(&bucket).await {
@@ -40,6 +63,10 @@ pub async fn handle_bucket_get(
 
     if params.contains_key("encryption") {
         return super::bucket::get_bucket_encryption(state, bucket).await;
+    }
+
+    if params.contains_key("policy") {
+        return super::bucket::get_bucket_policy(state, bucket).await;
     }
 
     if params.contains_key("versions") {

@@ -55,6 +55,7 @@ fn default_test_config(data_dir: String) -> Config {
         admin_rate_window_secs: 60,
         trusted_proxies: String::new(),
         login_rate_limit_redis_url: None,
+        server_host: String::new(),
     }
 }
 
@@ -79,15 +80,22 @@ async fn new_test_storage(
 }
 
 async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let credentials = Arc::new(
+        maxio::auth::credentials::CredentialStore::load(&config.data_dir, &config)
+            .await
+            .unwrap(),
+    );
     let state = server::new_app_state(
         storage,
         Arc::new(config.clone()),
         Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
+        credentials,
+        Some(addr.port()),
     );
 
     let app = server::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
     let base_url = format!("http://{}", addr);
 
     tokio::spawn(async move {
@@ -128,10 +136,24 @@ async fn start_server_with_quota(max_object_bytes: u64) -> (String, TempDir) {
 
 /// Sign a request with AWS Signature V4.
 fn sign_request(method: &str, url: &str, headers: &mut Vec<(String, String)>, body: &[u8]) {
+    sign_request_with_creds(method, url, headers, body, None, ACCESS_KEY, SECRET_KEY);
+}
+
+fn sign_request_with_creds(
+    method: &str,
+    url: &str,
+    headers: &mut Vec<(String, String)>,
+    body: &[u8],
+    host_header: Option<&str>,
+    access_key: &str,
+    secret_key: &str,
+) {
     let parsed = reqwest::Url::parse(url).unwrap();
-    let host = parsed.host_str().unwrap();
-    let port = parsed.port().unwrap();
-    let host_header = format!("{}:{}", host, port);
+    let host_header = host_header.map(str::to_string).unwrap_or_else(|| {
+        let host = parsed.host_str().unwrap();
+        let port = parsed.port().unwrap();
+        format!("{}:{}", host, port)
+    });
     let path = parsed.path();
     let query = parsed.query().unwrap_or("");
 
@@ -189,7 +211,7 @@ fn sign_request(method: &str, url: &str, headers: &mut Vec<(String, String)>, bo
         hex::encode(Sha256::digest(canonical_request.as_bytes()))
     );
 
-    let key = format!("AWS4{}", SECRET_KEY);
+    let key = format!("AWS4{}", secret_key);
     let mut mac = HmacSha256::new_from_slice(key.as_bytes()).unwrap();
     mac.update(date_stamp.as_bytes());
     let date_key = mac.finalize().into_bytes();
@@ -212,7 +234,7 @@ fn sign_request(method: &str, url: &str, headers: &mut Vec<(String, String)>, bo
 
     let auth = format!(
         "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
-        ACCESS_KEY, scope, signed_headers_str, signature
+        access_key, scope, signed_headers_str, signature
     );
     headers.push(("authorization".to_string(), auth));
 }
@@ -1021,6 +1043,7 @@ async fn test_delete_bucket_sweeps_nested_versions() {
             encryption_config: None,
             public_read: false,
             public_list: false,
+            bucket_policy: None,
         })
         .await
         .unwrap();
@@ -7458,4 +7481,248 @@ async fn test_trusted_proxy_uses_x_forwarded_for_for_login_rate_limit() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 401);
+}
+
+/// Raw HTTP/1.1 request with explicit `Host` (reqwest overwrites Host when connecting by IP).
+async fn s3_request_virtual_host(
+    method: &str,
+    listen: std::net::SocketAddr,
+    server_host: &str,
+    bucket: &str,
+    path: &str,
+    body: Vec<u8>,
+) -> (u16, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let vhost_domain = format!("{bucket}.{}", server_host.split(':').next().unwrap());
+    let host_header = format!("{vhost_domain}:{}", listen.port());
+    let sign_url = format!("http://{host_header}{path}");
+    let mut headers: Vec<(String, String)> = Vec::new();
+    sign_request_with_creds(
+        method,
+        &sign_url,
+        &mut headers,
+        &body,
+        Some(&host_header),
+        ACCESS_KEY,
+        SECRET_KEY,
+    );
+
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {host_header}\r\n");
+    for (k, v) in &headers {
+        if k != "host" {
+            req.push_str(&format!("{k}: {v}\r\n"));
+        }
+    }
+    if !body.is_empty() {
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    req.push_str("Connection: close\r\n\r\n");
+
+    let mut stream = tokio::net::TcpStream::connect(listen).await.unwrap();
+    stream.write_all(req.as_bytes()).await.unwrap();
+    if !body.is_empty() {
+        stream.write_all(&body).await.unwrap();
+    }
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8_lossy(&response);
+    let status = response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let body_start = response.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+    (status, response[body_start..].to_string())
+}
+
+async fn start_server_with_server_host(
+    storage: Arc<FilesystemStorage>,
+    mut config: Config,
+) -> (String, std::net::SocketAddr, String) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    config.server_host = format!("localhost:{}", addr.port());
+    let server_host = config.server_host.clone();
+    let credentials = Arc::new(
+        maxio::auth::credentials::CredentialStore::load(&config.data_dir, &config)
+            .await
+            .unwrap(),
+    );
+    let state = server::new_app_state(
+        storage,
+        Arc::new(config),
+        Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
+        credentials,
+        Some(addr.port()),
+    );
+    let app = server::build_router(state);
+    let base_url = format!("http://{}", addr);
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    (base_url, addr, server_host)
+}
+
+#[tokio::test]
+async fn test_virtual_host_style_put_and_get() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let config = default_test_config(data_dir);
+    let (base_url, listen, server_host) =
+        start_server_with_server_host(storage, config).await;
+
+    s3_request("PUT", &format!("{base_url}/vh-bucket"), vec![]).await;
+
+    let (put_status, _) = s3_request_virtual_host(
+        "PUT",
+        listen,
+        &server_host,
+        "vh-bucket",
+        "/hello.txt",
+        b"virtual-hosted".to_vec(),
+    )
+    .await;
+    assert_eq!(put_status, 200);
+
+    let (get_status, get_body) = s3_request_virtual_host(
+        "GET",
+        listen,
+        &server_host,
+        "vh-bucket",
+        "/hello.txt",
+        vec![],
+    )
+    .await;
+    assert_eq!(get_status, 200);
+    assert_eq!(get_body, "virtual-hosted");
+}
+
+#[tokio::test]
+async fn test_secondary_credential_can_authenticate() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let creds_path = format!("{data_dir}/.maxio-credentials.json");
+    std::fs::write(
+        &creds_path,
+        r#"{"credentials":[{"access_key":"altuser","secret_key":"altsecret","enabled":true}]}"#,
+    )
+    .unwrap();
+
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
+
+    let url = format!("{base_url}/alt-bucket");
+    let now = chrono::Utc::now();
+    let date_stamp = now.format("%Y%m%d").to_string();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let host_header = format!(
+        "127.0.0.1:{}",
+        reqwest::Url::parse(&base_url).unwrap().port().unwrap()
+    );
+    let payload_hash = hex::encode(Sha256::digest(&[] as &[u8]));
+    let mut headers = vec![
+        ("host".to_string(), host_header),
+        ("x-amz-date".to_string(), amz_date.clone()),
+        ("x-amz-content-sha256".to_string(), payload_hash.clone()),
+    ];
+    headers.sort_by(|a, b| a.0.cmp(&b.0));
+    let signed_headers_str = headers.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(";");
+    let canonical_headers: String = headers
+        .iter()
+        .map(|(k, v)| format!("{}:{}\n", k, v.trim()))
+        .collect();
+    let canonical_request = format!(
+        "PUT\n/alt-bucket\n\n{}\n{}\n{}",
+        canonical_headers, signed_headers_str, payload_hash
+    );
+    let scope = format!("{}/{}/s3/aws4_request", date_stamp, REGION);
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        amz_date,
+        scope,
+        hex::encode(Sha256::digest(canonical_request.as_bytes()))
+    );
+    let key = format!("AWS4{}", "altsecret");
+    let mut mac = HmacSha256::new_from_slice(key.as_bytes()).unwrap();
+    mac.update(date_stamp.as_bytes());
+    let date_key = mac.finalize().into_bytes();
+    let mut mac = HmacSha256::new_from_slice(&date_key).unwrap();
+    mac.update(REGION.as_bytes());
+    let date_region_key = mac.finalize().into_bytes();
+    let mut mac = HmacSha256::new_from_slice(&date_region_key).unwrap();
+    mac.update(b"s3");
+    let date_region_service_key = mac.finalize().into_bytes();
+    let mut mac = HmacSha256::new_from_slice(&date_region_service_key).unwrap();
+    mac.update(b"aws4_request");
+    let signing_key = mac.finalize().into_bytes();
+    let mut mac = HmacSha256::new_from_slice(&signing_key).unwrap();
+    mac.update(string_to_sign.as_bytes());
+    let signature = hex::encode(mac.finalize().into_bytes());
+    let auth = format!(
+        "AWS4-HMAC-SHA256 Credential=altuser/{scope}, SignedHeaders={signed_headers_str}, Signature={signature}"
+    );
+    let resp = client()
+        .put(&url)
+        .header("authorization", auth)
+        .header("x-amz-date", amz_date)
+        .header("x-amz-content-sha256", payload_hash)
+        .header("host", headers[0].1.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_bucket_policy_public_read_via_get_object() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/policy-bucket"), vec![]).await;
+
+    let policy = r#"{
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::policy-bucket/*"
+        }]
+    }"#;
+
+    let mut headers: Vec<(String, String)> = Vec::new();
+    let url = format!("{base_url}/policy-bucket?policy");
+    sign_request("PUT", &url, &mut headers, policy.as_bytes());
+    let mut req = client().put(&url);
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let resp = req.body(policy).send().await.unwrap();
+    assert_eq!(resp.status(), 204);
+
+    s3_request(
+        "PUT",
+        &format!("{base_url}/policy-bucket/public.txt"),
+        b"open".to_vec(),
+    )
+    .await;
+
+    let resp = client()
+        .get(format!("{base_url}/policy-bucket/public.txt"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.text().await.unwrap(), "open");
 }

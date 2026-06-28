@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Instant;
 
 use crate::api::console::console_router;
+use crate::api::virtual_host::virtual_host_middleware;
+use crate::auth::credentials::CredentialStore;
 use crate::api::cors::cors_middleware;
 use crate::api::router::s3_router;
 use crate::auth::middleware::auth_middleware;
@@ -39,17 +41,23 @@ pub struct AppState {
     pub trusted_proxies: Arc<TrustedProxies>,
     pub started_at: Instant,
     pub last_housekeeping_at: Arc<AtomicI64>,
+    pub credentials: Arc<CredentialStore>,
+    pub server_host: String,
 }
 
 pub fn build_router(state: AppState) -> Router {
     let s3_routes = s3_router()
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
+            cors_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
             auth_middleware,
         ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            cors_middleware,
+            virtual_host_middleware,
         ));
 
     let admin_routes = crate::api::admin::router()
@@ -207,6 +215,8 @@ pub fn new_app_state(
     storage: Arc<FilesystemStorage>,
     config: Arc<Config>,
     login_rate_limiter: Arc<LoginRateLimiter>,
+    credentials: Arc<CredentialStore>,
+    listen_port: Option<u16>,
 ) -> AppState {
     AppState {
         storage,
@@ -225,5 +235,7 @@ pub fn new_app_state(
         trusted_proxies: Arc::new(TrustedProxies::parse(&config.trusted_proxies)),
         started_at: Instant::now(),
         last_housekeeping_at: Arc::new(AtomicI64::new(0)),
+        credentials,
+        server_host: crate::api::virtual_host::effective_server_host(&config, listen_port),
     }
 }

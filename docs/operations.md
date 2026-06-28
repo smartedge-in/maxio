@@ -47,6 +47,53 @@ Do **not** use `--allow-insecure-dev` or `MAXIO_ALLOW_INSECURE_DEV=true` in prod
 
 Rotate credentials by updating the environment and restarting MaxIO. Console session cookies include a **credential fingerprint** — sessions issued before rotation are rejected immediately after restart with new keys (users must log in again). Tokens still expire after 7 days when credentials are unchanged.
 
+### Additional S3 access keys
+
+Beyond the bootstrap pair, add keys in `<data-dir>/.maxio-credentials.json`:
+
+```json
+{
+  "credentials": [
+    {
+      "access_key": "deploy-bot",
+      "secret_key": "…",
+      "enabled": true,
+      "description": "CI uploads"
+    }
+  ]
+}
+```
+
+Restrict file permissions (`chmod 600`). All enabled keys authenticate to the same global namespace (no per-key IAM scopes in v1). See `docs/plans/2026-06-28-multi-user-credentials.md`.
+
+## Virtual-hosted-style URLs
+
+Set the hostname clients use in virtual-hosted requests:
+
+```bash
+export MAXIO_SERVER_HOST="s3.example.com"
+```
+
+Behind TLS termination, this should match the public DNS name (port included for non-443 HTTP). Clients may then use `https://my-bucket.s3.example.com/key` in addition to path-style `https://s3.example.com/my-bucket/key`. Details: `docs/s3-compatibility.md`.
+
+## Bucket policies
+
+Upload a minimal public-read policy:
+
+```bash
+aws --endpoint-url http://localhost:9000 s3api put-bucket-policy --bucket photos --policy '{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": "*",
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::photos/*"
+  }]
+}'
+```
+
+v1 supports only Allow + `Principal:*` + `s3:GetObject` / `s3:ListBucket`. See `docs/plans/2026-06-28-bucket-policy-evaluation.md`.
+
 ## SSE-S3 keyring backup
 
 On first boot without `MAXIO_MASTER_KEY`, MaxIO creates `<data-dir>/.maxio-keys.json`. **Back up this file** with your data directory. Loss of all keyring keys makes SSE-S3 encrypted objects unrecoverable.

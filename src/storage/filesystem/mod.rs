@@ -421,6 +421,58 @@ impl FilesystemStorage {
         Ok((meta.public_read, meta.public_list))
     }
 
+    pub async fn put_bucket_policy(&self, bucket: &str, policy: &str) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
+        let effects = crate::storage::policy::evaluate_v1_policy(bucket, policy)
+            .map_err(|e| StorageError::InvalidKey(e))?;
+        let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
+        let data = fs::read_to_string(&meta_path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::NotFound(bucket.to_string())
+            } else {
+                StorageError::Io(e)
+            }
+        })?;
+        let mut meta: BucketMeta = serde_json::from_str(&data)?;
+        meta.bucket_policy = Some(policy.to_string());
+        meta.public_read = effects.public_read;
+        meta.public_list = effects.public_list;
+        fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        Ok(())
+    }
+
+    pub async fn get_bucket_policy(&self, bucket: &str) -> Result<Option<String>, StorageError> {
+        validate_bucket_name(bucket)?;
+        let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
+        let data = fs::read_to_string(&meta_path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::NotFound(bucket.to_string())
+            } else {
+                StorageError::Io(e)
+            }
+        })?;
+        let meta: BucketMeta = serde_json::from_str(&data)?;
+        Ok(meta.bucket_policy)
+    }
+
+    pub async fn delete_bucket_policy(&self, bucket: &str) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
+        let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
+        let data = fs::read_to_string(&meta_path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::NotFound(bucket.to_string())
+            } else {
+                StorageError::Io(e)
+            }
+        })?;
+        let mut meta: BucketMeta = serde_json::from_str(&data)?;
+        meta.bucket_policy = None;
+        meta.public_read = false;
+        meta.public_list = false;
+        fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        Ok(())
+    }
+
     pub async fn set_bucket_public(
         &self,
         bucket: &str,

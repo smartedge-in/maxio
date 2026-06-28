@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- P1 S3 compatibility: virtual-hosted-style requests — `Host: bucket.{server_host}` with `MAXIO_SERVER_HOST` / `--server-host`; handler dispatch + SigV4 client-path verification (P1-09).
+- P1 S3 compatibility: multi-credential store — bootstrap env keys plus optional `<data-dir>/.maxio-credentials.json` for additional access/secret pairs (P1-10 phase 1).
+- P1 S3 compatibility: bucket policy v1 — `PUT/GET/DELETE ?policy` with Allow/`Principal:*` subset for `s3:GetObject` and `s3:ListBucket` (P1-11).
+- Design docs: `docs/plans/2026-06-28-multi-user-credentials.md`, `docs/plans/2026-06-28-bucket-policy-evaluation.md`, `docs/s3-compatibility.md`.
+- Unit tests for `CredentialStore` and policy parser; integration tests for virtual-host PUT/GET, secondary credential auth, and public-read bucket policy.
 - P1 security & reliability: `MAXIO_TRUSTED_PROXIES` for safe `X-Forwarded-For` client IP behind known load balancers (P1-03).
 - P1 security & reliability: console session tokens keyed to credential fingerprint — sessions invalidate immediately when access/secret change (P1-05).
 - P1 security & reliability: optional `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` for distributed console login rate limiting across replicas (P1-06).

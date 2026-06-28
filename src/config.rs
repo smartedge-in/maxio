@@ -128,6 +128,10 @@ pub struct Config {
     /// Optional Redis URL for distributed console login rate limiting across replicas (`redis://host:6379`).
     #[arg(long, env = "MAXIO_LOGIN_RATE_LIMIT_REDIS_URL")]
     pub login_rate_limit_redis_url: Option<String>,
+
+    /// Public S3 endpoint host for virtual-hosted-style requests (`bucket.{server_host}`), e.g. `s3.example.com` or `localhost:9000`.
+    #[arg(long, env = "MAXIO_SERVER_HOST", default_value = "")]
+    pub server_host: String,
 }
 
 #[cfg(test)]

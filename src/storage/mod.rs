@@ -2,6 +2,7 @@ pub mod chunk_reader;
 pub mod crypto;
 pub mod filesystem;
 pub mod keys;
+pub mod policy;
 pub mod quota;
 
 use serde::{Deserialize, Serialize};
@@ -94,6 +95,8 @@ pub struct BucketMeta {
     pub public_read: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub public_list: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,6 +354,7 @@ pub async fn provision_default_buckets(
             encryption_config: None,
             public_read: false,
             public_list: false,
+            bucket_policy: None,
         };
         match storage.create_bucket(&meta).await {
             Ok(true) => tracing::info!("Created default bucket: {}", bucket_name),

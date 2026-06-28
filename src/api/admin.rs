@@ -35,7 +35,7 @@ pub async fn admin_auth_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    if !verify_admin_auth(&state.config, request.headers()) {
+    if !verify_admin_auth(&state.config, &state.credentials, request.headers()) {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({
@@ -69,7 +69,11 @@ pub async fn admin_rate_limit_middleware(
     next.run(request).await
 }
 
-fn verify_admin_auth(config: &Config, headers: &HeaderMap) -> bool {
+fn verify_admin_auth(
+    config: &Config,
+    credentials: &crate::auth::credentials::CredentialStore,
+    headers: &HeaderMap,
+) -> bool {
     let Some(auth) = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -87,6 +91,9 @@ fn verify_admin_auth(config: &Config, headers: &HeaderMap) -> bool {
         if let Ok(decoded) = B64.decode(encoded) {
             if let Ok(creds) = String::from_utf8(decoded) {
                 if let Some((user, pass)) = creds.split_once(':') {
+                    if let Some(cred) = credentials.lookup(user) {
+                        return pass == cred.secret_key;
+                    }
                     return user == config.access_key && pass == config.secret_key;
                 }
             }
@@ -421,6 +428,7 @@ mod tests {
             admin_rate_window_secs: 60,
             trusted_proxies: String::new(),
             login_rate_limit_redis_url: None,
+            server_host: String::new(),
         }
     }
 
@@ -433,11 +441,19 @@ mod tests {
         headers
     }
 
+    fn test_credentials(config: &Config) -> crate::auth::credentials::CredentialStore {
+        crate::auth::credentials::CredentialStore::from_single(
+            &config.access_key,
+            &config.secret_key,
+        )
+    }
+
     #[test]
     fn accepts_matching_bearer_token() {
         let config = test_config();
         assert!(verify_admin_auth(
             &config,
+            &test_credentials(&config),
             &headers_with("Bearer secret-token")
         ));
     }
@@ -447,6 +463,7 @@ mod tests {
         let config = test_config();
         assert!(!verify_admin_auth(
             &config,
+            &test_credentials(&config),
             &headers_with("Bearer wrong-token")
         ));
     }
@@ -457,12 +474,18 @@ mod tests {
         let encoded = B64.encode("adminuser:adminpass");
         assert!(verify_admin_auth(
             &config,
+            &test_credentials(&config),
             &headers_with(&format!("Basic {encoded}"))
         ));
     }
 
     #[test]
     fn rejects_missing_auth() {
-        assert!(!verify_admin_auth(&test_config(), &HeaderMap::new()));
+        let config = test_config();
+        assert!(!verify_admin_auth(
+            &config,
+            &test_credentials(&config),
+            &HeaderMap::new()
+        ));
     }
 }

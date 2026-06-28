@@ -153,16 +153,13 @@ pub async fn login(
             .into_response();
     }
 
-    // Use constant-time comparison to prevent timing side-channel attacks
-    let key_match = constant_time_eq(
-        body.access_key.as_bytes(),
-        state.config.access_key.as_bytes(),
-    );
-    let secret_match = constant_time_eq(
-        body.secret_key.as_bytes(),
-        state.config.secret_key.as_bytes(),
-    );
-    if !key_match || !secret_match {
+    let authenticated = state.credentials.lookup(&body.access_key).is_some_and(|cred| {
+        constant_time_eq(
+            body.secret_key.as_bytes(),
+            cred.secret_key.as_bytes(),
+        )
+    });
+    if !authenticated {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "Invalid credentials"})),
@@ -350,6 +347,7 @@ pub async fn create_bucket(
         encryption_config: None,
         public_read: false,
         public_list: false,
+        bucket_policy: None,
     };
 
     match state.storage.create_bucket(&meta).await {
@@ -1185,6 +1183,7 @@ mod tests {
                 encryption_config: None,
                 public_read: false,
                 public_list: false,
+                bucket_policy: None,
             })
             .await
             .unwrap();

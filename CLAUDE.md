@@ -86,7 +86,7 @@ This runs both processes concurrently (Ctrl+C kills both):
 
 - **Pure filesystem storage**: No database. Buckets are directories, objects are files at their key path, metadata in `.meta.json` sidecars. Backup-friendly — just copy the data dir
 - **Storage layout**: `{data_dir}/buckets/{bucket-name}/{key-path}` for data, `{key-path}.meta.json` for metadata, `.bucket.json` for bucket metadata
-- **Path-style only**: `/{bucket}/{key}` routing. No virtual-hosted-style yet
+- **Path-style and virtual-hosted-style**: `/{bucket}/{key}` and `Host: bucket.endpoint/key` (see `docs/s3-compatibility.md`)
 - **UNSIGNED-PAYLOAD accepted**: Skips body hashing for PutObject (AWS CLI default)
 - **Embedded UI assets**: Frontend is compiled into the binary via `rust-embed`. In debug builds, assets are read from the SvelteKit static build (`ui/build/`) when embedded; dev uses Vite/SvelteKit HMR. In release builds, assets are baked in — single binary, no external files needed
 - **Web console**: SPA at `/ui/`, API at `/api/`. Cookie-based auth (HMAC tokens, not SigV4). Presigned URL generation with configurable expiry (1h/6h/24h/7d picker in UI)

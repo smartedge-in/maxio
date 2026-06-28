@@ -43,9 +43,9 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
-| P1-09 | Virtual-hosted-style requests | api | XL | Only path-style `/{bucket}/{key}` routing is supported. | `Host: bucket.endpoint` requests resolve correctly; integration tests for AWS SDK virtual-host mode. |
-| P1-10 | Multi-user / IAM-style credentials | auth | XL | Single access/secret pair for entire server. | Design doc + phased implementation: multiple keys, or integration with external IdP. |
-| P1-11 | Bucket policy engine | api | XL | Public read/list flags only; no JSON bucket policies. | Evaluate MinIO policy subset; document explicit non-goals for v1. |
+| ~~P1-09~~ | ~~Virtual-hosted-style requests~~ | api | XL | Done — `Host: bucket.{server_host}` dispatch; `MAXIO_SERVER_HOST`; SigV4 uses client path; integration test with explicit Host. | — |
+| ~~P1-10~~ | ~~Multi-user / IAM-style credentials~~ | auth | XL | Done — phase 1: `CredentialStore` + `.maxio-credentials.json`; design doc `docs/plans/2026-06-28-multi-user-credentials.md`. | — |
+| ~~P1-11~~ | ~~Bucket policy engine~~ | api | XL | Done — v1 JSON policy subset (`Allow`, `Principal:*`, GetObject/ListBucket); `docs/plans/2026-06-28-bucket-policy-evaluation.md`. | — |
 
 ---
 

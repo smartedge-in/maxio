@@ -18,7 +18,7 @@ MaxIO is a lightweight, single-binary S3-compatible object storage server writte
 
 - **Single Binary** — Frontend assets are compiled into the binary via `rust-embed`. Nothing extra to deploy
 - **Pure Filesystem Storage** — No database. Buckets are directories, objects are files, metadata in `.meta.json` sidecars
-- **AWS Signature V4** — Compatible with `mc`, AWS CLI, and any S3 SDK
+- **AWS Signature V4** — Compatible with `mc`, AWS CLI, and any S3 SDK; path-style and virtual-hosted-style URLs
 - **Web Console** — Built-in UI at `/ui/` for browsing, uploading, and managing objects
 - **S3 API Coverage** — ListBuckets, CreateBucket, HeadBucket, DeleteBucket, GetBucketLocation, ListObjectsV1/V2, ListObjectVersions, PutObject, GetObject, HeadObject, DeleteObject, DeleteObjects (batch), CopyObject, Multipart Upload (including UploadPartCopy), Object Tagging, CORS, Versioning, GetBucketEncryption, PutBucketEncryption, DeleteBucketEncryption
 - **Server-Side Encryption** — AES-256-GCM at rest with per-object Data Encryption Keys, sidecar HMAC-SHA256 integrity binding, and AAD-bound frames. Supports SSE-S3 (server-managed keyring with rotatable master key), SSE-C (customer-supplied keys), bucket default encryption, and composes with Erasure Coding (encrypt-then-EC)
@@ -151,6 +151,7 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | `MAXIO_ADMIN_RATE_WINDOW_SECS` | `--admin-rate-window-secs` | `60` | Sliding window for admin API rate limit (seconds) |
 | `MAXIO_TRUSTED_PROXIES` | `--trusted-proxies` | _(empty)_ | Comma-separated trusted proxy CIDRs; when the direct peer matches, `X-Forwarded-For` is used for client IP (console login + rate limits) |
 | `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` | `--login-rate-limit-redis-url` | _(empty)_ | Optional Redis URL for shared console login rate limiting across replicas (`redis://host:6379`) |
+| `MAXIO_SERVER_HOST` | `--server-host` | _(auto)_ | Public S3 endpoint host for virtual-hosted-style requests (`bucket.{server_host}`), e.g. `s3.example.com` or `localhost:9000` |
 
 ### Health endpoints
 
@@ -160,7 +161,7 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | `/healthz?verbose=1` | Liveness with JSON subsystem metrics (disk free %, active multipart uploads, housekeeping lag, readyz status) |
 | `/readyz` | Readiness probe — returns `200` when the data directory is writable and the SSE-S3 keyring is usable; `503` otherwise |
 
-See [docs/operations.md](docs/operations.md) for production deployment, TLS, backups, and Kubernetes examples.
+See [docs/operations.md](docs/operations.md) for production deployment, TLS, backups, and Kubernetes examples. S3 routing, policies, and multi-key auth are documented in [docs/s3-compatibility.md](docs/s3-compatibility.md).
 
 ## Usage
 
