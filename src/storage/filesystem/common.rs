@@ -212,6 +212,15 @@ pub(super) fn preflight_chunk_reader(reader: &mut VerifiedChunkReader) -> Result
     reader.preflight().map_err(map_chunk_read_error)
 }
 
+pub(super) async fn preflight_frame_decryptor(
+    decryptor: &mut crate::storage::crypto::FrameDecryptor,
+) -> Result<(), StorageError> {
+    decryptor
+        .preflight()
+        .await
+        .map_err(|e| StorageError::DecryptionError(e.to_string()))
+}
+
 pub(super) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

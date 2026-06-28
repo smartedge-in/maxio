@@ -6385,26 +6385,30 @@ async fn test_sse_s3_cross_version_ciphertext_swap_rejected() {
     let b_bytes = std::fs::read(&ver_b_data).unwrap();
     std::fs::write(&ver_a_data, &b_bytes).unwrap();
 
-    let get = s3_request(
+    let get_result = s3_request_result(
         "GET",
         &format!("{}/ver-swap/k.bin?versionId={}", base_url, vid_a),
         vec![],
     )
     .await;
-    // Decryptor fails mid-stream on AAD mismatch; assertion: bytes returned
-    // do NOT equal plaintext_a (the attacker's goal was to substitute B's data
-    // for A's without detection).
-    let body = get.bytes().await.unwrap_or_default();
-    assert_ne!(
-        body.as_ref(),
-        plaintext_a.as_slice(),
-        "cross-version ciphertext swap must not authenticate"
-    );
-    assert_ne!(
-        body.as_ref(),
-        plaintext_b.as_slice(),
-        "cross-version swap must not yield B's plaintext either"
-    );
+    // Decryptor must fail before or during read; swapped ciphertext must never
+    // yield either version's plaintext under the victim version's AAD.
+    match get_result {
+        Err(_) => {}
+        Ok(get) => {
+            let body = get.bytes().await.unwrap_or_default();
+            assert_ne!(
+                body.as_ref(),
+                plaintext_a.as_slice(),
+                "cross-version ciphertext swap must not authenticate"
+            );
+            assert_ne!(
+                body.as_ref(),
+                plaintext_b.as_slice(),
+                "cross-version swap must not yield B's plaintext either"
+            );
+        }
+    }
 }
 
 /// 0-byte SSE-S3 object: PUT + GET round-trip. Sidecar MAC + AAD path must

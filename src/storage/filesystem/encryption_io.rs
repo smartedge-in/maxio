@@ -410,13 +410,14 @@ impl FilesystemStorage {
                 let aad_builder = object_aad_builder(bucket, key, meta.version_id.as_deref());
                 let mut ct_reader = VerifiedChunkReader::new(ver_ec_dir, manifest);
                 preflight_chunk_reader(&mut ct_reader)?;
-                let decryptor = FrameDecryptor::new(
+                let mut decryptor = FrameDecryptor::new(
                     Box::pin(ct_reader),
                     &dek,
                     plaintext_size,
                     frame_size,
                     aad_builder,
                 );
+                preflight_frame_decryptor(&mut decryptor).await?;
                 return Ok((Box::pin(decryptor), meta));
             }
             let mut reader = VerifiedChunkReader::new(ver_ec_dir, manifest);
@@ -442,13 +443,14 @@ impl FilesystemStorage {
                 }
             })?;
             let aad_builder = object_aad_builder(bucket, key, meta.version_id.as_deref());
-            let decryptor = FrameDecryptor::new(
+            let mut decryptor = FrameDecryptor::new(
                 Box::pin(file),
                 &dek,
                 plaintext_size,
                 chunk_size,
                 aad_builder,
             );
+            preflight_frame_decryptor(&mut decryptor).await?;
             return Ok((Box::pin(decryptor), meta));
         }
 

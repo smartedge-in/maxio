@@ -297,6 +297,32 @@ impl FrameDecryptor {
         start_frame * (chunk_size as u64 + FRAME_OVERHEAD as u64)
     }
 
+    /// Decrypt the first plaintext byte before response headers are sent, so
+    /// authentication failures surface as structured errors instead of a
+    /// truncated HTTP body.
+    pub async fn preflight(&mut self) -> io::Result<()> {
+        use tokio::io::AsyncReadExt;
+
+        if self.plaintext_size == 0 || self.remaining == 0 {
+            return Ok(());
+        }
+
+        let remaining_before = self.remaining;
+        let out_pos_before = self.out_pos;
+        let mut probe = [0u8; 1];
+        let n = self.read(&mut probe).await?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "encrypted object truncated before first plaintext byte",
+            ));
+        }
+        // `read` advances the consumer cursor; rewind so the HTTP body is complete.
+        self.out_pos = out_pos_before;
+        self.remaining = remaining_before;
+        Ok(())
+    }
+
     /// Compute `frame_target` for the current `chunk_index`.
     fn update_frame_target(&mut self) {
         let bytes_before = self.chunk_index * self.chunk_size as u64;
