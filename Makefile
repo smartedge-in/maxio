@@ -15,10 +15,11 @@ MAKEFLAGS     += --no-builtin-rules
 # -----------------------------------------------------------------------------
 CARGO_HOME      ?= $(HOME)/.cargo
 BUN_INSTALL     ?= $(HOME)/.bun
-export PATH     := $(CARGO_HOME)/bin:$(BUN_INSTALL)/bin:$(PATH)
+LOCAL_BIN       ?= $(HOME)/.local/bin
+export PATH     := $(CARGO_HOME)/bin:$(BUN_INSTALL)/bin:$(LOCAL_BIN):$(PATH)
 CARGO           := $(firstword $(shell command -v cargo 2>/dev/null) $(CARGO_HOME)/bin/cargo)
 RUSTUP          := $(firstword $(shell command -v rustup 2>/dev/null) $(CARGO_HOME)/bin/rustup)
-TRIVY           ?= trivy
+TRIVY           := $(firstword $(shell command -v trivy 2>/dev/null) $(LOCAL_BIN)/trivy)
 DOCKER          ?= docker
 BUN             := $(shell command -v bun 2>/dev/null)
 HAS_BUN         := $(if $(BUN),1,)
@@ -404,14 +405,14 @@ install-tools: ## Install required developer and security tooling (do not use su
 		|| "$(CARGO)" install cargo-deny --locked
 	@command -v cargo-llvm-cov >/dev/null 2>&1 \
 		|| "$(CARGO)" install cargo-llvm-cov --locked
-	$(call log,Checking Trivy installation)
-	@if command -v $(TRIVY) >/dev/null 2>&1; then \
-		printf "$(COLOR_GREEN)Trivy already installed: $$($(TRIVY) --version | head -1)$(COLOR_RESET)\n"; \
+	$(call log,Installing Trivy)
+	@if command -v trivy >/dev/null 2>&1; then \
+		printf "$(COLOR_GREEN)Trivy already installed: $$(trivy --version | head -1)$(COLOR_RESET)\n"; \
 	else \
-		printf "$(COLOR_YELLOW)warning: Trivy not found (required for make trivy-* / full CI).$(COLOR_RESET)\n"; \
-		printf "  $(COLOR_CYAN)Linux (deb/rpm):$(COLOR_RESET) https://aquasecurity.github.io/trivy/latest/getting-started/installation/\n"; \
-		printf "  $(COLOR_CYAN)macOS (Homebrew):$(COLOR_RESET) brew install trivy\n"; \
-		printf "  $(COLOR_CYAN)System-wide script:$(COLOR_RESET) curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin\n"; \
+		mkdir -p "$(LOCAL_BIN)"; \
+		curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+			| sh -s -- -b "$(LOCAL_BIN)"; \
+		printf "$(COLOR_GREEN)Trivy installed to $(LOCAL_BIN)/trivy$(COLOR_RESET)\n"; \
 	fi
 	@printf "$(COLOR_GREEN)All developer tools are ready.$(COLOR_RESET)\n"
 
