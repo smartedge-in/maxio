@@ -36,8 +36,7 @@ pub async fn admin_auth_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let Some(principal) =
-        admin_principal(&state.config, &state.credentials, request.headers())
+    let Some(principal) = admin_principal(&state.config, &state.credentials, request.headers())
     else {
         return (
             StatusCode::UNAUTHORIZED,
@@ -477,12 +476,14 @@ mod tests {
     #[test]
     fn rejects_wrong_bearer_token() {
         let config = test_config();
-        assert!(admin_principal(
-            &config,
-            &test_credentials(&config),
-            &headers_with("Bearer wrong-token")
-        )
-        .is_none());
+        assert!(
+            admin_principal(
+                &config,
+                &test_credentials(&config),
+                &headers_with("Bearer wrong-token")
+            )
+            .is_none()
+        );
     }
 
     #[test]
