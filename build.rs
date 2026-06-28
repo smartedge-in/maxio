@@ -27,11 +27,15 @@ fn main() {
         return;
     }
 
-    run_bun_install_if_needed(ui_dir);
-    run(ui_dir, "bun", &["run", "build"]);
+    if !run_bun_install_if_needed(ui_dir) || !run(ui_dir, "bun", &["run", "build"]) {
+        println!(
+            "cargo:warning=bun unavailable or frontend build failed; embedding minimal UI (set SKIP_FRONTEND=1 to silence)"
+        );
+        ensure_minimal_frontend(&build_dir);
+    }
 }
 
-fn run_bun_install_if_needed(ui_dir: &Path) {
+fn run_bun_install_if_needed(ui_dir: &Path) -> bool {
     let node_modules = ui_dir.join("node_modules");
     let package_json = ui_dir.join("package.json");
     let bun_lock = ui_dir.join("bun.lock");
@@ -41,19 +45,26 @@ fn run_bun_install_if_needed(ui_dir: &Path) {
         || mtime(&bun_lock) > mtime(&node_modules);
 
     if needs_install {
-        run(ui_dir, "bun", &["install", "--frozen-lockfile"]);
+        return run(ui_dir, "bun", &["install", "--frozen-lockfile"]);
     }
+
+    true
 }
 
-fn run(cwd: &Path, program: &str, args: &[&str]) {
-    let status = Command::new(program)
-        .args(args)
-        .current_dir(cwd)
-        .status()
-        .unwrap_or_else(|err| panic!("failed to run {program}: {err}"));
-
-    if !status.success() {
-        panic!("{program} {} failed with {status}", args.join(" "));
+fn run(cwd: &Path, program: &str, args: &[&str]) -> bool {
+    match Command::new(program).args(args).current_dir(cwd).status() {
+        Ok(status) if status.success() => true,
+        Ok(status) => {
+            eprintln!(
+                "cargo:warning={program} {} failed with {status}",
+                args.join(" ")
+            );
+            false
+        }
+        Err(err) => {
+            eprintln!("cargo:warning=failed to run {program}: {err}");
+            false
+        }
     }
 }
 
