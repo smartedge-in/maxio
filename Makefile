@@ -48,7 +48,7 @@ CARGO_FLAGS     ?=
 BUILD_FLAGS     ?= --locked
 CLIPPY_FLAGS    ?= --workspace --all-targets --all-features -- -D warnings
 COVERAGE_FLAGS  ?= --workspace --all-features --html --output-dir $(COVERAGE_DIR)
-DENY_FLAGS      ?=
+DENY_FLAGS      ?= licenses
 TRIVY_FS_FLAGS  ?= --cache-dir $(TRIVY_CACHE_DIR)
 TRIVY_IMG_FLAGS ?= --cache-dir $(TRIVY_CACHE_DIR)
 
@@ -166,10 +166,15 @@ audit: ## Audit dependencies for known security vulnerabilities
 	$(call ensure_cargo_ext,audit)
 	$(CARGO) audit
 
-deny: ## Validate dependency licenses and policy (cargo-deny)
-	$(call log,Running cargo deny check)
+deny: ## Validate dependency licenses (cargo-deny; default: licenses only)
+	$(call log,Running cargo deny check $(DENY_FLAGS))
 	$(call ensure_cargo_ext,deny)
 	$(CARGO) deny check $(DENY_FLAGS)
+
+deny-all: ## Run full cargo-deny (licenses, advisories, bans, sources)
+	$(call log,Running full cargo deny check)
+	$(call ensure_cargo_ext,deny)
+	$(CARGO) deny check
 
 doc: ## Build Rust API documentation (no dependencies)
 	$(call log,Building documentation)
@@ -425,11 +430,11 @@ help: ## Show available targets and descriptions
 	@printf "  $(COLOR_CYAN)HAS_BUN$(COLOR_RESET)         = $(if $(HAS_BUN),yes,no) ($(BUN))\n"
 	@printf "  $(COLOR_CYAN)CARGO$(COLOR_RESET)           = $(CARGO)\n"
 	@printf "  $(COLOR_CYAN)RUSTUP$(COLOR_RESET)          = $(RUSTUP)\n"
-	@printf "  $(COLOR_CYAN)DENY_FLAGS$(COLOR_RESET)        = $(DENY_FLAGS) (e.g. licenses)\n"
+	@printf "  $(COLOR_CYAN)DENY_FLAGS$(COLOR_RESET)        = $(DENY_FLAGS) (default: licenses)\n"
 	@printf "\n$(COLOR_BOLD)Examples$(COLOR_RESET)\n\n"
 	@printf "  make install-tools   # run as normal user, not sudo\n"
 	@printf "  make ci\n"
 	@printf "  make test SKIP_FRONTEND=1\n"
 	@printf "  make image IMAGE_TAG=$(PROJECT)-v0.4.2\n"
-	@printf "  make deny DENY_FLAGS=licenses\n"
+	@printf "  make deny-all          # full cargo-deny including advisories\n"
 	@printf "  make trivy-fs-critical\n"

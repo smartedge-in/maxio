@@ -9,13 +9,8 @@ version = 2
 allow = [
   "Apache-2.0",
   "MIT",
-  "BSD-2-Clause",
   "BSD-3-Clause",
-  "ISC",
-  "Zlib",
   "Unicode-3.0",
-  "CC0-1.0",
-  "0BSD",
 ]
 confidence-threshold = 0.8
 exceptions = []
@@ -26,6 +21,15 @@ ignore = false
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
+
+[advisories]
+# Full graph check: make deny-all. CI / make deny use `licenses` only.
+ignore = [
+  # Transitive via reed-solomon-erasure → parking_lot 0.11 (Redox-only path).
+  "RUSTSEC-2024-0384",
+  # rand 0.10 unsound only when a custom logger is installed; no logger in maxio.
+  "RUSTSEC-2026-0097",
+]
 
 [sources]
 unknown-registry = "deny"
