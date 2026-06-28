@@ -237,7 +237,8 @@ aws --endpoint-url http://localhost:9000 s3api put-object \
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. The current version is in the root
+[`VERSION`](VERSION) file; bump it and run `make sync-version` before tagging a release.
 
 ## Contributing
 

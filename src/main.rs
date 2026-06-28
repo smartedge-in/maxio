@@ -24,6 +24,7 @@ mod proxy;
 mod rate_limit;
 mod server;
 mod storage;
+mod version;
 mod xml;
 
 use clap::Parser;
@@ -42,7 +43,7 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "maxio",
     about = "S3-compatible object storage server",
-    version = env!("CARGO_PKG_VERSION")
+    version = maxio::version::VERSION
 )]
 struct Cli {
     #[command(subcommand)]
@@ -231,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    tracing::info!("MaxIO v{} listening on {}", env!("CARGO_PKG_VERSION"), addr);
+    tracing::info!("MaxIO v{} listening on {}", maxio::version::VERSION, addr);
     tracing::info!("Access Key: {}", config.access_key);
     tracing::info!("Secret Key: [REDACTED]");
     tracing::info!("Data dir:   {}", config.data_dir);
@@ -289,7 +290,7 @@ async fn run_healthcheck(url: &str, timeout_ms: u64) -> anyhow::Result<()> {
         "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: maxio-healthcheck/{}\r\n\r\n",
         path_and_query,
         host,
-        env!("CARGO_PKG_VERSION")
+        maxio::version::VERSION
     );
     timeout(timeout_duration, stream.write_all(request.as_bytes()))
         .await

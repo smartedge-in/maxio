@@ -25,11 +25,13 @@ BUN             := $(shell command -v bun 2>/dev/null)
 HAS_BUN         := $(if $(BUN),1,)
 
 # -----------------------------------------------------------------------------
-# Project / image
+# Project / image / semver
 # -----------------------------------------------------------------------------
 PROJECT         ?= maxio
+VERSION_FILE    ?= VERSION
+VERSION         := $(shell tr -d '[:space:]' < $(VERSION_FILE) 2>/dev/null)
 IMAGE_NAME      ?= maxio
-IMAGE_TAG       ?= latest
+IMAGE_TAG       ?= v$(VERSION)
 IMAGE_REF       := $(IMAGE_NAME):$(IMAGE_TAG)
 
 # -----------------------------------------------------------------------------
@@ -109,7 +111,7 @@ endef
 .PHONY: all ci
 all: ci ## Run the complete production validation pipeline
 
-ci: ## Run full CI pipeline in order (stops on first failure)
+ci: sync-version ## Run full CI pipeline in order (stops on first failure)
 	@if [ "$(SKIP_FRONTEND)" = "1" ] && [ -z "$(HAS_BUN)" ]; then \
 		printf "$(COLOR_YELLOW)warning: bun not found; SKIP_FRONTEND=1 (minimal embedded UI)$(COLOR_RESET)\n"; \
 		printf "$(COLOR_DIM)Install bun: make install-tools  |  Full UI: make frontend release$(COLOR_RESET)\n"; \
@@ -140,12 +142,20 @@ ci: ## Run full CI pipeline in order (stops on first failure)
 # Rust quality
 # =============================================================================
 
-.PHONY: fmt check lint test coverage audit deny doc frontend release
+.PHONY: sync-version version fmt check lint test coverage audit deny doc frontend release
+
+sync-version: ## Sync VERSION file into Cargo.toml and ui/package.json
+	$(call log,Syncing semantic version from $(VERSION_FILE))
+	@./scripts/sync-version.sh
+
+version: ## Print the current semantic version from VERSION
+	@printf '%s\n' '$(VERSION)'
+
 fmt: ## Check Rust code formatting (cargo fmt --check)
 	$(call log,Checking Rust formatting)
 	$(CARGO) fmt --all -- --check
 
-check: ## Static compile check for the workspace
+check: sync-version ## Static compile check for the workspace
 	$(call log,Running cargo check --workspace)
 	$(CARGO) check --workspace $(CARGO_FLAGS)
 
@@ -194,8 +204,8 @@ frontend: ## Build embedded web console (requires bun)
 	cd ui && bun run build
 	@printf "$(COLOR_GREEN)Frontend built in ui/build/$(COLOR_RESET)\n"
 
-release: ## Build optimized release binaries
-	$(call log,Building release binaries)
+release: sync-version ## Build optimized release binaries
+	$(call log,Building release binaries v$(VERSION))
 	@if [ -n "$(HAS_BUN)" ] && [ "$(SKIP_FRONTEND)" != "1" ]; then \
 		$(MAKE) --no-print-directory frontend; \
 		env -u SKIP_FRONTEND $(CARGO) build --release $(BUILD_FLAGS) $(CARGO_FLAGS); \
@@ -310,10 +320,11 @@ report: ## Generate JSON Trivy report (suitable for HTML conversion)
 
 .PHONY: image trivy-image trivy-image-critical
 
-image: ## Build Docker container image
+image: sync-version ## Build Docker container image
 	$(call log,Building Docker image $(IMAGE_REF))
 	$(call require_cmd,$(DOCKER))
 	$(DOCKER) build \
+		--build-arg MAXIO_VERSION="$(VERSION)" \
 		-t "$(IMAGE_REF)" \
 		-f Dockerfile \
 		.
@@ -426,6 +437,7 @@ help: ## Show available targets and descriptions
 		| awk 'BEGIN {FS = ":.*## "}; {printf "  $(COLOR_GREEN)make %-22s$(COLOR_RESET) %s\n", $$1, $$2}'
 	@printf "\n$(COLOR_BOLD)Variables$(COLOR_RESET)\n\n"
 	@printf "  $(COLOR_CYAN)IMAGE_NAME$(COLOR_RESET)      = $(IMAGE_NAME)\n"
+	@printf "  $(COLOR_CYAN)VERSION$(COLOR_RESET)         = $(VERSION) (from $(VERSION_FILE))\n"
 	@printf "  $(COLOR_CYAN)IMAGE_TAG$(COLOR_RESET)       = $(IMAGE_TAG)\n"
 	@printf "  $(COLOR_CYAN)SBOM_FILE$(COLOR_RESET)       = $(SBOM_FILE)\n"
 	@printf "  $(COLOR_CYAN)TRIVY_CACHE_DIR$(COLOR_RESET) = $(TRIVY_CACHE_DIR)\n"
@@ -438,6 +450,6 @@ help: ## Show available targets and descriptions
 	@printf "  make install-tools   # run as normal user, not sudo\n"
 	@printf "  make ci\n"
 	@printf "  make test SKIP_FRONTEND=1\n"
-	@printf "  make image IMAGE_TAG=$(PROJECT)-v0.4.2\n"
+	@printf "  make image                 # tags image as $(IMAGE_NAME):v\$$VERSION\n"
 	@printf "  make deny-all          # full cargo-deny including advisories\n"
 	@printf "  make trivy-fs-critical\n"

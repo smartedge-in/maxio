@@ -24,4 +24,5 @@ pub mod proxy;
 pub mod rate_limit;
 pub mod server;
 pub mod storage;
+pub mod version;
 pub mod xml;

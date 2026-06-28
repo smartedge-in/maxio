@@ -8,7 +8,7 @@ use std::path::PathBuf;
 #[command(
     name = "maxio-admin",
     about = "Remote administration CLI for MaxIO object storage",
-    version,
+    version = maxio::version::VERSION,
     after_help = "Remote commands require a profile (see `maxio-admin config path`). \
                   Local-only commands accept --data-dir explicitly."
 )]

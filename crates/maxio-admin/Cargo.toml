@@ -1,11 +1,11 @@
 [package]
 name = "maxio-admin"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Remote administration CLI for MaxIO object storage instances"
-license = "Apache-2.0"
-repository = "https://github.com/coollabsio/maxio"
-authors = ["MaxIO Contributors"]
 keywords = ["maxio", "s3", "object-storage", "cli", "admin"]
 categories = ["command-line-utilities"]
 

@@ -10,6 +10,18 @@ Always spell the product name **MaxIO** (capital M, capital I, capital O). Never
 
 - Use **bun** (not npm) for the `ui/` frontend
 
+## Versioning
+
+MaxIO uses [Semantic Versioning](https://semver.org/). The release number lives in the repository
+root **`VERSION`** file (currently `0.4.2`). Edit `VERSION`, then run `make sync-version` to
+update `Cargo.toml` and `ui/package.json`. `make check`, `make release`, and `make ci` run
+`sync-version` automatically. Runtime and CLI `--version` read `maxio::version::VERSION`.
+
+```bash
+make version       # print current semver
+make sync-version  # propagate VERSION → manifests
+```
+
 ## Build & Run
 
 ```bash

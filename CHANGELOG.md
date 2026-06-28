@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Root **`VERSION`** file as the single source of truth for [Semantic Versioning](https://semver.org/); `make sync-version` propagates it to `Cargo.toml` (workspace) and `ui/package.json`; `maxio::version::VERSION` is exposed at runtime.
 - Production GNU **Makefile** with a full local validation pipeline (`make ci` / `make all`): fmt, check, clippy, test, coverage, `cargo audit`, `cargo deny`, Trivy filesystem/secret/config/license scans, CycloneDX SBOM, doc, release build, Docker image, and Trivy image scan.
 - `make install-tools` — installs Rust toolchain components, `cargo-audit` / `cargo-deny` / `cargo-llvm-cov`, bun (when `unzip` is available), and Trivy to `~/.local/bin` (run as a normal user, not `sudo`).
 - `make deny-all` — full `cargo deny check` (licenses, advisories, bans, sources); `make deny` defaults to licenses only (matches GitHub Actions).
@@ -69,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SSE read path: `FrameDecryptor::preflight()` validates the first encrypted frame before streaming the response body; sidecar integrity errors map to HTTP 400, EC chunk corruption to HTTP 500.
 - `make ci` runs `cargo clean` after `doc` and before `release` to drop debug artifacts and avoid disk exhaustion on small root volumes.
 - Trivy vulnerability DB cache defaults to `/tmp/maxio-trivy-cache` instead of the repository tree.
+- `maxio-admin` crate version tracks the workspace semver (was independent `0.1.0`).
+- Docker `image` tags default to `maxio:v$(VERSION)` from the `VERSION` file.
 - `build.rs` falls back gracefully when bun is missing (`SKIP_FRONTEND=1`); `make ci` auto-enables `SKIP_FRONTEND` when bun is not on `PATH`.
 - `/readyz` no longer returns `200` unconditionally; it reflects actual storage readiness.
 - S3 and console upload paths pass `Content-Length` (when present) into storage for early quota validation.

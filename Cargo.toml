@@ -2,14 +2,21 @@
 members = [".", "crates/maxio-admin"]
 resolver = "2"
 
-[package]
-name = "maxio"
+[workspace.package]
 version = "0.4.2"
 edition = "2024"
-description = "S3-compatible object storage server — single-binary replacement for MinIO"
 license = "Apache-2.0"
 repository = "https://github.com/coollabsio/maxio"
 authors = ["MaxIO Contributors"]
+
+[package]
+name = "maxio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "S3-compatible object storage server — single-binary replacement for MinIO"
 keywords = ["s3", "object-storage", "minio", "storage", "server"]
 categories = ["web-programming::http-server", "filesystem"]
 

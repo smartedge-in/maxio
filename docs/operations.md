@@ -397,6 +397,13 @@ Restore by stopping MaxIO, restoring the directory tree, and starting again. Buc
 The repository root **Makefile** runs an extended validation pipeline beyond GitHub Actions.
 Use it before release builds or when validating security and licensing locally.
 
+### Versioning
+
+Release versions follow [Semantic Versioning](https://semver.org/). The canonical version is in
+the repository root **`VERSION`** file. After bumping it, run `make sync-version` (or any target
+that depends on it, such as `make release`). Container images built via `make image` are tagged
+`maxio:v<VERSION>` by default.
+
 ### One-time setup
 
 ```bash

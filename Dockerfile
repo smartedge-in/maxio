@@ -1,5 +1,7 @@
 FROM rust:1-bookworm AS builder
 
+ARG MAXIO_VERSION=0.0.0
+
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:${PATH}"
 
@@ -8,15 +10,20 @@ WORKDIR /app
 COPY ui/package.json ui/bun.lock ./ui/
 RUN cd ui && bun install --frozen-lockfile
 
-COPY Cargo.toml Cargo.lock build.rs ./
+COPY VERSION scripts/sync-version.sh Cargo.toml Cargo.lock build.rs ./
+COPY crates ./crates
 COPY src ./src
 COPY tests ./tests
 COPY ui ./ui
 
+RUN chmod +x scripts/sync-version.sh && ./scripts/sync-version.sh
 RUN cd ui && bun run build
 RUN cargo build --release --locked
 
 FROM debian:bookworm-slim AS runtime
+
+ARG MAXIO_VERSION=0.0.0
+LABEL org.opencontainers.image.version="${MAXIO_VERSION}"
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/* \

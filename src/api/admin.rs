@@ -119,7 +119,7 @@ async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
     Json(StatusResponse {
         healthz: "ok",
         readyz,
-        version: env!("CARGO_PKG_VERSION"),
+        version: crate::version::VERSION,
         uptime_secs: state.started_at.elapsed().as_secs(),
     })
 }
