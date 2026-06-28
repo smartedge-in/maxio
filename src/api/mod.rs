@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod bucket;
 pub mod console;
 pub mod cors;

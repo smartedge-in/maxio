@@ -1,0 +1,25 @@
+[package]
+name = "maxio-admin"
+version = "0.1.0"
+edition = "2024"
+description = "Remote administration CLI for MaxIO object storage instances"
+license = "Apache-2.0"
+repository = "https://github.com/coollabsio/maxio"
+authors = ["MaxIO Contributors"]
+keywords = ["maxio", "s3", "object-storage", "cli", "admin"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "maxio-admin"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+toml = "0.8"

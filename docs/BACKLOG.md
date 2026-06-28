@@ -49,6 +49,15 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 ---
 
+## P1 — Erasure coding (reliability & coverage)
+
+| ID | Title | Area | Effort | Description | Acceptance criteria |
+|----|-------|------|--------|-------------|-------------------|
+| P1-12 | Clean S3 errors on EC read failure | storage | M | When Reed-Solomon recovery fails or a chunk checksum mismatches without recoverable parity, reads often fail mid-stream (connection reset) instead of returning a structured S3/XML error. | `GetObject` / range reads return a deterministic HTTP error (e.g. 500 + `InternalError` or dedicated code) when chunk verification or RS reconstruction fails; integration test for `test_parity_too_many_failures`-style scenario asserts status/body, not only connection drop. |
+| P1-13 | EC corruption tests in CI | ci | S | `aws-cli` job starts MaxIO without `--erasure-coding`, so `tests/aws_cli_test.sh` EC corruption checks are skipped (`INFO: erasure coding corruption tests skipped`). | Main-branch CI runs `aws_cli_test.sh` against a server with `--erasure-coding` (and optionally `--parity-shards`); corruption and recovery assertions execute, not skip. |
+
+---
+
 ## P2 — Maintainability & code health
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
@@ -59,6 +68,18 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | P2-04 | Unit test coverage report in CI | ci | S | Coverage is unknown; integration tests dominate. | `cargo llvm-cov` or `cargo tarpaulin` job publishes summary; set minimum threshold for `storage/crypto`, `auth`. |
 | P2-05 | Replace `unwrap()` in hot paths | storage | M | `unwrap`/`expect` in auth and storage error paths. | Audit and convert to `?` + proper `S3Error`/`StorageError` where user-visible. |
 | P2-06 | Console API integration tests | api | M | Console routes lack dedicated integration coverage vs S3. | Tests for login, rate limit, presign, bucket settings JSON API. |
+| P2-09 | Multipart + EC integration tests | storage | M | `complete_multipart_chunked` / `complete_multipart_chunked_encrypted` exist but multipart integration tests use the default non-EC server. | Tests under `start_server_ec()` / `start_server_ec_parity()`: create upload → upload parts → complete → GET roundtrip; SSE-S3 multipart variant covered. |
+| P2-10 | CopyObject + EC integration tests | storage | S | Copy rewrites via `put_object` (chunks on EC-enabled servers) but no dedicated EC copy coverage. | With EC enabled: copy same-bucket and cross-bucket; destination is chunked on disk; GET roundtrip passes; SSE-S3 copy paths included. |
+| P2-11 | Document EC operational limits | docs | S | Server-wide `--erasure-coding` toggle, parity required for recovery, GF(2⁸) 255-shard cap, and single-node scope are implicit in code but not summarized for operators. | `docs/operations.md` (or README) section: when to enable parity, max shards formula, no per-bucket EC, no recovery without parity, link to config flags. |
+
+---
+
+## P2 — Operations tooling
+
+| ID | Title | Area | Effort | Description | Acceptance criteria |
+|----|-------|------|--------|-------------|-------------------|
+| P2-13 | Authenticated admin API (remote ops) | api | L | **Scaffolding:** `/api/admin/v1/*` routes exist in `src/api/admin.rs` but return `501` without auth. Remote administration still needs real handlers beyond S3, console UI, and public `/healthz`/`/readyz`. | Versioned admin HTTP API (e.g. `/api/admin/v1/…`) protected by admin credentials (dedicated token or scoped use of access/secret with `MAXIO_ADMIN` role — design doc required). Endpoints at minimum: **GET /status** (healthz + readyz + version + uptime), **GET /info** (data-dir path, disk free/used, bucket/object counts, active config: EC, quotas, region), **GET /doctor** (readiness + disk reserve + keyring usable), **POST /housekeeping/run** (on-demand stale-multipart/temp sweep), **GET /keyring** (ids + metadata, never raw keys). TLS documented as required for production; rate-limited; mutating calls audit-logged when P2-08 lands. Integration tests for auth failure, success paths, and JSON schema stability. |
+| P2-12 | MaxIO admin / ops CLI (remote-first) | ops | XL | **Scaffolding:** `crates/maxio-admin` binary with command stubs + profile config; server exposes `/api/admin/v1/*` 501 stubs. The `maxio` binary still only has `healthcheck` and local `keyring`. | **`maxio-admin` CLI is remote-first** (finish P2-12) — every inspect/manage command targets a running instance via **P2-13 admin API** using named **profiles** (`endpoint`, TLS, admin credentials, timeout). Commands: `admin status`, `admin info`, `admin doctor`, `admin buckets list|head`, `admin housekeeping run`, `admin keyring list` (remote metadata). **Local-only** commands (explicit `--data-dir`, no network): `admin keyring rotate`, offline `doctor` for air-gapped recovery. Supports multiple profiles (`prod`, `staging`), `--json` + human tables, config file (`~/.config/maxio/config.toml`), env overrides. Does **not** replace `mc`/AWS CLI for object put/get. Documented in `docs/operations.md` with remote examples (including behind reverse proxy). CLI integration tests against live test server + admin API; contract tests for JSON output. **Blocked on P2-13** for remote paths. |
 
 ---
 
@@ -81,6 +102,7 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | P3-04 | Workspace crate split | storage | L | Single crate for server + storage + UI embed. | `maxio-server`, `maxio-storage` crates when API boundaries stabilize. |
 | P3-05 | ARM64 release binaries | ci | S | Release workflow may be x86-only today. | Multi-arch Docker image and GitHub release assets. |
 | P3-06 | UI E2E tests (Playwright) | ui | M | No browser-level tests for upload/download flows. | Smoke test: login → create bucket → upload → download → delete. |
+| P3-07 | Per-bucket erasure coding toggle | storage | L | Erasure coding is server-wide (`MAXIO_ERASURE_CODING`); operators cannot mix flat and chunked layouts per bucket on one instance. | Design note + implementation: per-bucket or per-prefix EC policy, migration path for existing flat objects, documented trade-offs. |
 
 ---
 
@@ -95,7 +117,8 @@ Reference only — no backlog action unless regressions appear.
 | SSE-S3 / SSE-C / keyring rotation CLI | Implemented with AAD-bound frames |
 | Default credential production guard | Refuses `maxioadmin` without `--allow-insecure-dev` |
 | Docker non-root runtime | `USER maxio` in Dockerfile |
-| Integration test suite | ~160 tests in `tests/integration.rs` (local, not CI) |
+| Integration test suite | ~160 tests in `tests/integration.rs`; `cargo test` in CI |
+| Erasure coding (single-node) | Chunked PUT/GET, range reads, parity RS recovery, encrypt-then-EC, ~20 EC/parity integration tests |
 | Public bucket anonymous access | Query sub-resource blocklist on bypass |
 | Housekeeping | Stale multipart + temp file sweep |
 
@@ -106,6 +129,8 @@ Reference only — no backlog action unless regressions appear.
 **Sprint 1 (stabilize):** P0-01, P0-02, P2-03, P1-07  
 **Sprint 2 (harden):** P0-03, P1-01, P1-02, P0-04  
 **Sprint 3 (scale maintainability):** P2-01, P2-04, P0-05, P2-06  
+**Sprint 4 (erasure coding hardening):** P1-13, P2-11, P2-09, P2-10, P1-12  
+**Sprint 5 (ops tooling):** P2-13 (admin API), then P2-12 (CLI: profiles → remote status/info/doctor → housekeeping; local keyring rotate last)
 
 ---
 

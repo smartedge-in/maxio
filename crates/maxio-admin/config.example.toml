@@ -1,0 +1,14 @@
+# Copy to ~/.config/maxio/config.toml (see `maxio-admin config path`)
+
+default_profile = "local"
+
+[profiles.local]
+endpoint = "http://127.0.0.1:9000"
+admin_token = "change-me"
+timeout_ms = 10000
+
+[profiles.prod]
+endpoint = "https://maxio.example.com"
+admin_token = "use-a-strong-admin-token"
+timeout_ms = 15000
+# tls_insecure = false

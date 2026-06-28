@@ -31,6 +31,7 @@ pub fn build_router(state: AppState) -> Router {
         ));
 
     Router::new()
+        .nest("/api/admin/v1", crate::api::admin::router())
         .nest("/api", console_router(state.clone()))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))

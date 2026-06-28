@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/maxio-admin"]
+resolver = "2"
+
 [package]
 name = "maxio"
 version = "0.4.2"
