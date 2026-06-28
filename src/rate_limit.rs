@@ -55,7 +55,8 @@ impl SlidingWindowLimiter {
         bucket.count += 1;
 
         if bucket.count > self.max {
-            let remaining = window.saturating_sub(now.duration_since(bucket.window_start).as_secs());
+            let remaining =
+                window.saturating_sub(now.duration_since(bucket.window_start).as_secs());
             Some(remaining.max(1))
         } else {
             None
@@ -90,9 +91,7 @@ impl LoginRateLimiter {
 
     pub fn in_memory(max: u32, window_secs: u64) -> Self {
         Self {
-            backend: LoginRateLimiterBackend::Memory(SlidingWindowLimiter::new(
-                max, window_secs,
-            )),
+            backend: LoginRateLimiterBackend::Memory(SlidingWindowLimiter::new(max, window_secs)),
         }
     }
 
@@ -135,11 +134,7 @@ async fn redis_check_and_increment(
         return None;
     }
     let key = format!("maxio:login:{ip}");
-    let count: u32 = match redis::cmd("INCR")
-        .arg(&key)
-        .query_async(&mut manager)
-        .await
-    {
+    let count: u32 = match redis::cmd("INCR").arg(&key).query_async(&mut manager).await {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("redis login rate limit INCR failed: {e}");

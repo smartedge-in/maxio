@@ -74,7 +74,10 @@ async fn run_local(data_dir: &str, json: bool) -> Result<()> {
         }),
     ];
     let ok = checks.iter().all(|c| c["ok"].as_bool().unwrap_or(false));
-    emit(json, &json!({ "ok": ok, "checks": checks, "data_dir": data_dir }))?;
+    emit(
+        json,
+        &json!({ "ok": ok, "checks": checks, "data_dir": data_dir }),
+    )?;
     if !ok {
         std::process::exit(1);
     }

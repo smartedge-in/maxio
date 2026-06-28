@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use axum::{
+    Extension,
     body::Body,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::Response,
-    Extension,
 };
 
-use super::virtual_host::{resolve_bucket, virtual_host_object_key, VirtualHostContext};
+use super::virtual_host::{VirtualHostContext, resolve_bucket, virtual_host_object_key};
 
 use crate::error::S3Error;
 use crate::server::AppState;
@@ -466,10 +466,7 @@ async fn put_bucket_policy(
         .unwrap())
 }
 
-pub async fn get_bucket_policy(
-    state: AppState,
-    bucket: String,
-) -> Result<Response<Body>, S3Error> {
+pub async fn get_bucket_policy(state: AppState, bucket: String) -> Result<Response<Body>, S3Error> {
     match state.storage.head_bucket(&bucket).await {
         Ok(true) => {}
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
@@ -490,10 +487,7 @@ pub async fn get_bucket_policy(
         .unwrap())
 }
 
-async fn delete_bucket_policy(
-    state: AppState,
-    bucket: String,
-) -> Result<Response<Body>, S3Error> {
+async fn delete_bucket_policy(state: AppState, bucket: String) -> Result<Response<Body>, S3Error> {
     match state.storage.head_bucket(&bucket).await {
         Ok(true) => {}
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),

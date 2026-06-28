@@ -1,7 +1,10 @@
 use super::*;
 
 impl FilesystemStorage {
-    pub(super) fn prepare_encryption(&self, req: &EncryptionRequest) -> Result<EncryptionMeta, StorageError> {
+    pub(super) fn prepare_encryption(
+        &self,
+        req: &EncryptionRequest,
+    ) -> Result<EncryptionMeta, StorageError> {
         let b64 = base64::engine::general_purpose::STANDARD;
         match req.mode {
             EncryptionMode::SseS3 => {
@@ -289,7 +292,11 @@ impl FilesystemStorage {
     }
 
     /// Scan versions for a key and update the top-level files to reflect the latest non-delete-marker.
-    pub(super) async fn update_current_version(&self, bucket: &str, key: &str) -> Result<(), StorageError> {
+    pub(super) async fn update_current_version(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<(), StorageError> {
         let ver_dir = self.versions_dir(bucket, key);
         if !fs::try_exists(&ver_dir).await.unwrap_or(false) {
             return Ok(());
@@ -528,5 +535,4 @@ impl FilesystemStorage {
 
         Ok(meta)
     }
-
 }

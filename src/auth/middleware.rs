@@ -6,8 +6,8 @@ use axum::{
 use chrono::{NaiveDateTime, Utc};
 
 use crate::api::virtual_host::{
-    extract_virtual_bucket, host_header_value, object_key_from_signature_path,
-    signature_path_from_request, VirtualHostContext,
+    VirtualHostContext, extract_virtual_bucket, host_header_value, object_key_from_signature_path,
+    signature_path_from_request,
 };
 use crate::error::S3Error;
 use crate::proxy::client_ip_from_request;
@@ -70,7 +70,11 @@ pub async fn auth_middleware(
 
     let auth_header = match request.headers().get("authorization") {
         Some(h) => h.to_str().map_err(|_| {
-            auth_failure(&state, &client_ip, S3Error::access_denied("Invalid Authorization header"))
+            auth_failure(
+                &state,
+                &client_ip,
+                S3Error::access_denied("Invalid Authorization header"),
+            )
         })?,
         None => {
             tracing::debug!("No Authorization header present");
@@ -157,7 +161,11 @@ pub async fn auth_middleware(
 
     if !valid {
         tracing::debug!("Signature verification FAILED");
-        return Err(auth_failure(&state, &client_ip, S3Error::signature_mismatch()));
+        return Err(auth_failure(
+            &state,
+            &client_ip,
+            S3Error::signature_mismatch(),
+        ));
     }
 
     tracing::debug!("Signature verification OK");
@@ -320,8 +328,13 @@ async fn handle_presigned(
     }
 
     // Check expiration
-    let issued_at = NaiveDateTime::parse_from_str(&timestamp, "%Y%m%dT%H%M%SZ")
-        .map_err(|_| auth_failure(state, client_ip, S3Error::access_denied("Invalid X-Amz-Date format")))?;
+    let issued_at = NaiveDateTime::parse_from_str(&timestamp, "%Y%m%dT%H%M%SZ").map_err(|_| {
+        auth_failure(
+            state,
+            client_ip,
+            S3Error::access_denied("Invalid X-Amz-Date format"),
+        )
+    })?;
     let expires_at = issued_at + chrono::Duration::seconds(expires_secs as i64);
     let now = Utc::now().naive_utc();
 
@@ -332,7 +345,11 @@ async fn handle_presigned(
             expires_at,
             now
         );
-        return Err(auth_failure(state, client_ip, S3Error::expired_presigned_url()));
+        return Err(auth_failure(
+            state,
+            client_ip,
+            S3Error::expired_presigned_url(),
+        ));
     }
     if issued_at > now + chrono::Duration::minutes(15) {
         return Err(auth_failure(
@@ -363,7 +380,11 @@ async fn handle_presigned(
 
     if !valid {
         tracing::debug!("Presigned signature verification FAILED");
-        return Err(auth_failure(state, client_ip, S3Error::signature_mismatch()));
+        return Err(auth_failure(
+            state,
+            client_ip,
+            S3Error::signature_mismatch(),
+        ));
     }
 
     tracing::debug!("Presigned signature verification OK");
@@ -386,6 +407,8 @@ mod tests {
     fn forbidden_subresource_queries_block_public_bypass() {
         assert!(query_has_forbidden_public_subresource("policy"));
         assert!(query_has_forbidden_public_subresource("uploads&prefix=a"));
-        assert!(!query_has_forbidden_public_subresource("prefix=a&delimiter=/"));
+        assert!(!query_has_forbidden_public_subresource(
+            "prefix=a&delimiter=/"
+        ));
     }
 }

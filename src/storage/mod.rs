@@ -438,7 +438,7 @@ mod validation_tests {
 
 #[cfg(test)]
 mod upload_error_tests {
-    use super::{map_upload_error, StorageError};
+    use super::{StorageError, map_upload_error};
     use crate::error::S3ErrorCode;
 
     #[test]

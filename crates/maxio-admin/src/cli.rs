@@ -80,9 +80,7 @@ pub enum BucketsCommand {
     /// List buckets with summary metadata
     List,
     /// Show metadata for one bucket
-    Head {
-        name: String,
-    },
+    Head { name: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -125,17 +123,29 @@ impl Cli {
             Command::Keyring(cmd) => {
                 commands::keyring::run(cmd, profile, endpoint, json, config).await
             }
-            Command::Status => commands::status::run(build_context(profile, endpoint, json, config).await?).await,
-            Command::Info => commands::info::run(build_context(profile, endpoint, json, config).await?).await,
+            Command::Status => {
+                commands::status::run(build_context(profile, endpoint, json, config).await?).await
+            }
+            Command::Info => {
+                commands::info::run(build_context(profile, endpoint, json, config).await?).await
+            }
             Command::Doctor { data_dir } => {
-                commands::doctor::run(data_dir, build_context(profile, endpoint, json, config).await?)
-                    .await
+                commands::doctor::run(
+                    data_dir,
+                    build_context(profile, endpoint, json, config).await?,
+                )
+                .await
             }
             Command::Buckets(cmd) => {
-                commands::buckets::run(cmd, build_context(profile, endpoint, json, config).await?).await
+                commands::buckets::run(cmd, build_context(profile, endpoint, json, config).await?)
+                    .await
             }
             Command::Housekeeping { action } => {
-                commands::housekeeping::run(action, build_context(profile, endpoint, json, config).await?).await
+                commands::housekeeping::run(
+                    action,
+                    build_context(profile, endpoint, json, config).await?,
+                )
+                .await
             }
         }
     }

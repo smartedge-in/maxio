@@ -240,3 +240,7 @@ See [CLAUDE.md](CLAUDE.md) for the full development workflow, architecture detai
 ## License
 
 [Apache-2.0](LICENSE)
+
+Third-party dependency and embedded-asset licensing policy is documented in
+[docs/licensing.md](docs/licensing.md). CI runs `cargo deny check` against a permissive
+license allow-list.

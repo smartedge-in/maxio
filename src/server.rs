@@ -1,9 +1,9 @@
+use axum::Json;
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Json;
 use serde::Deserialize;
 use serde::Serialize;
 use std::sync::Arc;
@@ -11,10 +11,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Instant;
 
 use crate::api::console::console_router;
-use crate::api::virtual_host::virtual_host_middleware;
-use crate::auth::credentials::CredentialStore;
 use crate::api::cors::cors_middleware;
 use crate::api::router::s3_router;
+use crate::api::virtual_host::virtual_host_middleware;
+use crate::auth::credentials::CredentialStore;
 use crate::auth::middleware::auth_middleware;
 use crate::config::Config;
 use crate::embedded::ui_handler;
@@ -113,10 +113,7 @@ struct HousekeepingHealth {
     interval_secs: u64,
 }
 
-async fn healthz(
-    State(state): State<AppState>,
-    Query(query): Query<HealthQuery>,
-) -> Response {
+async fn healthz(State(state): State<AppState>, Query(query): Query<HealthQuery>) -> Response {
     if query.verbose != Some(1) {
         return StatusCode::OK.into_response();
     }
@@ -191,9 +188,9 @@ async fn security_headers_middleware(
 ) -> axum::response::Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.entry(header::CONTENT_SECURITY_POLICY).or_insert_with(|| {
-        HeaderValue::from_static(CONTENT_SECURITY_POLICY)
-    });
+    headers
+        .entry(header::CONTENT_SECURITY_POLICY)
+        .or_insert_with(|| HeaderValue::from_static(CONTENT_SECURITY_POLICY));
     headers
         .entry(header::X_CONTENT_TYPE_OPTIONS)
         .or_insert(HeaderValue::from_static("nosniff"));

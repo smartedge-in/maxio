@@ -46,6 +46,21 @@ jobs:
         run: bun run build
         working-directory: ui
 
+  licenses:
+    name: License audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Check dependency licenses
+        run: cargo deny check licenses
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

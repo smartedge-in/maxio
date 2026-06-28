@@ -53,10 +53,7 @@ impl TrustedProxies {
             return peer_ip.to_string();
         }
 
-        let Some(forwarded) = headers
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-        else {
+        let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) else {
             return peer_ip.to_string();
         };
 
@@ -165,14 +162,8 @@ mod tests {
     fn ignores_forwarded_without_trusted_proxies() {
         let trusted = TrustedProxies::default();
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-forwarded-for",
-            HeaderValue::from_static("203.0.113.50"),
-        );
-        assert_eq!(
-            trusted.client_ip(&headers, &peer("10.0.0.5")),
-            "10.0.0.5"
-        );
+        headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.50"));
+        assert_eq!(trusted.client_ip(&headers, &peer("10.0.0.5")), "10.0.0.5");
     }
 
     #[test]

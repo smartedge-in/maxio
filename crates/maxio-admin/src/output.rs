@@ -23,10 +23,7 @@ pub fn emit_stub(json_mode: bool, command: &str, endpoint: &str, profile: &str) 
 
 pub fn emit_message(json_mode: bool, message: &str) {
     if json_mode {
-        println!(
-            "{}",
-            serde_json::json!({ "message": message }).to_string()
-        );
+        println!("{}", serde_json::json!({ "message": message }).to_string());
     } else {
         println!("{message}");
     }
@@ -69,13 +66,21 @@ fn print_human(value: &Value) {
     }
 
     if let Some(keys) = value.get("keys").and_then(|k| k.as_array()) {
-        println!("Active key: {}", value.get("active_id").and_then(|v| v.as_str()).unwrap_or("?"));
+        println!(
+            "Active key: {}",
+            value
+                .get("active_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+        );
         println!("{:<20}  {:<26}  ACTIVE", "KEY_ID", "CREATED_AT");
         for key in keys {
             println!(
                 "{:<20}  {:<26}  {}",
                 key.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
-                key.get("created_at").and_then(|v| v.as_str()).unwrap_or("?"),
+                key.get("created_at")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?"),
                 if key.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
                     "yes"
                 } else {

@@ -67,7 +67,12 @@ pub(super) fn validate_upload_id(upload_id: &str) -> Result<(), StorageError> {
 ///
 /// Binds every GCM auth tag to object identity, detecting cross-object frame
 /// swaps that would otherwise decrypt cleanly (same DEK + nonce + index).
-pub(super) fn build_frame_aad(bucket: &str, key: &str, version_id: Option<&str>, chunk_index: u64) -> Vec<u8> {
+pub(super) fn build_frame_aad(
+    bucket: &str,
+    key: &str,
+    version_id: Option<&str>,
+    chunk_index: u64,
+) -> Vec<u8> {
     let mut hasher = <Sha256 as Digest>::new();
     hasher.update(bucket.as_bytes());
     hasher.update([0u8]);
@@ -149,7 +154,10 @@ pub(super) fn canonical_json_value(v: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Compute the hex-encoded HMAC-SHA256 over `mac_input(meta)` keyed by the DEK.
-pub(super) fn compute_sidecar_mac(dek: &[u8; 32], meta: &ObjectMeta) -> Result<String, StorageError> {
+pub(super) fn compute_sidecar_mac(
+    dek: &[u8; 32],
+    meta: &ObjectMeta,
+) -> Result<String, StorageError> {
     let input = mac_input(meta);
     let value = serde_json::to_value(&input)?;
     let canonical = canonical_json_value(&value);
@@ -223,7 +231,11 @@ pub(super) async fn write_chunk_to_dir(
     write_chunk_file(&dir.join(format!("{:06}", index)), index, data).await
 }
 
-pub(super) async fn write_chunk_file(path: &Path, index: u32, data: &[u8]) -> Result<ChunkInfo, StorageError> {
+pub(super) async fn write_chunk_file(
+    path: &Path,
+    index: u32,
+    data: &[u8],
+) -> Result<ChunkInfo, StorageError> {
     let sha256 = hex::encode(Sha256::digest(data));
     let mut file = fs::File::create(&path).await?;
     file.write_all(data).await?;

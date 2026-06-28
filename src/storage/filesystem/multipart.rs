@@ -442,7 +442,11 @@ impl FilesystemStorage {
         })
     }
 
-    pub(super) async fn put_folder_marker(&self, bucket: &str, key: &str) -> Result<PutResult, StorageError> {
+    pub(super) async fn put_folder_marker(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<PutResult, StorageError> {
         let folder_dir = self
             .buckets_dir
             .join(bucket)
@@ -485,7 +489,6 @@ impl FilesystemStorage {
             checksum_value: None,
         })
     }
-
 
     pub async fn create_multipart_upload(
         &self,
@@ -1132,5 +1135,4 @@ impl FilesystemStorage {
     }
 
     // --- Versioning ---
-
 }

@@ -1,7 +1,7 @@
 //! Authenticated admin HTTP API (P2-13).
 
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -13,9 +13,9 @@ use serde_json::json;
 use crate::config::Config;
 use crate::proxy::client_ip_from_request;
 use crate::server::AppState;
+use crate::storage::BucketMeta;
 use crate::storage::keys;
 use crate::storage::quota::disk_space_bytes;
-use crate::storage::BucketMeta;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
@@ -292,7 +292,9 @@ struct BucketsResponse {
     buckets: Vec<BucketSummary>,
 }
 
-async fn list_buckets(State(state): State<AppState>) -> Result<Json<BucketsResponse>, AdminApiError> {
+async fn list_buckets(
+    State(state): State<AppState>,
+) -> Result<Json<BucketsResponse>, AdminApiError> {
     let mut buckets = Vec::new();
     for meta in state.storage.list_buckets().await? {
         let object_count = state.storage.count_bucket_objects(&meta.name).await?;
@@ -320,7 +322,9 @@ async fn head_bucket(
     let meta = buckets
         .into_iter()
         .find(|b| b.name == name)
-        .ok_or(AdminApiError::NotFound(format!("bucket '{name}' not found")))?;
+        .ok_or(AdminApiError::NotFound(format!(
+            "bucket '{name}' not found"
+        )))?;
     let object_count = state.storage.count_bucket_objects(&name).await?;
     Ok(Json(BucketDetailResponse {
         bucket: meta,
@@ -346,8 +350,7 @@ async fn housekeeping_run(
         "admin API: on-demand housekeeping sweep"
     );
     let stale_after = chrono::Duration::days(7);
-    let (uploads_removed, temp_files_removed) =
-        state.storage.housekeeping_sweep(stale_after).await;
+    let (uploads_removed, temp_files_removed) = state.storage.housekeeping_sweep(stale_after).await;
     Json(HousekeepingResponse {
         uploads_removed,
         temp_files_removed,
@@ -434,10 +437,7 @@ mod tests {
 
     fn headers_with(value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_str(value).unwrap(),
-        );
+        headers.insert(header::AUTHORIZATION, HeaderValue::from_str(value).unwrap());
         headers
     }
 

@@ -1,14 +1,14 @@
 use std::collections::{BTreeSet, HashMap};
 
 use axum::{
+    Extension,
     body::Body,
     extract::{Path, Query, State},
     response::Response,
-    Extension,
 };
 use http::{HeaderMap, StatusCode};
 
-use super::virtual_host::{resolve_bucket, virtual_host_object_key, VirtualHostContext};
+use super::virtual_host::{VirtualHostContext, resolve_bucket, virtual_host_object_key};
 
 use super::multipart;
 use crate::error::S3Error;

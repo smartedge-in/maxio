@@ -70,14 +70,10 @@ pub fn evaluate_v1_policy(bucket: &str, raw: &str) -> Result<PolicyEffects, Stri
 
     for stmt in &policy.statement {
         if !stmt.effect.eq_ignore_ascii_case("Allow") {
-            return Err(
-                "MalformedPolicy: only Effect=Allow statements are supported in v1".into(),
-            );
+            return Err("MalformedPolicy: only Effect=Allow statements are supported in v1".into());
         }
         if !principal_is_wildcard(&stmt.principal) {
-            return Err(
-                "MalformedPolicy: only Principal=\"*\" is supported in v1".into(),
-            );
+            return Err("MalformedPolicy: only Principal=\"*\" is supported in v1".into());
         }
 
         let mut apply_action = |raw_action: &str| -> Result<(), String> {

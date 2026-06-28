@@ -114,9 +114,8 @@ async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> S
 async fn start_server() -> (String, TempDir) {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
     (base_url, tmp)
 }
@@ -125,9 +124,7 @@ async fn start_server_with_quota(max_object_bytes: u64) -> (String, TempDir) {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let quota = QuotaLimits::from_config(max_object_bytes, 0);
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, quota).await,
-    );
+    let storage = Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, quota).await);
     let mut config = default_test_config(data_dir);
     config.max_object_bytes = max_object_bytes;
     let base_url = spawn_test_server(storage, config).await;
@@ -245,9 +242,8 @@ async fn start_server_with_default_buckets(default_buckets: &str) -> (String, Te
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     maxio::storage::provision_default_buckets(storage.as_ref(), default_buckets, REGION).await;
 
     let mut config = default_test_config(data_dir);
@@ -283,9 +279,8 @@ async fn test_default_buckets_skip_existing() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
 
     // First provision: creates the bucket
     maxio::storage::provision_default_buckets(storage.as_ref(), "existing", REGION).await;
@@ -680,9 +675,8 @@ async fn test_readyz_is_public_and_returns_ok() {
 async fn test_readyz_returns_503_when_data_dir_unwritable() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let base_url = spawn_test_server(storage, default_test_config(data_dir.clone())).await;
 
     let resp = client()
@@ -752,9 +746,8 @@ async fn test_security_headers_are_applied() {
 async fn test_s3_auth_failure_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.s3_rate_auth_max = 3;
     config.s3_rate_auth_window_secs = 300;
@@ -784,20 +777,14 @@ async fn test_s3_auth_failure_rate_limit() {
 async fn test_s3_put_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.s3_rate_put_max = 2;
     config.s3_rate_put_window_secs = 60;
     let base_url = spawn_test_server(storage, config).await;
 
-    s3_request(
-        "PUT",
-        &format!("{}/put-limit-bucket", base_url),
-        Vec::new(),
-    )
-    .await;
+    s3_request("PUT", &format!("{}/put-limit-bucket", base_url), Vec::new()).await;
     s3_request(
         "PUT",
         &format!("{}/put-limit-bucket/obj.txt", base_url),
@@ -2682,16 +2669,25 @@ async fn test_console_bucket_versioning_and_public_settings() {
     let session = console_login(&base_url).await;
 
     let resp = client()
-        .get(format!("{}/api/buckets/console-settings/versioning", base_url))
+        .get(format!(
+            "{}/api/buckets/console-settings/versioning",
+            base_url
+        ))
         .header("cookie", format!("maxio_session={}", session))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.json::<serde_json::Value>().await.unwrap()["enabled"], false);
+    assert_eq!(
+        resp.json::<serde_json::Value>().await.unwrap()["enabled"],
+        false
+    );
 
     let resp = client()
-        .put(format!("{}/api/buckets/console-settings/versioning", base_url))
+        .put(format!(
+            "{}/api/buckets/console-settings/versioning",
+            base_url
+        ))
         .header("cookie", format!("maxio_session={}", session))
         .json(&serde_json::json!({"enabled": true}))
         .send()
@@ -2700,12 +2696,18 @@ async fn test_console_bucket_versioning_and_public_settings() {
     assert_eq!(resp.status(), 200);
 
     let resp = client()
-        .get(format!("{}/api/buckets/console-settings/versioning", base_url))
+        .get(format!(
+            "{}/api/buckets/console-settings/versioning",
+            base_url
+        ))
         .header("cookie", format!("maxio_session={}", session))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.json::<serde_json::Value>().await.unwrap()["enabled"], true);
+    assert_eq!(
+        resp.json::<serde_json::Value>().await.unwrap()["enabled"],
+        true
+    );
 
     let resp = client()
         .get(format!("{}/api/buckets/console-settings/public", base_url))
@@ -3509,7 +3511,13 @@ async fn test_multipart_complete_ec() {
         p1.clone(),
     )
     .await;
-    let e1 = r1.headers().get("etag").unwrap().to_str().unwrap().to_string();
+    let e1 = r1
+        .headers()
+        .get("etag")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
     let r2 = s3_request(
         "PUT",
         &format!(
@@ -3519,7 +3527,13 @@ async fn test_multipart_complete_ec() {
         p2.clone(),
     )
     .await;
-    let e2 = r2.headers().get("etag").unwrap().to_str().unwrap().to_string();
+    let e2 = r2
+        .headers()
+        .get("etag")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
 
     let complete_xml = format!(
         "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>{}</ETag></Part></CompleteMultipartUpload>",
@@ -3569,7 +3583,13 @@ async fn test_multipart_complete_ec_sse_s3() {
         vec![("x-amz-server-side-encryption", "AES256")],
     )
     .await;
-    let e1 = r1.headers().get("etag").unwrap().to_str().unwrap().to_string();
+    let e1 = r1
+        .headers()
+        .get("etag")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
 
     let complete_xml = format!(
         "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{}</ETag></Part></CompleteMultipartUpload>",
@@ -3583,11 +3603,7 @@ async fn test_multipart_complete_ec_sse_s3() {
     .await;
     assert_eq!(complete.status(), 200);
 
-    assert!(
-        tmp.path()
-            .join("buckets/ec-mp-enc/secret.bin.ec")
-            .is_dir()
-    );
+    assert!(tmp.path().join("buckets/ec-mp-enc/secret.bin.ec").is_dir());
 
     let get = s3_request("GET", &format!("{}/ec-mp-enc/secret.bin", base_url), vec![]).await;
     assert_eq!(get.status(), 200);
@@ -3894,9 +3910,8 @@ async fn start_server_parity(parity_shards: u32) -> (String, TempDir) {
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     // 100-byte chunks for easy multi-chunk testing
-    let storage = Arc::new(
-        new_test_storage(&data_dir, true, 100, parity_shards, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, true, 100, parity_shards, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.erasure_coding = true;
     config.chunk_size = 100;
@@ -4031,8 +4046,7 @@ async fn test_parity_too_many_failures() {
         std::fs::remove_file(&chunk_path).unwrap();
     }
 
-    let resp =
-        s3_request("GET", &format!("{}/parity-test/file.bin", base_url), vec![]).await;
+    let resp = s3_request("GET", &format!("{}/parity-test/file.bin", base_url), vec![]).await;
     assert_eq!(resp.status(), 500);
     let xml = resp.text().await.unwrap();
     assert!(xml.contains("InternalError"), "unexpected body: {xml}");
@@ -6524,7 +6538,14 @@ async fn start_server_ec_parity(chunk_size: u64, parity_shards: u32) -> (String,
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     let storage = Arc::new(
-        new_test_storage(&data_dir, true, chunk_size, parity_shards, unlimited_quota()).await,
+        new_test_storage(
+            &data_dir,
+            true,
+            chunk_size,
+            parity_shards,
+            unlimited_quota(),
+        )
+        .await,
     );
     let mut config = default_test_config(data_dir);
     config.erasure_coding = true;
@@ -7344,7 +7365,8 @@ async fn test_admin_api_status_with_bearer_token() {
 #[tokio::test]
 async fn test_admin_api_status_with_basic_auth() {
     let (base_url, _tmp) = start_server().await;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{ACCESS_KEY}:{SECRET_KEY}"));
+    let encoded =
+        base64::engine::general_purpose::STANDARD.encode(format!("{ACCESS_KEY}:{SECRET_KEY}"));
     let resp = client()
         .get(format!("{base_url}/api/admin/v1/status"))
         .header("authorization", format!("Basic {encoded}"))
@@ -7446,9 +7468,8 @@ async fn test_healthz_verbose_returns_subsystem_metrics() {
 async fn test_trusted_proxy_uses_x_forwarded_for_for_login_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.trusted_proxies = "127.0.0.0/8".to_string();
     let base_url = spawn_test_server(storage, config).await;
@@ -7491,7 +7512,12 @@ async fn put_bucket_policy_signed(base_url: &str, bucket: &str, policy: &str) ->
     for (k, v) in &headers {
         req = req.header(k.as_str(), v.as_str());
     }
-    req.body(policy.to_string()).send().await.unwrap().status().as_u16()
+    req.body(policy.to_string())
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .as_u16()
 }
 
 /// Raw HTTP/1.1 GET with virtual-hosted `Host` and no authentication.
@@ -7505,9 +7531,7 @@ async fn virtual_host_get_anonymous(
 
     let vhost_domain = format!("{bucket}.{}", server_host.split(':').next().unwrap());
     let host_header = format!("{vhost_domain}:{}", listen.port());
-    let req = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n"
-    );
+    let req = format!("GET {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n");
     let mut stream = tokio::net::TcpStream::connect(listen).await.unwrap();
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut response = Vec::new();
@@ -7615,12 +7639,10 @@ async fn start_server_with_server_host(
 async fn test_virtual_host_style_put_and_get() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let config = default_test_config(data_dir);
-    let (base_url, listen, server_host) =
-        start_server_with_server_host(storage, config).await;
+    let (base_url, listen, server_host) = start_server_with_server_host(storage, config).await;
 
     s3_request("PUT", &format!("{base_url}/vh-bucket"), vec![]).await;
 
@@ -7659,9 +7681,8 @@ async fn test_secondary_credential_can_authenticate() {
     )
     .unwrap();
 
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
 
     let url = format!("{base_url}/alt-bucket");
@@ -7688,7 +7709,10 @@ async fn test_bucket_policy_public_read_via_get_object() {
             "Resource": "arn:aws:s3:::policy-bucket/*"
         }]
     }"#;
-    assert_eq!(put_bucket_policy_signed(&base_url, "policy-bucket", policy).await, 204);
+    assert_eq!(
+        put_bucket_policy_signed(&base_url, "policy-bucket", policy).await,
+        204
+    );
 
     s3_request(
         "PUT",
@@ -7720,7 +7744,10 @@ async fn test_bucket_policy_get_and_delete() {
         }]
     }"#;
 
-    assert_eq!(put_bucket_policy_signed(&base_url, "pol-get", policy).await, 204);
+    assert_eq!(
+        put_bucket_policy_signed(&base_url, "pol-get", policy).await,
+        204
+    );
 
     let get_url = format!("{base_url}/pol-get?policy");
     let mut get_headers: Vec<(String, String)> = Vec::new();
@@ -7756,19 +7783,20 @@ async fn test_bucket_policy_malformed_rejected() {
     s3_request("PUT", &format!("{base_url}/bad-pol"), vec![]).await;
 
     let policy = r#"{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bad-pol/*"}]}"#;
-    assert_eq!(put_bucket_policy_signed(&base_url, "bad-pol", policy).await, 400);
+    assert_eq!(
+        put_bucket_policy_signed(&base_url, "bad-pol", policy).await,
+        400
+    );
 }
 
 #[tokio::test]
 async fn test_virtual_host_anonymous_public_read() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage = Arc::new(
-        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
-    );
+    let storage =
+        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let config = default_test_config(data_dir);
-    let (base_url, listen, server_host) =
-        start_server_with_server_host(storage, config).await;
+    let (base_url, listen, server_host) = start_server_with_server_host(storage, config).await;
 
     s3_request("PUT", &format!("{base_url}/pub-vh"), vec![]).await;
 
@@ -7780,7 +7808,10 @@ async fn test_virtual_host_anonymous_public_read() {
             "Resource": "arn:aws:s3:::pub-vh/*"
         }]
     }"#;
-    assert_eq!(put_bucket_policy_signed(&base_url, "pub-vh", policy).await, 204);
+    assert_eq!(
+        put_bucket_policy_signed(&base_url, "pub-vh", policy).await,
+        204
+    );
 
     s3_request(
         "PUT",

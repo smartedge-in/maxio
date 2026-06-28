@@ -32,7 +32,6 @@ impl FilesystemStorage {
 
     // --- Object operations ---
 
-
     pub async fn list_objects(
         &self,
         bucket: &str,
@@ -47,7 +46,11 @@ impl FilesystemStorage {
         Ok(results)
     }
 
-    pub(super) async fn read_object_meta(&self, bucket: &str, key: &str) -> Result<ObjectMeta, StorageError> {
+    pub(super) async fn read_object_meta(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<ObjectMeta, StorageError> {
         let meta_path = self.meta_path(bucket, key);
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -138,7 +141,6 @@ impl FilesystemStorage {
             Ok(())
         })
     }
-
 
     pub async fn list_object_versions(
         &self,

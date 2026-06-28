@@ -46,3 +46,6 @@ maxio-admin doctor --data-dir ./data
 ```
 
 See [docs/operations.md](../../docs/operations.md) for TLS, authentication, and production deployment guidance.
+
+`maxio-admin` uses `reqwest` with `native-tls-vendored` (bundled OpenSSL at build time).
+See [docs/licensing.md](../../docs/licensing.md).

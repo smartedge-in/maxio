@@ -6,10 +6,10 @@
 //! handlers call [`resolve_bucket`] and optionally delegate object operations.
 
 use axum::{
+    Extension,
     extract::{Request, State},
     middleware::Next,
     response::Response,
-    Extension,
 };
 
 use crate::config::Config;
@@ -26,11 +26,7 @@ pub struct VirtualHostContext {
 /// Object key from a virtual-hosted request path (`/key`), if present.
 pub fn object_key_from_signature_path(signature_path: &str) -> Option<&str> {
     let key = signature_path.trim_start_matches('/');
-    if key.is_empty() {
-        None
-    } else {
-        Some(key)
-    }
+    if key.is_empty() { None } else { Some(key) }
 }
 
 /// Bucket name for the request: virtual-host context wins over the path segment.

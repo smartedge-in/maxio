@@ -51,8 +51,7 @@ impl ConfigFile {
             .or_else(|| self.default_profile.clone())
             .ok_or_else(|| {
                 AdminError::Config(
-                    "no profile selected; pass --profile or set default_profile in config"
-                        .into(),
+                    "no profile selected; pass --profile or set default_profile in config".into(),
                 )
             })?;
         let profile = self
@@ -64,8 +63,26 @@ impl ConfigFile {
     }
 }
 
+/// Resolves the platform user config directory without pulling in `dirs` (MPL-2.0).
+pub fn user_config_dir() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
+    }
+}
+
 pub fn default_config_path() -> PathBuf {
-    dirs::config_dir()
+    user_config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("maxio")
         .join("config.toml")
@@ -74,6 +91,71 @@ pub fn default_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn user_config_dir_prefers_xdg_config_home() {
+        let _guard = env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let custom = temp.path().join("xdg-config");
+        std::fs::create_dir_all(&custom).unwrap();
+
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", &custom);
+        }
+        assert_eq!(user_config_dir().as_deref(), Some(custom.as_path()));
+
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+    }
+
+    #[test]
+    fn user_config_dir_falls_back_to_home_dot_config() {
+        let _guard = env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", &home);
+        }
+        assert_eq!(
+            user_config_dir().as_deref(),
+            Some(home.join(".config").as_path())
+        );
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+    }
+
+    #[test]
+    fn default_config_path_joins_maxio_config_toml() {
+        let _guard = env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let custom = temp.path().join("xdg-config");
+        std::fs::create_dir_all(&custom).unwrap();
+
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", &custom);
+        }
+        assert_eq!(
+            default_config_path(),
+            custom.join("maxio").join("config.toml")
+        );
+
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
+    }
 
     #[test]
     fn parses_example_config() {

@@ -55,11 +55,7 @@ impl QuotaLimits {
         Ok(())
     }
 
-    pub fn check_write_progress(
-        &self,
-        data_root: &Path,
-        written: u64,
-    ) -> Result<(), StorageError> {
+    pub fn check_write_progress(&self, data_root: &Path, written: u64) -> Result<(), StorageError> {
         self.check_object_size(written)?;
         if self.min_free_disk_bytes > 0 {
             let available = available_disk_bytes(data_root).ok_or_else(|| {
@@ -147,7 +143,9 @@ impl<R: AsyncRead + Unpin> AsyncRead for QuotaReader<R> {
             let read = (buf.filled().len() - before) as u64;
             if read > 0 {
                 self.written += read;
-                if let Err(e) = self.limits.check_write_progress(&self.data_root, self.written)
+                if let Err(e) = self
+                    .limits
+                    .check_write_progress(&self.data_root, self.written)
                 {
                     return Poll::Ready(Err(quota_io_error(e)));
                 }

@@ -172,9 +172,8 @@ async fn main() -> anyhow::Result<()> {
         rate_limit::LoginRateLimiter::from_config(config.login_rate_limit_redis_url.as_deref())
             .await?,
     );
-    let credentials = Arc::new(
-        auth::credentials::CredentialStore::load(&config.data_dir, &config).await?,
-    );
+    let credentials =
+        Arc::new(auth::credentials::CredentialStore::load(&config.data_dir, &config).await?);
     if credentials.len() > 1 {
         tracing::info!(
             "S3 credentials: {} access key(s) loaded (bootstrap + .maxio-credentials.json)",
@@ -201,13 +200,15 @@ async fn main() -> anyhow::Result<()> {
         let last_run = state.last_housekeeping_at.clone();
         tokio::spawn(async move {
             let stale_after = chrono::Duration::days(7);
-            let mut ticker = tokio::time::interval(Duration::from_secs(
-                server::HOUSEKEEPING_INTERVAL_SECS,
-            ));
+            let mut ticker =
+                tokio::time::interval(Duration::from_secs(server::HOUSEKEEPING_INTERVAL_SECS));
             loop {
                 ticker.tick().await;
                 let (uploads, temps) = storage.housekeeping_sweep(stale_after).await;
-                last_run.store(chrono::Utc::now().timestamp(), std::sync::atomic::Ordering::Relaxed);
+                last_run.store(
+                    chrono::Utc::now().timestamp(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 if uploads > 0 || temps > 0 {
                     tracing::info!(
                         "housekeeping: removed {} stale upload(s), {} temp file(s)",

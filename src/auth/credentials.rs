@@ -51,8 +51,8 @@ impl CredentialStore {
 
         let path = format!("{data_dir}/{CREDENTIALS_FILE}");
         if let Ok(raw) = fs::read_to_string(&path).await {
-            let file: CredentialsFile = serde_json::from_str(&raw)
-                .map_err(|e| anyhow::anyhow!("parse {path}: {e}"))?;
+            let file: CredentialsFile =
+                serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parse {path}: {e}"))?;
             for entry in file.credentials {
                 if entry.access_key.is_empty() || entry.secret_key.is_empty() {
                     continue;
@@ -65,9 +65,7 @@ impl CredentialStore {
     }
 
     pub fn lookup(&self, access_key: &str) -> Option<&CredentialEntry> {
-        self.by_access_key
-            .get(access_key)
-            .filter(|c| c.enabled)
+        self.by_access_key.get(access_key).filter(|c| c.enabled)
     }
 
     pub fn list_access_keys(&self) -> Vec<&str> {
@@ -195,7 +193,9 @@ mod tests {
     async fn malformed_credentials_file_returns_error() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().to_str().unwrap();
-        fs::write(format!("{dir}/{CREDENTIALS_FILE}"), "not-json").await.unwrap();
+        fs::write(format!("{dir}/{CREDENTIALS_FILE}"), "not-json")
+            .await
+            .unwrap();
         assert!(CredentialStore::load(dir, &test_config()).await.is_err());
     }
 

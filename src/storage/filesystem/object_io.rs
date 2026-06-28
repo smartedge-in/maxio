@@ -249,7 +249,10 @@ impl FilesystemStorage {
         let mut chunk_buf = Vec::with_capacity(self.chunk_size as usize);
 
         loop {
-            let n = body.read(&mut read_buf).await.map_err(map_read_quota_error)?;
+            let n = body
+                .read(&mut read_buf)
+                .await
+                .map_err(map_read_quota_error)?;
             if n == 0 {
                 // Flush remaining chunk_buf
                 if !chunk_buf.is_empty() {
@@ -432,7 +435,10 @@ impl FilesystemStorage {
         let mut chunk_buf: Vec<u8> = Vec::with_capacity(self.chunk_size as usize);
 
         loop {
-            let n = body.read(&mut read_buf).await.map_err(map_read_quota_error)?;
+            let n = body
+                .read(&mut read_buf)
+                .await
+                .map_err(map_read_quota_error)?;
             if n == 0 {
                 // Flush trailing partial frame.
                 if !frame_buf.is_empty() {

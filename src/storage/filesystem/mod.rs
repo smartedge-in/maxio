@@ -28,13 +28,11 @@ const IO_BUFFER_SIZE: usize = 256 * 1024;
 const SMALL_OBJECT_THRESHOLD: u64 = 256 * 1024;
 
 mod common;
-mod object_io;
-mod multipart;
 mod encryption_io;
-mod listing;
 mod housekeeping;
-
-
+mod listing;
+mod multipart;
+mod object_io;
 
 use common::*;
 
@@ -143,11 +141,7 @@ impl FilesystemStorage {
     }
 
     pub(super) fn wrap_upload_reader(&self, body: ByteStream) -> ByteStream {
-        Box::pin(QuotaReader::new(
-            body,
-            self.quota,
-            self.data_root.clone(),
-        ))
+        Box::pin(QuotaReader::new(body, self.quota, self.data_root.clone()))
     }
 
     // --- Bucket operations ---
@@ -272,7 +266,6 @@ impl FilesystemStorage {
         })
     }
 
-
     pub(super) fn object_path(&self, bucket: &str, key: &str) -> PathBuf {
         if key.ends_with('/') {
             let dir = key.trim_end_matches('/');
@@ -308,7 +301,11 @@ impl FilesystemStorage {
         matches!(fs::metadata(ec_dir).await, Ok(m) if m.is_dir())
     }
 
-    pub(super) async fn read_manifest(&self, bucket: &str, key: &str) -> Result<ChunkManifest, StorageError> {
+    pub(super) async fn read_manifest(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<ChunkManifest, StorageError> {
         let path = self.manifest_path(bucket, key);
         let data = fs::read_to_string(&path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -337,11 +334,15 @@ impl FilesystemStorage {
             .join(part_number.to_string())
     }
 
-    pub(super) fn part_meta_path(&self, bucket: &str, upload_id: &str, part_number: u32) -> PathBuf {
+    pub(super) fn part_meta_path(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+        part_number: u32,
+    ) -> PathBuf {
         self.upload_dir(bucket, upload_id)
             .join(format!("{}.meta.json", part_number))
     }
-
 
     pub(super) fn generate_version_id() -> String {
         let micros = chrono::Utc::now().timestamp_micros() as u64;

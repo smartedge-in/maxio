@@ -153,12 +153,12 @@ pub async fn login(
             .into_response();
     }
 
-    let authenticated = state.credentials.lookup(&body.access_key).is_some_and(|cred| {
-        constant_time_eq(
-            body.secret_key.as_bytes(),
-            cred.secret_key.as_bytes(),
-        )
-    });
+    let authenticated = state
+        .credentials
+        .lookup(&body.access_key)
+        .is_some_and(|cred| {
+            constant_time_eq(body.secret_key.as_bytes(), cred.secret_key.as_bytes())
+        });
     if !authenticated {
         return (
             StatusCode::UNAUTHORIZED,
@@ -1166,10 +1166,7 @@ mod tests {
     async fn test_storage(data_dir: &str) -> Result<FilesystemStorage, Box<dyn std::error::Error>> {
         let keyring = Arc::new(Keyring::load(data_dir, None).await?);
         let quota = QuotaLimits::from_config(0, 0);
-        Ok(
-            FilesystemStorage::new(data_dir, false, 10 * 1024 * 1024, 0, keyring, quota)
-                .await?,
-        )
+        Ok(FilesystemStorage::new(data_dir, false, 10 * 1024 * 1024, 0, keyring, quota).await?)
     }
 
     async fn create_test_bucket(storage: &FilesystemStorage, bucket: &str) {
