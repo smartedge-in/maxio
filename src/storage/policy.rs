@@ -296,6 +296,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_wrong_resource_for_list_bucket() {
+        let raw = r#"{
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:ListBucket",
+                "Resource": "arn:aws:s3:::photos/*"
+            }]
+        }"#;
+        let err = evaluate_v1_policy("photos", raw).unwrap_err();
+        assert!(err.contains("s3:ListBucket"));
+    }
+
+    #[test]
     fn normalizes_s3_action_prefix_case() {
         let effects = read_policy(
             "x",

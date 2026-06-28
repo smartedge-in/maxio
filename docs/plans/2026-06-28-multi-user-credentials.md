@@ -43,6 +43,12 @@ Support more than one S3 access/secret key pair without a full IAM service.
 | Hot reload without restart | File watcher + atomic credential swap |
 | Admin API to manage keys | Use config management / GitOps for v1 |
 
+## Verification
+
+- Unit: `cargo test -p maxio --lib credentials`
+- Integration: `cargo test -p maxio --test integration secondary`
+- Coverage floor: ≥80% lines on `auth/credentials.rs` (see `scripts/check-coverage-floors.sh`)
+
 ## Phase 2 sketch
 
 1. Admin API CRUD for credentials (encrypted at rest).

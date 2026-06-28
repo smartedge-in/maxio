@@ -163,6 +163,8 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 
 See [docs/operations.md](docs/operations.md) for production deployment, TLS, backups, and Kubernetes examples. S3 routing, policies, and multi-key auth are documented in [docs/s3-compatibility.md](docs/s3-compatibility.md).
 
+Run `cargo test -p maxio --lib` for unit tests and `scripts/check-coverage-floors.sh` after `cargo llvm-cov --lib --summary-only` to verify per-module coverage floors.
+
 ## Usage
 
 ### MinIO Client (mc)

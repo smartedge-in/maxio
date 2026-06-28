@@ -7483,6 +7483,46 @@ async fn test_trusted_proxy_uses_x_forwarded_for_for_login_rate_limit() {
     assert_eq!(resp.status(), 401);
 }
 
+async fn put_bucket_policy_signed(base_url: &str, bucket: &str, policy: &str) -> u16 {
+    let url = format!("{base_url}/{bucket}?policy");
+    let mut headers: Vec<(String, String)> = Vec::new();
+    sign_request("PUT", &url, &mut headers, policy.as_bytes());
+    let mut req = client().put(&url);
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    req.body(policy.to_string()).send().await.unwrap().status().as_u16()
+}
+
+/// Raw HTTP/1.1 GET with virtual-hosted `Host` and no authentication.
+async fn virtual_host_get_anonymous(
+    listen: std::net::SocketAddr,
+    server_host: &str,
+    bucket: &str,
+    path: &str,
+) -> (u16, String) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let vhost_domain = format!("{bucket}.{}", server_host.split(':').next().unwrap());
+    let host_header = format!("{vhost_domain}:{}", listen.port());
+    let req = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n"
+    );
+    let mut stream = tokio::net::TcpStream::connect(listen).await.unwrap();
+    stream.write_all(req.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    let response = String::from_utf8_lossy(&response);
+    let status = response
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let body_start = response.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+    (status, response[body_start..].to_string())
+}
+
 /// Raw HTTP/1.1 request with explicit `Host` (reqwest overwrites Host when connecting by IP).
 async fn s3_request_virtual_host(
     method: &str,
@@ -7648,16 +7688,7 @@ async fn test_bucket_policy_public_read_via_get_object() {
             "Resource": "arn:aws:s3:::policy-bucket/*"
         }]
     }"#;
-
-    let mut headers: Vec<(String, String)> = Vec::new();
-    let url = format!("{base_url}/policy-bucket?policy");
-    sign_request("PUT", &url, &mut headers, policy.as_bytes());
-    let mut req = client().put(&url);
-    for (k, v) in &headers {
-        req = req.header(k.as_str(), v.as_str());
-    }
-    let resp = req.body(policy).send().await.unwrap();
-    assert_eq!(resp.status(), 204);
+    assert_eq!(put_bucket_policy_signed(&base_url, "policy-bucket", policy).await, 204);
 
     s3_request(
         "PUT",
@@ -7689,14 +7720,7 @@ async fn test_bucket_policy_get_and_delete() {
         }]
     }"#;
 
-    let put_url = format!("{base_url}/pol-get?policy");
-    let mut headers: Vec<(String, String)> = Vec::new();
-    sign_request("PUT", &put_url, &mut headers, policy.as_bytes());
-    let mut put = client().put(&put_url);
-    for (k, v) in &headers {
-        put = put.header(k.as_str(), v.as_str());
-    }
-    assert_eq!(put.body(policy).send().await.unwrap().status(), 204);
+    assert_eq!(put_bucket_policy_signed(&base_url, "pol-get", policy).await, 204);
 
     let get_url = format!("{base_url}/pol-get?policy");
     let mut get_headers: Vec<(String, String)> = Vec::new();
@@ -7732,12 +7756,41 @@ async fn test_bucket_policy_malformed_rejected() {
     s3_request("PUT", &format!("{base_url}/bad-pol"), vec![]).await;
 
     let policy = r#"{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bad-pol/*"}]}"#;
-    let url = format!("{base_url}/bad-pol?policy");
-    let mut headers: Vec<(String, String)> = Vec::new();
-    sign_request("PUT", &url, &mut headers, policy.as_bytes());
-    let mut req = client().put(&url);
-    for (k, v) in &headers {
-        req = req.header(k.as_str(), v.as_str());
-    }
-    assert_eq!(req.body(policy).send().await.unwrap().status(), 400);
+    assert_eq!(put_bucket_policy_signed(&base_url, "bad-pol", policy).await, 400);
+}
+
+#[tokio::test]
+async fn test_virtual_host_anonymous_public_read() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let config = default_test_config(data_dir);
+    let (base_url, listen, server_host) =
+        start_server_with_server_host(storage, config).await;
+
+    s3_request("PUT", &format!("{base_url}/pub-vh"), vec![]).await;
+
+    let policy = r#"{
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::pub-vh/*"
+        }]
+    }"#;
+    assert_eq!(put_bucket_policy_signed(&base_url, "pub-vh", policy).await, 204);
+
+    s3_request(
+        "PUT",
+        &format!("{base_url}/pub-vh/secret.txt"),
+        b"public-vh".to_vec(),
+    )
+    .await;
+
+    let (status, body) =
+        virtual_host_get_anonymous(listen, &server_host, "pub-vh", "/secret.txt").await;
+    assert_eq!(status, 200);
+    assert_eq!(body, "public-vh");
 }

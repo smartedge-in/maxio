@@ -40,6 +40,12 @@ MinIO implements a large fraction of AWS IAM policy grammar (statements, princip
 - Malformed JSON or unsupported statements → `MalformedPolicy` (HTTP 400).
 - `GET ?policy` when none set → `NoSuchBucketPolicy` (HTTP 404).
 
+## Verification
+
+- Unit: `cargo test -p maxio --lib policy`
+- Integration: `cargo test -p maxio --test integration bucket_policy`
+- Anonymous public read + virtual-host read covered by `test_bucket_policy_public_read_via_get_object` and `test_virtual_host_anonymous_public_read`
+
 ## Future work
 
 1. Principal-specific Allow rules mapped to access keys.

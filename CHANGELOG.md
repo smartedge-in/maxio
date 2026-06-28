@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Refactored P1 S3 modules: shared virtual-host helpers (`resolve_bucket`, `signature_path_from_request`), simplified policy action parsing, expanded unit tests; CI coverage floors at 80% for `virtual_host`, `credentials`, and `policy`.
+- Three review/refactor cycles on P1 S3 code: shared virtual-host helpers, auth public-bypass constants, integration test helpers, expanded unit/integration tests, and ≥80% CI coverage floors on `virtual_host`, `credentials`, and `policy`.
 
 ### Added
 
