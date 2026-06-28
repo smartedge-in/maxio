@@ -28,8 +28,8 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
-| P1-01 | S3 API rate limiting | security | M | Only console login is rate-limited; S3 routes have no throttle. | Configurable limits on auth failures and/or PUT rate per IP; returns 429 with `Retry-After`. |
-| P1-02 | Tighten console CSP | ui | M | CSP allows `'unsafe-inline'` for scripts and styles. | Hash- or nonce-based script policy where feasible; document any remaining inline exceptions. |
+| ~~P1-01~~ | ~~S3 API rate limiting~~ | security | M | Done — `MAXIO_S3_RATE_AUTH_*` and `MAXIO_S3_RATE_PUT_*`; per-IP sliding window; `429` + `Retry-After` + S3 `SlowDown`. | — |
+| ~~P1-02~~ | ~~Tighten console CSP~~ | ui | M | Done — theme bootstrap moved to `/ui/theme-init.js`; `script-src 'self'` only; `style-src` keeps `'unsafe-inline'` for Svelte (documented). | — |
 | P1-03 | Trusted proxy configuration | security | S | `X-Forwarded-For` is intentionally ignored for console login IP. | `MAXIO_TRUSTED_PROXIES` (CIDR list) enables correct client IP behind known load balancers only. |
 | P1-04 | Secure bind defaults documentation | ops | S | Server binds `0.0.0.0` by default. | README warns about exposure; recommend `127.0.0.1` for dev and ingress-only for prod. |
 | P1-05 | Session invalidation on credential rotate | auth | M | Console HMAC tokens remain valid for 7 days after access/secret change. | Document limitation or add token version keyed to credential hash; force re-login on rotate. |
@@ -127,7 +127,7 @@ Reference only — no backlog action unless regressions appear.
 ## Suggested sprint order
 
 **Sprint 1 (stabilize):** ~~P0-01~~, ~~P0-02~~, ~~P2-03~~, ~~P1-07~~ ✓
-**Sprint 2 (harden):** P0-03, P1-01, P1-02, P0-04  
+**Sprint 2 (harden):** ~~P0-03~~, ~~P1-01~~, ~~P1-02~~, ~~P0-04~~ ✓
 **Sprint 3 (scale maintainability):** P2-01, P2-04, P0-05, P2-06  
 **Sprint 4 (erasure coding hardening):** P1-13, P2-11, P2-09, P2-10, P1-12  
 **Sprint 5 (ops tooling):** P2-13 (admin API), then P2-12 (CLI: profiles → remote status/info/doctor → housekeeping; local keyring rotate last)

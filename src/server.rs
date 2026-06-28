@@ -4,19 +4,27 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::routing::get;
 use std::sync::Arc;
 
-use crate::api::console::{LoginRateLimiter, console_router};
+use crate::api::console::console_router;
 use crate::api::cors::cors_middleware;
 use crate::api::router::s3_router;
 use crate::auth::middleware::auth_middleware;
 use crate::config::Config;
 use crate::embedded::ui_handler;
+use crate::rate_limit::{LoginRateLimiter, S3RateLimiter};
 use crate::storage::filesystem::FilesystemStorage;
+
+/// Content-Security-Policy for all HTTP responses.
+///
+/// Scripts are loaded only from `'self'` (bundled assets under `/ui/`). Svelte
+/// component styles may be injected inline, so `style-src` retains `'unsafe-inline'`.
+pub const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'";
 
 #[derive(Clone)]
 pub struct AppState {
     pub storage: Arc<FilesystemStorage>,
     pub config: Arc<Config>,
     pub login_rate_limiter: Arc<LoginRateLimiter>,
+    pub s3_rate_limiter: Arc<S3RateLimiter>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -77,7 +85,7 @@ async fn security_headers_middleware(
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.entry(header::CONTENT_SECURITY_POLICY).or_insert_with(|| {
-        HeaderValue::from_static("default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'")
+        HeaderValue::from_static(CONTENT_SECURITY_POLICY)
     });
     headers
         .entry(header::X_CONTENT_TYPE_OPTIONS)

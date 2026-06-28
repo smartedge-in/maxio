@@ -167,7 +167,30 @@ spec:
             claimName: maxio-data
 ```
 
-Expose via Ingress with TLS. Console login rate limiting is in-memory; run a single replica for the console or accept per-pod limits until shared rate limiting is implemented (see backlog P1-06).
+Expose via Ingress with TLS.
+
+## Rate limiting
+
+MaxIO applies in-memory per-client-IP rate limits (sliding window). Limits are per process; behind multiple replicas each pod enforces its own counters until shared rate limiting lands (P1-06).
+
+| Limit | Env vars | Default | Behavior |
+|-------|----------|---------|----------|
+| Console login | _(fixed)_ | 10 attempts / 5 min | JSON `429` on `/api/auth/login` |
+| S3 auth failures | `MAXIO_S3_RATE_AUTH_MAX`, `MAXIO_S3_RATE_AUTH_WINDOW_SECS` | 60 / 300 s | S3 XML `SlowDown`, HTTP `429`, `Retry-After` |
+| S3 PUT uploads | `MAXIO_S3_RATE_PUT_MAX`, `MAXIO_S3_RATE_PUT_WINDOW_SECS` | disabled | Same `SlowDown` response |
+
+Set `MAXIO_S3_RATE_AUTH_MAX=0` or `MAXIO_S3_RATE_PUT_MAX=0` to disable a limit. Tune PUT limits when exposing MaxIO directly to untrusted networks.
+
+Console login rate limiting is in-memory; run a single replica for the console or accept per-pod limits until shared rate limiting is implemented (see backlog P1-06).
+
+## Content Security Policy
+
+The console is served at `/ui/` with a strict CSP on all routes:
+
+- **Scripts:** `script-src 'self'` only. The theme bootstrap runs from `/ui/theme-init.js` (no inline scripts).
+- **Styles:** `style-src 'self' 'unsafe-inline'` — Svelte injects component-scoped styles inline; removing this would break the UI until a build-time hash/nonce pipeline exists.
+
+Review `CONTENT_SECURITY_POLICY` in `src/server.rs` when changing the frontend build.
 
 ## Data backup
 

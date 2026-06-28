@@ -140,6 +140,10 @@ Open `http://localhost:9000/ui/` in your browser. Default credentials: `maxioadm
 | `MAXIO_MAX_CONSOLE_BODY_BYTES` | `--max-console-body-bytes` | `1048576` | Max request body size for console JSON/form API routes; object uploads are streaming and not covered by this limit |
 | `MAXIO_MAX_OBJECT_BYTES` | `--max-object-bytes` | `0` | Maximum S3 object size in bytes (`0` = unlimited). Oversized uploads return `EntityTooLarge` |
 | `MAXIO_MIN_FREE_DISK_BYTES` | `--min-free-disk-bytes` | `0` | Minimum free bytes to keep on the data volume (`0` = disabled). New uploads are rejected with HTTP 507 when free space is below this reserve |
+| `MAXIO_S3_RATE_AUTH_MAX` | `--s3-rate-auth-max` | `60` | Max failed S3 auth attempts per client IP per window (`0` = disabled) |
+| `MAXIO_S3_RATE_AUTH_WINDOW_SECS` | `--s3-rate-auth-window-secs` | `300` | Sliding window for S3 auth failure rate limit (seconds) |
+| `MAXIO_S3_RATE_PUT_MAX` | `--s3-rate-put-max` | `0` | Max S3 PUT requests per client IP per window (`0` = disabled) |
+| `MAXIO_S3_RATE_PUT_WINDOW_SECS` | `--s3-rate-put-window-secs` | `60` | Sliding window for S3 PUT rate limit (seconds) |
 | `MAXIO_HEALTHCHECK_URL` | `healthcheck --url` | `http://127.0.0.1:9000/healthz` | Healthcheck endpoint URL; default port follows `MAXIO_PORT` when set |
 | `MAXIO_HEALTHCHECK_TIMEOUT_MS` | `healthcheck --timeout-ms` | `2000` | Healthcheck connect/read timeout in milliseconds |
 

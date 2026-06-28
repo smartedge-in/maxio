@@ -6,6 +6,7 @@ use axum::{
 use chrono::{NaiveDateTime, Utc};
 
 use crate::error::S3Error;
+use crate::rate_limit::client_ip_from_request;
 use crate::server::AppState;
 
 use super::signature_v4;
@@ -17,14 +18,21 @@ pub async fn auth_middleware(
 ) -> Result<Response, S3Error> {
     let method = request.method().as_str().to_string();
     let uri = request.uri().to_string();
+    let client_ip = client_ip_from_request(&request);
 
     tracing::debug!("{} {}", method, uri);
+
+    if method == "PUT" && state.s3_rate_limiter.put_requests.is_enabled() {
+        if let Some(retry_after) = state.s3_rate_limiter.put_requests.try_acquire(&client_ip) {
+            return Err(S3Error::slow_down(retry_after));
+        }
+    }
 
     let query = request.uri().query().unwrap_or("").to_string();
 
     // Detect presigned URL by presence of X-Amz-Signature (case-insensitive per AWS).
     if signature_v4::query_has_presigned_signature(&query) {
-        return handle_presigned(&state, &method, &query, request, next).await;
+        return handle_presigned(&state, &client_ip, &method, &query, request, next).await;
     }
 
     let has_auth_header = request.headers().get("authorization").is_some();
@@ -42,19 +50,23 @@ pub async fn auth_middleware(
     }
 
     let auth_header = match request.headers().get("authorization") {
-        Some(h) => h
-            .to_str()
-            .map_err(|_| S3Error::access_denied("Invalid Authorization header"))?,
+        Some(h) => h.to_str().map_err(|_| {
+            auth_failure(&state, &client_ip, S3Error::access_denied("Invalid Authorization header"))
+        })?,
         None => {
             tracing::debug!("No Authorization header present");
-            return Err(S3Error::access_denied("Missing Authorization header"));
+            return Err(auth_failure(
+                &state,
+                &client_ip,
+                S3Error::access_denied("Missing Authorization header"),
+            ));
         }
     };
 
     tracing::debug!("Authorization: <redacted>");
 
     let parsed = signature_v4::parse_authorization_header(auth_header)
-        .map_err(|e| S3Error::access_denied(e))?;
+        .map_err(|e| auth_failure(&state, &client_ip, S3Error::access_denied(e)))?;
 
     tracing::debug!(
         "Parsed: date={}, region={}, signed_headers={:?}",
@@ -68,12 +80,16 @@ pub async fn auth_middleware(
         state.config.access_key.as_bytes(),
     ) {
         tracing::debug!("Access key mismatch");
-        return Err(S3Error::invalid_access_key());
+        return Err(auth_failure(&state, &client_ip, S3Error::invalid_access_key()));
     }
 
     if !signature_v4::constant_time_eq(parsed.region.as_bytes(), state.config.region.as_bytes()) {
         tracing::debug!("Region mismatch");
-        return Err(S3Error::access_denied("Invalid region in credential scope"));
+        return Err(auth_failure(
+            &state,
+            &client_ip,
+            S3Error::access_denied("Invalid region in credential scope"),
+        ));
     }
 
     // Validate request timestamp is within ±15 minutes (AWS SigV4 spec)
@@ -87,13 +103,19 @@ pub async fn auth_middleware(
         let skew = (now - request_time).num_seconds().unsigned_abs();
         if skew > 15 * 60 {
             tracing::debug!("Request timestamp skew too large: {}s (max 900s)", skew);
-            return Err(S3Error::access_denied(
-                "RequestTimeTooSkewed: The difference between the request time and the current time is too large.",
+            return Err(auth_failure(
+                &state,
+                &client_ip,
+                S3Error::access_denied(
+                    "RequestTimeTooSkewed: The difference between the request time and the current time is too large.",
+                ),
             ));
         }
     } else {
-        return Err(S3Error::access_denied(
-            "Invalid or missing X-Amz-Date header",
+        return Err(auth_failure(
+            &state,
+            &client_ip,
+            S3Error::access_denied("Invalid or missing X-Amz-Date header"),
         ));
     }
 
@@ -116,7 +138,7 @@ pub async fn auth_middleware(
 
     if !valid {
         tracing::debug!("Signature verification FAILED");
-        return Err(S3Error::signature_mismatch());
+        return Err(auth_failure(&state, &client_ip, S3Error::signature_mismatch()));
     }
 
     tracing::debug!("Signature verification OK");
@@ -207,8 +229,18 @@ fn has_query_key(query: &str, key: &str) -> bool {
     false
 }
 
+fn auth_failure(state: &AppState, client_ip: &str, err: S3Error) -> S3Error {
+    if state.s3_rate_limiter.auth_failures.is_enabled() {
+        if let Some(retry_after) = state.s3_rate_limiter.auth_failures.try_acquire(client_ip) {
+            return S3Error::slow_down(retry_after);
+        }
+    }
+    err
+}
+
 async fn handle_presigned(
     state: &AppState,
+    client_ip: &str,
     method: &str,
     query: &str,
     request: Request,
@@ -216,23 +248,27 @@ async fn handle_presigned(
 ) -> Result<Response, S3Error> {
     tracing::debug!("Presigned URL detected");
 
-    let (parsed, timestamp, expires_secs) =
-        signature_v4::parse_presigned_query(query).map_err(|e| S3Error::access_denied(e))?;
+    let (parsed, timestamp, expires_secs) = signature_v4::parse_presigned_query(query)
+        .map_err(|e| auth_failure(state, client_ip, S3Error::access_denied(e)))?;
 
     if !signature_v4::constant_time_eq(
         parsed.access_key.as_bytes(),
         state.config.access_key.as_bytes(),
     ) {
-        return Err(S3Error::invalid_access_key());
+        return Err(auth_failure(state, client_ip, S3Error::invalid_access_key()));
     }
 
     if !signature_v4::constant_time_eq(parsed.region.as_bytes(), state.config.region.as_bytes()) {
-        return Err(S3Error::access_denied("Invalid region in credential scope"));
+        return Err(auth_failure(
+            state,
+            client_ip,
+            S3Error::access_denied("Invalid region in credential scope"),
+        ));
     }
 
     // Check expiration
     let issued_at = NaiveDateTime::parse_from_str(&timestamp, "%Y%m%dT%H%M%SZ")
-        .map_err(|_| S3Error::access_denied("Invalid X-Amz-Date format"))?;
+        .map_err(|_| auth_failure(state, client_ip, S3Error::access_denied("Invalid X-Amz-Date format")))?;
     let expires_at = issued_at + chrono::Duration::seconds(expires_secs as i64);
     let now = Utc::now().naive_utc();
 
@@ -243,11 +279,13 @@ async fn handle_presigned(
             expires_at,
             now
         );
-        return Err(S3Error::expired_presigned_url());
+        return Err(auth_failure(state, client_ip, S3Error::expired_presigned_url()));
     }
     if issued_at > now + chrono::Duration::minutes(15) {
-        return Err(S3Error::access_denied(
-            "X-Amz-Date is too far in the future",
+        return Err(auth_failure(
+            state,
+            client_ip,
+            S3Error::access_denied("X-Amz-Date is too far in the future"),
         ));
     }
 
@@ -272,7 +310,7 @@ async fn handle_presigned(
 
     if !valid {
         tracing::debug!("Presigned signature verification FAILED");
-        return Err(S3Error::signature_mismatch());
+        return Err(auth_failure(state, client_ip, S3Error::signature_mismatch()));
     }
 
     tracing::debug!("Presigned signature verification OK");

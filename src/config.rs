@@ -92,6 +92,22 @@ pub struct Config {
     /// Minimum free disk bytes to reserve on the data volume (0 = disabled).
     #[arg(long, env = "MAXIO_MIN_FREE_DISK_BYTES", default_value = "0")]
     pub min_free_disk_bytes: u64,
+
+    /// Max failed S3 auth attempts per client IP per window (0 = disabled).
+    #[arg(long, env = "MAXIO_S3_RATE_AUTH_MAX", default_value = "60")]
+    pub s3_rate_auth_max: u32,
+
+    /// Sliding window for S3 auth failure rate limit, in seconds.
+    #[arg(long, env = "MAXIO_S3_RATE_AUTH_WINDOW_SECS", default_value = "300")]
+    pub s3_rate_auth_window_secs: u64,
+
+    /// Max S3 PUT requests per client IP per window (0 = disabled).
+    #[arg(long, env = "MAXIO_S3_RATE_PUT_MAX", default_value = "0")]
+    pub s3_rate_put_max: u32,
+
+    /// Sliding window for S3 PUT rate limit, in seconds.
+    #[arg(long, env = "MAXIO_S3_RATE_PUT_WINDOW_SECS", default_value = "60")]
+    pub s3_rate_put_window_secs: u64,
 }
 
 #[cfg(test)]

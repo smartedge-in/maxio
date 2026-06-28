@@ -1,3 +1,4 @@
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 
@@ -6,6 +7,7 @@ pub struct S3Error {
     pub code: S3ErrorCode,
     pub message: String,
     pub resource: Option<String>,
+    pub retry_after_secs: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -36,6 +38,7 @@ pub enum S3ErrorCode {
     SignatureDoesNotMatch,
     InvalidEncryptionAlgorithm,
     ServerSideEncryptionConfigurationNotFound,
+    SlowDown,
 }
 
 impl S3ErrorCode {
@@ -68,6 +71,7 @@ impl S3ErrorCode {
             Self::ServerSideEncryptionConfigurationNotFound => {
                 "ServerSideEncryptionConfigurationNotFoundError"
             }
+            Self::SlowDown => "SlowDown",
         }
     }
 
@@ -86,6 +90,7 @@ impl S3ErrorCode {
             Self::BucketAlreadyOwnedByYou | Self::BucketNotEmpty => StatusCode::CONFLICT,
             Self::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
             Self::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
+            Self::SlowDown => StatusCode::TOO_MANY_REQUESTS,
             Self::InvalidRange => StatusCode::RANGE_NOT_SATISFIABLE,
             Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
             Self::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
@@ -101,6 +106,7 @@ impl S3Error {
             code: S3ErrorCode::InternalError,
             message: "We encountered an internal error. Please try again.".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -109,6 +115,7 @@ impl S3Error {
             code: S3ErrorCode::NoSuchBucket,
             message: format!("The specified bucket does not exist: {}", bucket),
             resource: Some(format!("/{}", bucket)),
+            retry_after_secs: None,
         }
     }
 
@@ -117,6 +124,7 @@ impl S3Error {
             code: S3ErrorCode::NoSuchKey,
             message: "The specified key does not exist.".into(),
             resource: Some(key.to_string()),
+            retry_after_secs: None,
         }
     }
 
@@ -125,6 +133,7 @@ impl S3Error {
             code: S3ErrorCode::NoSuchUpload,
             message: "The specified multipart upload does not exist.".into(),
             resource: Some(upload_id.to_string()),
+            retry_after_secs: None,
         }
     }
 
@@ -136,6 +145,7 @@ impl S3Error {
                 bucket
             ),
             resource: Some(format!("/{}", bucket)),
+            retry_after_secs: None,
         }
     }
 
@@ -144,6 +154,7 @@ impl S3Error {
             code: S3ErrorCode::BucketNotEmpty,
             message: "The bucket you tried to delete is not empty.".into(),
             resource: Some(format!("/{}", bucket)),
+            retry_after_secs: None,
         }
     }
 
@@ -152,6 +163,7 @@ impl S3Error {
             code: S3ErrorCode::InvalidBucketName,
             message: format!("The specified bucket is not valid: {}", name),
             resource: Some(format!("/{}", name)),
+            retry_after_secs: None,
         }
     }
 
@@ -160,6 +172,7 @@ impl S3Error {
             code: S3ErrorCode::InvalidArgument,
             message: msg.to_string(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -168,6 +181,7 @@ impl S3Error {
             code: S3ErrorCode::BadDigest,
             message: "The Content-MD5 you specified did not match what we received.".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -179,6 +193,7 @@ impl S3Error {
                 algo
             ),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -187,6 +202,7 @@ impl S3Error {
             code: S3ErrorCode::MalformedXML,
             message: "The XML you provided was not well-formed.".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -195,6 +211,7 @@ impl S3Error {
             code: S3ErrorCode::InvalidPart,
             message: msg.to_string(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -203,6 +220,7 @@ impl S3Error {
             code: S3ErrorCode::EntityTooSmall,
             message: "Your proposed upload is smaller than the minimum allowed object size.".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -214,6 +232,7 @@ impl S3Error {
                 max
             ),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -222,6 +241,7 @@ impl S3Error {
             code: S3ErrorCode::InsufficientStorage,
             message: msg.to_string(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -230,6 +250,7 @@ impl S3Error {
             code: S3ErrorCode::ExpiredPresignedUrl,
             message: "Request has expired".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -238,6 +259,7 @@ impl S3Error {
             code: S3ErrorCode::AccessDenied,
             message: msg.to_string(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -248,6 +270,7 @@ impl S3Error {
                 "The request signature we calculated does not match the signature you provided."
                     .into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -256,6 +279,7 @@ impl S3Error {
             code: S3ErrorCode::InvalidAccessKeyId,
             message: "The AWS Access Key Id you provided does not exist in our records.".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -264,6 +288,7 @@ impl S3Error {
             code: S3ErrorCode::NoSuchVersion,
             message: "The specified version does not exist.".into(),
             resource: Some(version_id.to_string()),
+            retry_after_secs: None,
         }
     }
 
@@ -272,6 +297,7 @@ impl S3Error {
             code: S3ErrorCode::InvalidRange,
             message: "The requested range is not satisfiable".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -280,6 +306,7 @@ impl S3Error {
             code: S3ErrorCode::NotImplemented,
             message: msg.to_string(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -288,6 +315,7 @@ impl S3Error {
             code: S3ErrorCode::NoSuchCORSConfiguration,
             message: "The CORS configuration does not exist".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -296,6 +324,7 @@ impl S3Error {
             code: S3ErrorCode::PreconditionFailed,
             message: "At least one of the pre-conditions you specified did not hold.".into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -305,6 +334,7 @@ impl S3Error {
             message: "The encryption request you specified is not valid. Supported value: AES256."
                 .into(),
             resource: None,
+            retry_after_secs: None,
         }
     }
 
@@ -313,6 +343,16 @@ impl S3Error {
             code: S3ErrorCode::ServerSideEncryptionConfigurationNotFound,
             message: "The server side encryption configuration was not found.".into(),
             resource: Some(format!("/{}", bucket)),
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn slow_down(retry_after_secs: u64) -> Self {
+        Self {
+            code: S3ErrorCode::SlowDown,
+            message: "Please reduce your request rate.".into(),
+            resource: None,
+            retry_after_secs: Some(retry_after_secs),
         }
     }
 }
@@ -336,14 +376,19 @@ impl IntoResponse for S3Error {
         );
 
         let status = self.code.status_code();
-        (
-            status,
-            [
-                ("content-type", "application/xml"),
-                ("x-amz-request-id", &request_id.to_string()),
-            ],
-            xml,
-        )
-            .into_response()
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/xml"),
+        );
+        if let Ok(value) = HeaderValue::from_str(&request_id.to_string()) {
+            headers.insert("x-amz-request-id", value);
+        }
+        if let Some(retry_after) = self.retry_after_secs {
+            if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
+                headers.insert(header::RETRY_AFTER, value);
+            }
+        }
+        (status, headers, xml).into_response()
     }
 }

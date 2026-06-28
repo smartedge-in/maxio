@@ -1,6 +1,5 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
-use std::time::Instant;
 
 use axum::{
     Json, Router,
@@ -22,58 +21,6 @@ type HmacSha256 = Hmac<Sha256>;
 
 const COOKIE_NAME: &str = "maxio_session";
 const TOKEN_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60; // 7 days
-
-const RATE_LIMIT_MAX: u32 = 10;
-const RATE_LIMIT_WINDOW_SECS: u64 = 300; // 5 minutes
-
-struct Bucket {
-    count: u32,
-    window_start: Instant,
-}
-
-pub struct LoginRateLimiter {
-    buckets: std::sync::Mutex<HashMap<String, Bucket>>,
-}
-
-impl LoginRateLimiter {
-    pub fn new() -> Self {
-        Self {
-            buckets: std::sync::Mutex::new(HashMap::new()),
-        }
-    }
-
-    /// Returns `Some(retry_after_secs)` if the IP is rate-limited, `None` if allowed.
-    /// Increments the counter on every call (success and failure both count).
-    pub fn check_and_increment(&self, ip: &str) -> Option<u64> {
-        let mut map = self.buckets.lock().unwrap();
-        let now = Instant::now();
-
-        // Prune expired entries to prevent unbounded memory growth
-        map.retain(|_, b| {
-            now.duration_since(b.window_start).as_secs() < RATE_LIMIT_WINDOW_SECS * 2
-        });
-
-        let bucket = map.entry(ip.to_string()).or_insert(Bucket {
-            count: 0,
-            window_start: now,
-        });
-
-        if now.duration_since(bucket.window_start).as_secs() >= RATE_LIMIT_WINDOW_SECS {
-            bucket.count = 0;
-            bucket.window_start = now;
-        }
-
-        bucket.count += 1;
-
-        if bucket.count > RATE_LIMIT_MAX {
-            let remaining = RATE_LIMIT_WINDOW_SECS
-                .saturating_sub(now.duration_since(bucket.window_start).as_secs());
-            Some(remaining.max(1))
-        } else {
-            None
-        }
-    }
-}
 
 fn extract_client_ip(headers: &HeaderMap, addr: &SocketAddr) -> String {
     let _ = headers;

@@ -45,6 +45,10 @@ fn default_test_config(data_dir: String) -> Config {
         max_console_body_bytes: 1024 * 1024,
         max_object_bytes: 0,
         min_free_disk_bytes: 0,
+        s3_rate_auth_max: 60,
+        s3_rate_auth_window_secs: 300,
+        s3_rate_put_max: 0,
+        s3_rate_put_window_secs: 60,
     }
 }
 
@@ -71,8 +75,14 @@ async fn new_test_storage(
 async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> String {
     let state = AppState {
         storage,
-        config: Arc::new(config),
-        login_rate_limiter: Arc::new(maxio::api::console::LoginRateLimiter::new()),
+        config: Arc::new(config.clone()),
+        login_rate_limiter: Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
+        s3_rate_limiter: Arc::new(maxio::rate_limit::S3RateLimiter::from_config(
+            config.s3_rate_auth_max,
+            config.s3_rate_auth_window_secs,
+            config.s3_rate_put_max,
+            config.s3_rate_put_window_secs,
+        )),
     };
 
     let app = server::build_router(state);
@@ -704,8 +714,85 @@ async fn test_security_headers_are_applied() {
         resp.headers().get("x-content-type-options").unwrap(),
         "nosniff"
     );
-    assert!(resp.headers().contains_key("content-security-policy"));
+    let csp = resp
+        .headers()
+        .get("content-security-policy")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(csp.contains("script-src 'self'"));
+    assert!(!csp.contains("script-src 'self' 'unsafe-inline'"));
+    assert!(csp.contains("style-src 'self' 'unsafe-inline'"));
     assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
+}
+
+#[tokio::test]
+async fn test_s3_auth_failure_rate_limit() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let mut config = default_test_config(data_dir);
+    config.s3_rate_auth_max = 3;
+    config.s3_rate_auth_window_secs = 300;
+    let base_url = spawn_test_server(storage, config).await;
+
+    for _ in 0..3 {
+        let resp = client()
+            .get(format!("{}/test-bucket", base_url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403);
+    }
+
+    let resp = client()
+        .get(format!("{}/test-bucket", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 429);
+    assert!(resp.headers().contains_key("retry-after"));
+    let xml = resp.text().await.unwrap();
+    assert!(xml.contains("SlowDown"), "unexpected body: {xml}");
+}
+
+#[tokio::test]
+async fn test_s3_put_rate_limit() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = Arc::new(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let mut config = default_test_config(data_dir);
+    config.s3_rate_put_max = 2;
+    config.s3_rate_put_window_secs = 60;
+    let base_url = spawn_test_server(storage, config).await;
+
+    s3_request(
+        "PUT",
+        &format!("{}/put-limit-bucket", base_url),
+        Vec::new(),
+    )
+    .await;
+    s3_request(
+        "PUT",
+        &format!("{}/put-limit-bucket/obj.txt", base_url),
+        b"hi".to_vec(),
+    )
+    .await;
+
+    let resp = s3_request(
+        "PUT",
+        &format!("{}/put-limit-bucket/obj2.txt", base_url),
+        b"hi".to_vec(),
+    )
+    .await;
+    assert_eq!(resp.status(), 429);
+    assert!(resp.headers().contains_key("retry-after"));
+    let xml = resp.text().await.unwrap();
+    assert!(xml.contains("SlowDown"), "unexpected body: {xml}");
 }
 
 #[tokio::test]

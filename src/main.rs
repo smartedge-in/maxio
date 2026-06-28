@@ -20,6 +20,7 @@ mod auth;
 mod config;
 mod embedded;
 mod error;
+mod rate_limit;
 mod server;
 mod storage;
 mod xml;
@@ -169,7 +170,13 @@ async fn main() -> anyhow::Result<()> {
     let state = server::AppState {
         storage: Arc::new(storage),
         config: Arc::new(config.clone()),
-        login_rate_limiter: Arc::new(api::console::LoginRateLimiter::new()),
+        login_rate_limiter: Arc::new(rate_limit::LoginRateLimiter::new()),
+        s3_rate_limiter: Arc::new(rate_limit::S3RateLimiter::from_config(
+            config.s3_rate_auth_max,
+            config.s3_rate_auth_window_secs,
+            config.s3_rate_put_max,
+            config.s3_rate_put_window_secs,
+        )),
     };
 
     // Background housekeeping: abort stale multipart uploads (>7 days) and

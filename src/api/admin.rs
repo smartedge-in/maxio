@@ -8,7 +8,9 @@ use axum::routing::{get, post};
 use axum::Json;
 use serde_json::{json, Value};
 
-pub fn router() -> Router {
+use crate::server::AppState;
+
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/status", get(stub))
         .route("/info", get(stub))
