@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **P3-17:** `maxio-admin` no longer depends on the root `maxio` facade — local doctor/keyring use `maxio-storage` directly, shrinking the link graph and fixing `rust-lld` bus errors during workspace tests on constrained hosts.
+- **P1-MR completion:** server `maxio serve --cluster-mode` routes bucket metadata mutations (`CreateBucket`/`DeleteBucket`) to the storage Raft leader via HTTP propose; object I/O remains on the server’s local filesystem (documented phase-1 limitation). K8s distributed storage StatefulSet enables EC + bitrot scan flags.
+- **Enterprise GA completion:** Keycloak console SSO in the UI (config fetch, login, silent refresh); Playwright smoke uses browser login form; release CI ships `maxio` + `maxio-admin` + `maxio-ui` binaries and offline bundle/image jobs; `Dockerfile.ui` + `maxio-ui` in offline image pack.
 
 ### Added
 
