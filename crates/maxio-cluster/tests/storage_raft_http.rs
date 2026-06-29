@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use maxio_cluster::ec::bitrot::BitrotScannerConfig;
 use maxio_cluster::routing::fetch_storage_status;
 use maxio_cluster::{StorageRaftNode, StorageRaftNodeConfig};
 use maxio_storage::raft::StorageMutation;
@@ -32,12 +33,19 @@ async fn spawn_node(
         chunk_size: 1024 * 1024,
         parity_shards: 0,
         metadata_index: false,
+        bitrot_scan_enabled: false,
+        bitrot_scan_interval_secs: 3600,
     })
     .await
     .unwrap();
 
+    let bitrot = BitrotScannerConfig {
+        local_node_id: id.to_string(),
+        interval: Duration::from_secs(3600),
+        enabled: false,
+    };
     tokio::spawn(async move {
-        node.serve(&bind).await.unwrap();
+        node.serve(&bind, bitrot).await.unwrap();
     })
 }
 

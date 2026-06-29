@@ -11,6 +11,9 @@ cargo test -p maxio-cluster --features cluster-tests --test cluster_p14
 echo "==> Storage Raft unit tests"
 cargo test -p maxio-storage --features raft raft::
 
+echo "==> P1-25 cluster EC bitrot scanner"
+cargo test -p maxio-cluster --features cluster-tests --test cluster_p14 bitrot_scanner
+
 echo "==> maxio-ui binary smoke"
 cargo build -p maxio-ui --release
 "$ROOT/target/release/maxio-ui" --help >/dev/null

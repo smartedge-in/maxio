@@ -9,6 +9,7 @@ use maxio_storage::quota::QuotaLimits;
 use openraft::Config;
 use openraft::Raft;
 
+use crate::ec::bitrot::{BitrotMetrics, BitrotScannerConfig, spawn_bitrot_scanner};
 use crate::storage::api::{RaftApiState, raft_router};
 use crate::storage::http_network::HttpRaftNetworkFactory;
 use crate::storage::network::ClusterRouter;
@@ -36,6 +37,8 @@ pub struct StorageRaftNodeConfig {
     pub chunk_size: u64,
     pub parity_shards: u32,
     pub metadata_index: bool,
+    pub bitrot_scan_enabled: bool,
+    pub bitrot_scan_interval_secs: u64,
 }
 
 pub fn default_openraft_config() -> anyhow::Result<Arc<Config>> {
@@ -55,6 +58,8 @@ pub struct StorageRaftNode {
     pub store: Arc<StorageRaftStore>,
     pub fs: Arc<FilesystemStorage>,
     advertise_addr: String,
+    bitrot_metrics: Arc<BitrotMetrics>,
+    peer_urls: BTreeMap<StorageNodeId, String>,
 }
 
 impl StorageRaftNode {
@@ -114,11 +119,16 @@ impl StorageRaftNode {
             raft,
         };
 
+        let bitrot_metrics = Arc::new(BitrotMetrics::default());
+        let peer_urls = cfg.peer_urls.clone();
+
         Ok(Self {
             handle,
             store,
             fs,
             advertise_addr: cfg.advertise_addr,
+            bitrot_metrics,
+            peer_urls,
         })
     }
 
@@ -126,10 +136,23 @@ impl StorageRaftNode {
         raft_router(RaftApiState {
             handle: self.handle.clone(),
             advertise_addr: self.advertise_addr.clone(),
+            fs: self.fs.clone(),
+            bitrot_metrics: self.bitrot_metrics.clone(),
         })
     }
 
-    pub async fn serve(self, bind_addr: &str) -> anyhow::Result<()> {
+    pub async fn serve(
+        self,
+        bind_addr: &str,
+        bitrot_cfg: BitrotScannerConfig,
+    ) -> anyhow::Result<()> {
+        spawn_bitrot_scanner(
+            bitrot_cfg,
+            self.store.clone(),
+            self.fs.clone(),
+            self.peer_urls.clone(),
+            self.bitrot_metrics.clone(),
+        );
         let app = self.router();
         let listener = tokio::net::TcpListener::bind(bind_addr).await?;
         tracing::info!(

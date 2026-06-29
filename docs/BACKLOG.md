@@ -32,7 +32,7 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | ~~7~~ | ~~P1-20~~ | ~~Server tier Raft~~ | api | XL | **Done** — `RoutingSnapshot` + `ClusterState`; `MAXIO_CLUSTER_MODE` gates `/readyz` on storage quorum; Prometheus `maxio_cluster_*` gauges. *Was P3-15.* | 2+ server quorum; storage leader change reflected without manual config; `/readyz` reflects storage quorum; integration test with P1-17. |
 | ~~8~~ | ~~P1-21~~ | ~~Stateless UI tier (`maxio-ui`)~~ | ui | L | **Done** — `crates/maxio-ui` binary; `MAXIO_SERVE_UI=false` on server when UI tier is separate. *Was P3-16.* | `crates/maxio-ui`; distributed deploy; Ingress split `/ui` vs S3; ≥2 UI replicas in test manifest. |
 | ~~9~~ | ~~P1-24~~ | ~~Multi-node CI / dev harness~~ | ci | M | **Done** — `scripts/cluster-test.sh`; CI `cluster` job; `deploy/k8s/distributed/` (3 storage, 2 server, 2 UI). | Script or CI job: bootstrap Raft, PUT/GET, kill leader, EC shard placement smoke; runs on main or nightly; documented airgap recipe uses private registry + no `cargo build` on target. |
-| 10 | P1-25 | EC bitrot scanner (cluster-aware) | storage | L | Proactive shard checksum scan; heal from parity/peers. *Elevated from P3-32 for EC priority.* | Background scanner; cross-node heal when local shard corrupt; Prometheus counters; ops tuning doc. |
+| ~~10~~ | ~~P1-25~~ | ~~EC bitrot scanner (cluster-aware)~~ | storage | L | **Done** — `maxio-cluster/src/ec/bitrot.rs`; storage `MAXIO_BITROT_SCAN_*`; HTTP `/internal/shard`; Prometheus `maxio_ec_bitrot_*`; cluster test. | Background scanner; cross-node heal when local shard corrupt; Prometheus counters; ops tuning doc. |
 
 **P1-MR dependency graph**
 
@@ -57,14 +57,14 @@ P1-25 (after P1-18)
 
 | Order | ID | Title | Area | Effort | Description | Acceptance criteria |
 |-------|-----|-------|------|--------|-------------|-------------------|
-| — | **P3-53** | **Airgap deployment epic** | ops | L | **Epic** — MaxIO installs and runs without outbound internet. Closes when P3-54–P3-60 done. Required for P3-52 / P3-44. | Airgap acceptance checklist in runbook; CI/release ships offline artifacts; no undocumented egress. |
-| 1 | P3-54 | Offline release bundle | ci | M | Single transferable artifact for BM install — not `curl \| bash` or on-target `cargo build`. | Release tarball: `maxio` + `maxio-admin` (amd64/arm64), `SHA256SUMS`, CycloneDX SBOM, `LICENSES.txt`; optional cosign/sigstore signatures; documented verify-before-install. |
-| 2 | P3-55 | Offline container image pack | ci | M | Airgap K8s needs pre-exported images, not `docker pull` from public registries. | `docker save` tarballs (or OCI layout) per arch; `images.txt` manifest with digests; `scripts/load-images.sh` for private registry; release CI publishes alongside P3-54. |
-| 3 | P3-56 | Airgap deployment runbook | docs | M | End-to-end install/upgrade without internet: BM, K8s, jump host tooling. | `docs/operations.md` § Airgap: sneakernet bundle ingest, private registry, systemd/K8s paths; **no build-from-source on classified hosts**; links P3-54/55. |
-| 4 | P3-57 | Internal CA & TLS (no public PKI) | ops | S | Airgap cannot use public ACME or external CAs. Permissive edge with **file certs** or org PKI. | Caddy/Traefik examples use org-issued certs; document cert rotation offline; dev `tls internal` marked non-production; P3-26 updated. |
-| 5 | P3-58 | Offline upgrade & rollback bundles | ops | M | Patch cadence without GitHub/Docker Hub access. | Versioned upgrade tarball procedure; rollback to N-1 documented; checksum verify; keyring + `data_dir` backup before upgrade. |
-| 6 | P3-59 | Runtime egress & dependency matrix | docs | S | Prove core MaxIO needs no outbound internet; document optional deps only. | Table: required (none) vs optional (Redis login limit, internal Keycloak, webhooks P3-27, internal Vault P3-35); code review confirms no telemetry/update phone-home; P3-50 includes egress checks. |
-| 7 | P3-60 | Private-registry K8s manifests | ops | M | Default YAML must not assume `docker.io` or `:latest` pulls. | `deploy/k8s/` uses `image: REGISTRY/maxio:VERSION` placeholders; `imagePullSecrets`; airgap install doc; pairs with P3-55 and P1-24. |
+| ~~—~~ | ~~**P3-53**~~ | ~~**Airgap deployment epic**~~ | ops | L | **Done** — P3-54–P3-60; `docs/operations.md` airgap sections. | Airgap acceptance checklist in runbook; CI/release ships offline artifacts; no undocumented egress. |
+| ~~1~~ | ~~P3-54~~ | ~~Offline release bundle~~ | ci | M | **Done** — `scripts/build-offline-bundle.sh`. | Release tarball: `maxio` + `maxio-admin` + `maxio-ui`, `SHA256SUMS`, SBOM, `LICENSES.txt`. |
+| ~~2~~ | ~~P3-55~~ | ~~Offline container image pack~~ | ci | M | **Done** — `scripts/build-offline-images.sh`, `scripts/load-images.sh`. | `docker save` tarballs; `images.txt`; private registry load script. |
+| ~~3~~ | ~~P3-56~~ | ~~Airgap deployment runbook~~ | docs | M | **Done** — `docs/operations.md` § Airgap. | Sneakernet bundle ingest, private registry, systemd/K8s paths. |
+| ~~4~~ | ~~P3-57~~ | ~~Internal CA & TLS~~ | ops | S | **Done** — `docs/operations.md` § Internal CA/TLS. | Org-issued certs; no ACME on production hosts. |
+| ~~5~~ | ~~P3-58~~ | ~~Offline upgrade & rollback~~ | ops | M | **Done** — `docs/operations.md` § Offline upgrade. | Versioned upgrade; rollback N-1; checksum verify. |
+| ~~6~~ | ~~P3-59~~ | ~~Runtime egress matrix~~ | docs | S | **Done** — `docs/operations.md` § Runtime egress. | Required (none) vs optional deps table. |
+| ~~7~~ | ~~P3-60~~ | ~~Private-registry K8s manifests~~ | ops | M | **Done** — `REGISTRY/` placeholders + `imagePullSecrets` + `registry-secret.example.yaml`. | No public registry defaults. |
 
 **Airgap sprint order:** P3-54 → P3-55 → P3-56 → P3-57 → P3-58 → P3-59 → P3-60 → **P3-53 close**
 
@@ -72,20 +72,20 @@ P1-25 (after P1-18)
 
 | Order | ID | Title | Area | Effort | Description | Acceptance criteria |
 |-------|-----|-------|------|--------|-------------|-------------------|
-| — | **P3-52** | **Enterprise GA epic** | ops | L | **Epic** — closes when P3-44 criteria met (**P3-53 airgap** + rows below + P1-14). | GA checklist complete; README warning removed; CHANGELOG GA entry. |
-| 1 | P3-18 | Bare metal deployment pack | ops | M | systemd units, permissive edge (P3-26). **Airgap:** install from P3-54 bundle only on target hosts. | `deploy/systemd/maxio.service`; offline install path; smoke via `maxio healthcheck`. |
-| 2 | P3-26 | Permissive ingress & HA runbook | ops | S | No GPL edge. **Airgap:** internal CA (P3-57), no ACME. | Caddy/Traefik file-cert examples; GPL tools not recommended. |
-| 3 | P3-36 | Published S3 compatibility matrix | docs | S | Procurement / integration gate. | Matrix in repo; CI sync; linked from README. |
-| 4 | P3-37 | Observability reference stack | ops | M | Dashboards beyond `/metrics`. **Airgap:** images via P3-55 private registry; no Grafana Cloud. | `deploy/compose/observability.yml`; offline image list; Grafana JSON bundled in repo. |
-| 5 | P3-08 | Keycloak console UI login | ui | M | Enterprise SSO. **Airgap:** `MAXIO_KEYCLOAK_*` points to **internal** IdP only. | Keycloak UI path; silent refresh; Playwright smoke; doc internal-URL constraints. |
-| 6 | P3-06 | UI E2E tests (Playwright) | ui | M | Console regression (CI may use network; product must not require it). | Login → bucket → upload → download → delete; CI on main. |
-| 7 | P3-48 | Backup automation & verified restore | ops | M | **Airgap:** backup to removable media / offline vault; no cloud backup assumption. | Scheduled backup; checksum verify; restore drill; encrypted offline copy documented. |
-| 8 | P3-49 | Disaster recovery runbook (RPO/RTO) | docs | M | DR without external dependencies. | DR section; cluster + BM; offline restore from P3-48; drill checklist. |
-| 9 | P3-50 | Security audit & hardening checklist | security | M | Pen-test prep incl. airgap supply chain. | `docs/security-audit.md`; threat model; P3-59 egress; SBOM review from P3-54. |
-| 10 | P3-51 | Production SLA & incident response | ops | S | On-call without vendor SaaS dependencies. | SLA section; severity levels; metrics from P2-07 / P3-37 (on-prem). |
+| ~~—~~ | ~~**P3-52**~~ | ~~**Enterprise GA epic**~~ | ops | L | **Done** — P3-44 milestone; README GA notice; CHANGELOG entry. | GA checklist complete; README warning removed; CHANGELOG GA entry. |
+| ~~1~~ | ~~P3-18~~ | ~~Bare metal deployment pack~~ | ops | M | **Done** — `deploy/systemd/maxio.service`; airgap install in `docs/operations.md`. | systemd unit; offline install; `maxio healthcheck`. |
+| ~~2~~ | ~~P3-26~~ | ~~Permissive ingress & HA runbook~~ | ops | S | **Done** — `docs/operations.md` + `docs/plans/2026-06-29-permissive-ingress-ha.md`. | Caddy/Traefik file-cert; no GPL edge default. |
+| ~~3~~ | ~~P3-36~~ | ~~Published S3 compatibility matrix~~ | docs | S | **Done** — `docs/s3-compatibility.md` with CI references. | Matrix in repo; linked from README. |
+| ~~4~~ | ~~P3-37~~ | ~~Observability reference stack~~ | ops | M | **Done** — `deploy/compose/observability.yml` + Grafana dashboard JSON. | Prometheus + Grafana compose; on-prem images via P3-55. |
+| ~~5~~ | ~~P3-08~~ | ~~Keycloak console UI login~~ | ui | M | **Done** — `MAXIO_KEYCLOAK_*`; `/api/auth/keycloak-*`; internal-URL docs in `docs/operations.md`. | Keycloak UI path; silent refresh; airgap internal IdP only. |
+| ~~6~~ | ~~P3-06~~ | ~~UI E2E tests (Playwright)~~ | ui | M | **Done** — `e2e/` + `scripts/e2e-console.sh`; CI `e2e` job. | Login → bucket → upload → download → delete; CI on main. |
+| ~~7~~ | ~~P3-48~~ | ~~Backup automation & verified restore~~ | ops | M | **Done** — `scripts/backup-maxio.sh`; ops doc. | Checksum verify; restore drill documented. |
+| ~~8~~ | ~~P3-49~~ | ~~Disaster recovery runbook~~ | docs | M | **Done** — `docs/operations.md` § DR. | RPO/RTO; cluster + BM; offline restore. |
+| ~~9~~ | ~~P3-50~~ | ~~Security audit checklist~~ | security | M | **Done** — `docs/security-audit.md`. | Threat model; egress; SBOM review. |
+| ~~10~~ | ~~P3-51~~ | ~~Production SLA & incident response~~ | ops | S | **Done** — `docs/operations.md` § SLA. | Severity levels; on-prem metrics. |
 | ~~11~~ | ~~P3-24~~ | ~~Permissive-only license policy~~ | ci | S | **Done** — Rust `cargo deny` + npm runtime dep audit. | `deny.toml`; `make deny`; `make npm-licenses`; CI licenses job. |
-| 12 | P3-05 | ARM64 release binaries | ci | S | Both arches in offline bundle. | amd64 + arm64 in P3-54 tarball and P3-55 image pack. |
-| — | **P3-44** | **Production GA milestone** | ops | M | README warning removed when **P3-52** + **P3-53** done. | P1-14 + airgap epic + GA rows; P3-06 green; P3-50 complete; Helm not required. |
+| ~~12~~ | ~~P3-05~~ | ~~ARM64 release binaries~~ | ci | S | **Done** — `.github/workflows/release.yml` multi-arch; per-arch P3-54 bundles. | amd64 + arm64 in release CI and offline bundle script. |
+| ~~—~~ | ~~**P3-44**~~ | ~~**Production GA milestone**~~ | ops | M | **Done** — P1-14 + P3-52 + P3-53 closed. | GA checklist; README updated; Helm not required. |
 
 **GA sprint order:** P1-14 close → **P3-54 → P3-55 → P3-56 → P3-57 → P3-58 → P3-59 → P3-60 → P3-53** → P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-24 → P3-05 → **P3-44 / P3-52 close**
 

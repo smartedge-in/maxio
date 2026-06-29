@@ -10,7 +10,7 @@ Rust · Axum · Svelte 5 · Tailwind CSS v4 · shadcn-svelte
 
 ## About the Project
 
-> **Warning:** MaxIO is under active development. Do not use it in production yet.
+> **Enterprise GA:** MaxIO ships a Raft-first multi-replica cluster path, airgap install bundles, and production runbooks. Review [docs/operations.md](docs/operations.md) before deploying — pilot your workload and DR drills in staging first.
 
 MaxIO is a lightweight, single-binary S3-compatible object storage server written in Rust. No JVM, no database, no runtime dependencies — just one binary and a data directory. Buckets are directories, objects are files. Back up by copying the data dir.
 

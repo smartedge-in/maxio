@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Enterprise GA (P3-44 / P3-52 / P3-53):** airgap install scripts (`scripts/build-offline-bundle.sh`, `build-offline-images.sh`, `load-images.sh`), bare-metal systemd unit, observability compose stack, backup script, security audit checklist, DR/SLA/airgap runbook sections in `docs/operations.md`, private-registry K8s `imagePullSecrets`, Playwright console E2E (`e2e/`, CI `e2e` job).
+- **P1-25 cluster EC bitrot scanner:** proactive shard checksum scan + heal from parity/peers on storage nodes (`MAXIO_BITROT_SCAN_*`); HTTP `GET /internal/shard`; Prometheus `maxio_ec_bitrot_*` counters; acceptance test in `cluster_p14`.
+
 - Production cluster wiring: `maxio storage-raft` subcommand for multi-process storage peers over HTTP Raft (`/internal/raft/*`); server `MAXIO_STORAGE_ENDPOINTS` background routing sync; updated `deploy/k8s/distributed/` StatefulSet + server Deployment; `scripts/kind-cluster-smoke.sh`.
 
 - `StorageBackend` trait (P1-15): all S3 metadata and object mutations go through `DynStorage` (`Arc<dyn StorageBackend>`) in `maxio-server`; `FilesystemStorage` is the default implementation; prerequisite for Raft apply path (`crates/maxio-storage/src/backend.rs`).

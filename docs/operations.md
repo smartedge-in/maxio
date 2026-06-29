@@ -274,7 +274,7 @@ Erasure coding is controlled **server-wide** via `MAXIO_ERASURE_CODING`. When en
 
 **Operational limits**
 
-- **Single-node only** — EC protects against bitrot and missing/corrupt chunks on one host; it is not replication or multi-node federation.
+- **Single-node** — EC protects against bitrot and missing/corrupt chunks on one host via read-time verification; cluster deployments add the P1-25 background scanner on storage peers.
 - **Per-bucket EC** — with server EC on, set `ErasureConfiguration` to `Disabled` on a bucket to keep flat layout; unset/`Enabled` uses chunked writes. Chunk size and parity remain server-wide.
 - **Parity required for recovery** — without `--parity-shards`, corrupt or missing chunks fail reads with S3 `InternalError` (HTTP 500). With parity, MaxIO attempts Reed-Solomon reconstruction when a data chunk fails its checksum.
 - **GF(2⁸) shard cap** — `data_chunks + parity_shards` must not exceed **255**. If an object would exceed this, increase `--chunk-size` (fewer data chunks) or reduce parity.
@@ -345,6 +345,26 @@ Not implemented. **Priority 1** path is **Raft-first multi-replica** (not operat
 
 Erasure coding supports single-node (default) and distributed shard placement (`maxio-cluster`, P1-18/P1-19).
 
+### Cluster EC bitrot scanner (P1-25)
+
+On **storage-tier** peers (`maxio storage-raft`), enable proactive shard checksum scanning and automatic heal from parity/peers:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `MAXIO_BITROT_SCAN_ENABLED` | `false` | Background scanner on storage nodes (requires EC + parity) |
+| `MAXIO_BITROT_SCAN_INTERVAL_SECS` | `3600` | Seconds between scan passes |
+
+Each cluster shard under `{data_dir}/.cluster-shards/` gets a sidecar `{shard}.sha256`. On mismatch the scanner rebuilds the local shard via Reed-Solomon using shards fetched from peer storage nodes (`GET /internal/shard?bucket=&key=&index=`).
+
+Prometheus counters on storage HTTP `:9100/metrics`:
+
+- `maxio_ec_bitrot_shards_scanned_total`
+- `maxio_ec_bitrot_corrupt_detected_total`
+- `maxio_ec_bitrot_shards_healed_total`
+- `maxio_ec_bitrot_scan_errors_total`
+
+Tune interval for large fleets: lower values increase I/O; production defaults to hourly.
+
 ### Asymmetric scale-out (P1-14)
 
 Distributed layouts use separate replica counts per tier (`deploy/k8s/distributed/`). Single-node colocated mode remains the default (`MAXIO_CLUSTER_MODE=false`, embedded UI).
@@ -373,9 +393,46 @@ docker run -d \
 
 Mount the data volume on durable storage (SSD, network block volume). Bind-mounting an NFS path works but latency affects listing performance.
 
-## Bare metal (planned, P3-18)
+## Bare metal (P3-18)
 
-Target layout: release binary, dedicated `maxio` user, `MAXIO_DATA_DIR` on local SSD, systemd unit, TLS at host reverse proxy. Multi-host tier separation (storage / server / UI) aligns with P3-13. Full runbook: `docs/plans/2026-06-29-deployment-targets.md`.
+Production bare-metal installs use the **P3-54 offline bundle** on target hosts — no `cargo build` or internet download on classified systems.
+
+### Install (from offline bundle)
+
+```bash
+# On a connected build/jump host:
+bash scripts/build-offline-bundle.sh
+# Transfer dist/offline-bundle/maxio-offline-<version>-linux-<arch>.tar.gz via sneakernet
+
+# On the target host — verify before install:
+cd /tmp && tar -xzf maxio-offline-*.tar.gz && cd maxio-offline-*
+sha256sum -c SHA256SUMS
+
+sudo useradd --system --home-dir /var/lib/maxio --shell /usr/sbin/nologin maxio || true
+sudo install -d -m 0750 -o maxio -g maxio /var/lib/maxio /etc/maxio
+sudo install -m 0755 bin/maxio bin/maxio-admin /usr/local/bin/
+sudo install -m 0644 deploy/systemd/maxio.service /etc/systemd/system/
+
+sudo tee /etc/maxio/maxio.env <<'EOF'
+MAXIO_DATA_DIR=/var/lib/maxio
+MAXIO_PORT=9000
+MAXIO_ADDRESS=127.0.0.1
+MAXIO_ACCESS_KEY=...
+MAXIO_SECRET_KEY=...
+MAXIO_METRICS_ENABLED=true
+MAXIO_SECURE_COOKIES=true
+EOF
+sudo chmod 0640 /etc/maxio/maxio.env
+sudo chown root:maxio /etc/maxio/maxio.env
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now maxio
+maxio healthcheck --url http://127.0.0.1:9000/readyz
+```
+
+TLS terminates at Caddy or Traefik on the same host (see [Internal CA & TLS](#internal-ca--tls-p3-57)). Bind MaxIO to loopback (`MAXIO_ADDRESS=127.0.0.1`) and expose only `:443` on the proxy.
+
+Distributed tier separation (storage / server / UI) uses the same binaries with different subcommands; see [Kubernetes](#kubernetes) wiring and `docs/plans/2026-06-29-deployment-targets.md`.
 
 ## Kubernetes
 
@@ -408,6 +465,9 @@ maxio-ui --port=9080
 **Kubernetes:**
 
 ```bash
+# Airgap: load images into private registry first (P3-55), create pull secret (P3-60)
+REGISTRY=registry.internal:5000/maxio bash scripts/load-images.sh dist/offline-images
+kubectl apply -f deploy/k8s/registry-secret.example.yaml   # customize credentials first
 kubectl apply -f deploy/k8s/distributed/
 # Replace REGISTRY/maxio:VERSION and REGISTRY/maxio-ui:VERSION in manifests before apply.
 ```
@@ -502,15 +562,27 @@ The console is served at `/ui/` with a strict CSP on all routes:
 
 Review `CONTENT_SECURITY_POLICY` in `src/server.rs` when changing the frontend build.
 
-## Data backup
+## Data backup (P3-48)
 
 Back up the entire `MAXIO_DATA_DIR`, including:
 
 - `buckets/` — object payload and metadata
 - `.maxio-keys.json` — SSE-S3 keyring (unless you only use `MAXIO_MASTER_KEY` from a separate backup)
+- `.maxio-credentials.json` — secondary S3 keys (if used)
+- `.maxio-metadata.db` — SQLite index (if `MAXIO_METADATA_INDEX=true`)
 - `.maxio-readyz-probe` — transient probe file; safe to ignore
 
-Restore by stopping MaxIO, restoring the directory tree, and starting again. Bucket and object layout is portable across hosts when permissions and paths are consistent.
+Automated backup with checksums:
+
+```bash
+# Cron example (daily 02:00 UTC):
+# 0 2 * * * maxio /opt/maxio/scripts/backup-maxio.sh /var/lib/maxio /backup/maxio
+bash scripts/backup-maxio.sh /var/lib/maxio /backup/maxio
+```
+
+Each run produces `maxio-backup-<timestamp>.tar.gz`, a top-level `.sha256` file, and an in-archive `SHA256SUMS` manifest. Store copies on **removable media or an offline vault** — airgap sites must not assume cloud backup.
+
+Restore by stopping MaxIO, verifying checksums, restoring the directory tree, and starting again. Bucket and object layout is portable across hosts when permissions and paths are consistent.
 
 ## Default buckets
 
@@ -640,3 +712,188 @@ maxio serve --data-dir /data 2>&1 | grep maxio_audit
 - Monitor free disk space on the data volume; align alerts with `MAXIO_MIN_FREE_DISK_BYTES`
 - Track 507 and `EntityTooLarge` rates as early signs of quota pressure
 - Log shipping via container runtime or sidecar (MaxIO uses structured `tracing` on stderr)
+
+Reference Prometheus + Grafana stack: `deploy/compose/observability.yml` (P3-37). Load observability images into your private registry in airgap environments alongside MaxIO (P3-55).
+
+## Airgap deployment (P3-56)
+
+Enterprise production assumes **no outbound internet** on install or steady-state. Internet-connected paths (`cargo build`, `docker pull`, public ACME) are convenience-only for development.
+
+### Artifacts
+
+| Artifact | Script | Contents |
+|----------|--------|----------|
+| Offline release bundle (P3-54) | `scripts/build-offline-bundle.sh` | `maxio`, `maxio-admin`, `maxio-ui`, `SHA256SUMS`, `LICENSE`, `LICENSES.txt`, `sbom.json` |
+| Offline image pack (P3-55) | `scripts/build-offline-images.sh` | `maxio-v<VERSION>-linux-<arch>.tar`, `images.txt`, checksums |
+| Registry ingest | `scripts/load-images.sh` | `docker load` + `docker push` to `REGISTRY` |
+
+Build on a connected **build/jump host** with Rust, bun (optional), Docker, and Trivy (`make install-tools`). Transfer artifacts via sneakernet or approved one-way diode.
+
+### Verify before install
+
+```bash
+# Release bundle
+sha256sum -c maxio-offline-<version>-linux-<arch>.tar.gz.sha256
+tar -xzf maxio-offline-*.tar.gz && cd maxio-offline-* && sha256sum -c SHA256SUMS
+
+# Container images
+sha256sum -c maxio-v*-linux-*.tar.sha256
+```
+
+Review `sbom.json` with `trivy sbom sbom.json` and complete `docs/security-audit.md` before production promotion.
+
+### Deployment paths
+
+| Target | Steps |
+|--------|-------|
+| **Bare metal** | P3-54 bundle → [Bare metal (P3-18)](#bare-metal-p3-18) → internal CA TLS (P3-57) |
+| **Kubernetes** | P3-55 images → `scripts/load-images.sh` → `registry-secret` (P3-60) → `kubectl apply -f deploy/k8s/` |
+| **Jump host ops** | Install `maxio-admin` from the same bundle; no cluster ingress required for local `--data-dir` commands |
+
+**Do not** run `cargo build`, `curl | bash`, or `docker pull` from public registries on classified production hosts.
+
+### Airgap acceptance checklist
+
+- [ ] Bundle and image checksums verified on target
+- [ ] SBOM reviewed; security audit checklist signed (`docs/security-audit.md`)
+- [ ] Private registry hosts all production images (MaxIO + observability if used)
+- [ ] K8s manifests use `REGISTRY/maxio:VERSION` — no `:latest`, no `docker.io` defaults
+- [ ] Egress firewall deny-all test passed (P3-59)
+- [ ] Backup and restore drill completed (P3-48, P3-49)
+
+## Internal CA & TLS (P3-57)
+
+Airgapped sites cannot use public ACME or external CAs. Terminate TLS at a permissive reverse proxy with **organization-issued certificates**.
+
+`tls internal` in Caddy examples is **development only** — replace with file paths or your org PKI in production.
+
+### Caddy (file certificates)
+
+```caddyfile
+s3.example.com {
+    tls /etc/ssl/maxio/s3.example.com.crt /etc/ssl/maxio/s3.example.com.key
+    reverse_proxy 127.0.0.1:9000 {
+        flush_interval -1
+    }
+}
+```
+
+### Traefik (file store)
+
+```yaml
+# dynamic/tls.yml
+tls:
+  certificates:
+    - certFile: /etc/ssl/maxio/s3.example.com.crt
+      keyFile: /etc/ssl/maxio/s3.example.com.key
+```
+
+### Certificate rotation (offline)
+
+1. Issue replacement cert from internal CA on a connected PKI host
+2. Transfer new cert/key via approved media
+3. Validate chain offline (`openssl verify -CAfile org-ca.pem cert.pem`)
+4. Reload proxy (`systemctl reload caddy` / `traefik`) — no MaxIO restart required
+5. Record rotation in change-management log
+
+Set `MAXIO_SERVER_HOST` to the public DNS name clients use. Set `MAXIO_TRUSTED_PROXIES` to proxy CIDRs and `MAXIO_SECURE_COOKIES=true`.
+
+## Offline upgrade and rollback (P3-58)
+
+Patch cadence without GitHub or Docker Hub access uses **versioned offline bundles** (P3-54) and image packs (P3-55).
+
+### Upgrade procedure
+
+1. **Backup** — run `scripts/backup-maxio.sh` and copy keyring offline (P3-48)
+2. **Verify** — checksum new bundle and images on the target
+3. **Stage** — extract bundle to `/opt/maxio/staging/<version>/`
+4. **Bare metal** — `systemctl stop maxio`; replace `/usr/local/bin/maxio` (+ `maxio-admin` on jump hosts); `systemctl start maxio`; `maxio healthcheck --url http://127.0.0.1:9000/readyz`
+5. **Kubernetes** — load new image tar via `scripts/load-images.sh`; update manifest image tag; rolling restart per tier; confirm `/readyz` on all pods
+6. **Smoke** — `maxio-admin doctor` or S3 PUT/GET from jump host
+
+### Rollback to N-1
+
+Keep the previous bundle and image tar on-site. Rollback is the reverse: stop → restore binaries/images from N-1 artifacts (data directory unchanged unless schema migration occurred) → start → verify `/readyz`. If upgrade mutated on-disk state, restore from pre-upgrade backup instead.
+
+Never delete the prior bundle until the new version has passed smoke tests and soak time.
+
+## Runtime egress and dependency matrix (P3-59)
+
+Core MaxIO requires **no outbound internet** for S3 API, console, housekeeping, or metrics scrape **inbound**.
+
+| Dependency | Required? | Direction | When used |
+|------------|-----------|-----------|-----------|
+| None (default single-node) | — | — | Standalone install |
+| Client → MaxIO (S3/console) | Yes | Inbound | All operations |
+| Prometheus → MaxIO `/metrics` | Optional | Inbound to MaxIO | `MAXIO_METRICS_ENABLED=true` |
+| MaxIO → Redis | Optional | Outbound to **internal** Redis | `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` (multi-replica console) |
+| MaxIO → Keycloak | Optional | Outbound to **internal** IdP | `MAXIO_KEYCLOAK_ENABLED=true` |
+| MaxIO → webhook targets | Optional (P3-27) | Outbound to **internal** URLs | Event notifications (future) |
+| MaxIO → Vault/KMS | Optional (P3-35) | Outbound to **internal** HSM/Vault | SSE-KMS (future) |
+| Build host → crates.io / bun registry | Build-time only | Outbound | **Not on production hosts** |
+| Telemetry / license phone-home | **None** | — | Not implemented |
+
+**Verification:** deploy with egress deny-all; confirm PUT/GET/LIST and `/readyz` succeed. Packet-capture staging clusters to prove no undocumented outbound TCP from MaxIO processes.
+
+## Disaster recovery runbook (P3-49)
+
+| Metric | Target (operator-defined) | Notes |
+|--------|---------------------------|-------|
+| **RPO** | ≤ backup interval | Default daily backup → up to 24 h object loss if site lost |
+| **RTO** | ≤ 4 h (single-node BM) | Depends on hardware spare capacity and restore media speed |
+
+### Single-node bare metal
+
+1. Provision replacement host (same arch as P3-54 bundle)
+2. Install from offline bundle (P3-56)
+3. Restore latest `maxio-backup-*.tar.gz` to `/var/lib/maxio` after checksum verify
+4. Restore `.maxio-keys.json` if not already in backup
+5. Start `maxio`; verify `/readyz` and sample PUT/GET
+6. Reattach TLS certs on proxy (P3-57)
+
+### Distributed Kubernetes
+
+1. Restore PVC snapshots / storage tier data per node (storage StatefulSet)
+2. Re-apply manifests with pinned `REGISTRY/maxio:VERSION` from private registry
+3. Confirm storage Raft quorum (`maxio-admin doctor` / storage `/internal/raft/status`)
+4. Rolling restart server then UI tiers; verify cluster routing epoch advances
+5. Run `scripts/cluster-test.sh` equivalent smoke on jump host if available
+
+### DR drill checklist (quarterly)
+
+- [ ] Restore backup to isolated staging host; verify `SHA256SUMS`
+- [ ] SSE-S3 object round-trip after restore
+- [ ] Document actual RPO/RTO achieved
+- [ ] Update on-call runbook with lessons learned
+
+## Production SLA and incident response (P3-51)
+
+MaxIO is operator-supported in enterprise deployments. Define SLAs with your platform team; suggested starting points:
+
+| Severity | Example condition | Response target | Update cadence |
+|----------|-------------------|-----------------|----------------|
+| **SEV1** | Total write outage, data loss risk, quorum lost | 15 min acknowledge | Every 30 min |
+| **SEV2** | Read degradation, single replica down (HA) | 30 min acknowledge | Every 1 h |
+| **SEV3** | Non-critical feature degraded, disk > 80% | Next business day | Daily |
+| **SEV4** | Cosmetic, doc, planned maintenance | Scheduled | As needed |
+
+### Key metrics (on-prem)
+
+Scrape from `GET /metrics` (P3-37 stack) or verbose health:
+
+- `maxio_disk_free_bytes` / `maxio_disk_total_bytes` — capacity
+- `rate(maxio_http_requests_total{status_class="5xx"}[5m])` — error rate
+- `/readyz` probe success — storage availability
+- `maxio_cluster_storage_quorum_ok` — distributed mode only
+- Audit log failure spikes on `target=maxio_audit`
+
+### Incident playbook (summary)
+
+1. **Detect** — alert on `/readyz` 503, disk threshold, 5xx SLO breach
+2. **Triage** — `maxio-admin status` / `doctor` from jump host; check disk and Raft quorum
+3. **Mitigate** — scale quotas, free disk, fail over to standby node, disable abusive client via network policy
+4. **Communicate** — status page / ticket per severity table; no external SaaS required
+5. **Resolve** — root cause doc; backup verification; security audit items if compromise suspected
+6. **Post-incident** — update `docs/security-audit.md` sign-off and DR drill notes
+
+On-call tooling (`maxio-admin`, Prometheus, Grafana) runs entirely on internal networks — no vendor SaaS dependency.

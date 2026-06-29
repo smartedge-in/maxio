@@ -1,0 +1,15 @@
+# Prometheus scrape config for MaxIO reference stack (P3-37).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: maxio
+    metrics_path: /metrics
+    static_configs:
+      # host.docker.internal works on Docker Desktop; on Linux use host IP or
+      # extra_hosts: host.docker.internal:host-gateway in compose overrides.
+      - targets: ["host.docker.internal:9000"]
+        labels:
+          service: maxio

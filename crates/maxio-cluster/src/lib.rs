@@ -6,12 +6,14 @@
 //! - **Harness** (P1-24): in-process 3-node tests
 
 pub mod ec;
+pub use ec::cluster_shard_path;
 pub mod harness;
 pub mod routing;
 pub mod server;
 pub mod storage;
 
 pub use ec::EcShardMap;
+pub use ec::bitrot::{BitrotMetrics, BitrotScannerConfig};
 pub use harness::ClusterHarness;
 pub use routing::{
     StoragePeerRef, StorageRaftStatus, fetch_routing_snapshot, parse_raft_peer_urls,

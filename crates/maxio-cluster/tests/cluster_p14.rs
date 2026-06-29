@@ -177,6 +177,78 @@ async fn distributed_ec_induced_shard_loss_peer_fetch() {
 }
 
 #[tokio::test]
+async fn bitrot_scanner_heals_corrupt_local_shard() {
+    use maxio_cluster::ec::bitrot::{BitrotMetrics, scan_placements, verify_shard_checksum};
+    use maxio_cluster::ec::{cluster_shard_path, place_shards, write_shard};
+
+    let mut h = ClusterHarness::boot().await.unwrap();
+    h.create_bucket("bitrot-bucket", "us-east-1").await.unwrap();
+
+    let node_ids: Vec<String> = h.storage.nodes().iter().map(|n| n.id.to_string()).collect();
+    let map = place_shards("bitrot-bucket", "obj.ec", 2, 1, &node_ids);
+    h.storage
+        .propose(StorageMutation::PutShardMap {
+            bucket: "bitrot-bucket".into(),
+            key: "obj.ec".into(),
+            map: map.clone(),
+        })
+        .await
+        .unwrap();
+
+    let fs_map = h.fs_map();
+    let s0 = b"shard0-data".to_vec();
+    let s1 = b"shard1-data".to_vec();
+    let mut parity = vec![0u8; s0.len()];
+    {
+        use reed_solomon_erasure::galois_8::ReedSolomon;
+        let rs = ReedSolomon::new(2, 1).unwrap();
+        let mut all = vec![s0.clone(), s1.clone(), parity.clone()];
+        rs.encode(&mut all).unwrap();
+        parity = all[2].clone();
+    }
+    write_shard(&fs_map, &map, 0, &s0).await.unwrap();
+    write_shard(&fs_map, &map, 1, &s1).await.unwrap();
+    write_shard(&fs_map, &map, 2, &parity).await.unwrap();
+
+    let owner = map
+        .placements
+        .iter()
+        .find(|(i, _)| *i == 0)
+        .map(|(_, n)| n.clone())
+        .unwrap();
+    let owner_fs = fs_map.get(&owner).unwrap();
+    let path = cluster_shard_path(owner_fs.data_root(), "bitrot-bucket", "obj.ec", 0);
+    tokio::fs::write(&path, b"CORRUPT!!!").await.unwrap();
+
+    let metrics = BitrotMetrics::default();
+    scan_placements(
+        owner_fs,
+        &owner,
+        std::slice::from_ref(&map),
+        &std::collections::BTreeMap::new(),
+        Some(&fs_map),
+        &metrics,
+    )
+    .await;
+
+    assert_eq!(
+        metrics
+            .corrupt_detected
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+    assert_eq!(
+        metrics
+            .shards_healed
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+    let healed = tokio::fs::read(&path).await.unwrap();
+    assert_eq!(healed, s0);
+    assert!(verify_shard_checksum(&path, &healed).await.unwrap());
+}
+
+#[tokio::test]
 async fn server_routing_survives_storage_leader_change() {
     let h = ClusterHarness::boot().await.unwrap();
     let epoch_before = h.servers.snapshot().await.epoch;

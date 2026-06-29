@@ -81,6 +81,10 @@ impl StorageRaftStore {
         sm.shard_maps.get(&id).cloned()
     }
 
+    pub async fn all_shard_maps(&self) -> Vec<EcShardPlacement> {
+        self.sm.read().await.shard_maps.values().cloned().collect()
+    }
+
     async fn apply_mutation(
         &self,
         mutation: &StorageMutation,

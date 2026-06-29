@@ -111,6 +111,14 @@ struct StorageRaftCli {
 
     #[arg(long, env = "MAXIO_METADATA_INDEX", default_value = "false")]
     metadata_index: bool,
+
+    /// Enable background EC bitrot scanner on this storage node (P1-25)
+    #[arg(long, env = "MAXIO_BITROT_SCAN_ENABLED", default_value = "false")]
+    bitrot_scan_enabled: bool,
+
+    /// Interval between EC bitrot scan passes (seconds)
+    #[arg(long, env = "MAXIO_BITROT_SCAN_INTERVAL_SECS", default_value = "3600")]
+    bitrot_scan_interval_secs: u64,
 }
 
 fn default_healthcheck_url() -> String {
@@ -446,10 +454,17 @@ async fn run_storage_raft(cfg: StorageRaftCli) -> anyhow::Result<()> {
         chunk_size: cfg.chunk_size,
         parity_shards: cfg.parity_shards,
         metadata_index: cfg.metadata_index,
+        bitrot_scan_enabled: cfg.bitrot_scan_enabled,
+        bitrot_scan_interval_secs: cfg.bitrot_scan_interval_secs,
     })
     .await?;
 
-    node.serve(&cfg.bind).await
+    let bitrot = maxio_cluster::BitrotScannerConfig {
+        local_node_id: cfg.node_id.to_string(),
+        interval: std::time::Duration::from_secs(cfg.bitrot_scan_interval_secs),
+        enabled: cfg.bitrot_scan_enabled && cfg.erasure_coding && cfg.parity_shards > 0,
+    };
+    node.serve(&cfg.bind, bitrot).await
 }
 
 async fn run_keyring_list(data_dir: &str) -> anyhow::Result<()> {

@@ -1,0 +1,43 @@
+# P3-37: reference observability stack for on-prem Prometheus + Grafana.
+# Airgap: load images via P3-55 (scripts/build-offline-images.sh) into a private
+# registry and replace image references below before docker compose up.
+#
+#   export MAXIO_METRICS_ENABLED=true
+#   docker compose -f deploy/compose/observability.yml up -d
+#
+# Scrape target assumes MaxIO exposes /metrics on the Docker host at :9000.
+# Adjust prometheus.yml or extra_hosts when MaxIO runs on another host.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: changeme
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:

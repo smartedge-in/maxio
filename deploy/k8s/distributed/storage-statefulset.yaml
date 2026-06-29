@@ -19,6 +19,8 @@ spec:
         app.kubernetes.io/name: maxio
         app.kubernetes.io/component: storage
     spec:
+      imagePullSecrets:
+        - name: maxio-registry
       containers:
         - name: maxio
           image: REGISTRY/maxio:VERSION

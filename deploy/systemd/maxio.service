@@ -1,0 +1,65 @@
+# P3-18: bare-metal systemd unit for single-node MaxIO.
+# Install from P3-54 offline bundle — do not build from source on production hosts.
+#
+#   sudo install -m 0755 bin/maxio /usr/local/bin/maxio
+#   sudo install -m 0644 deploy/systemd/maxio.service /etc/systemd/system/
+#   sudo install -d -m 0750 -o maxio -g maxio /var/lib/maxio
+#   sudo install -d -m 0750 -o maxio -g maxio /etc/maxio
+#   sudo systemctl daemon-reload && sudo systemctl enable --now maxio
+
+[Unit]
+Description=MaxIO S3-compatible object storage
+Documentation=https://github.com/coollabsio/maxio/blob/main/docs/operations.md
+After=network-online.target local-fs.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=maxio
+Group=maxio
+EnvironmentFile=-/etc/maxio/maxio.env
+
+ExecStart=/usr/local/bin/maxio serve \
+  --data-dir=${MAXIO_DATA_DIR} \
+  --port=${MAXIO_PORT} \
+  --address=${MAXIO_ADDRESS} \
+  --metrics-enabled
+
+ExecStartPost=/usr/local/bin/maxio healthcheck \
+  --url http://127.0.0.1:${MAXIO_PORT}/readyz \
+  --timeout-ms 5000
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+
+ReadWritePaths=/var/lib/maxio
+StateDirectory=maxio
+StateDirectoryMode=0750
+
+# Defaults when not set in /etc/maxio/maxio.env
+Environment=MAXIO_DATA_DIR=/var/lib/maxio
+Environment=MAXIO_PORT=9000
+Environment=MAXIO_ADDRESS=127.0.0.1
+Environment=MAXIO_SECURE_COOKIES=true
+
+[Install]
+WantedBy=multi-user.target

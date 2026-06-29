@@ -15,6 +15,10 @@ spec:
       labels:
         app.kubernetes.io/name: maxio
     spec:
+      # P3-60: required when images are hosted on a private registry (airgap).
+      # Create the secret first — see deploy/k8s/registry-secret.example.yaml
+      imagePullSecrets:
+        - name: maxio-registry
       containers:
         - name: maxio
           image: REGISTRY/maxio:VERSION

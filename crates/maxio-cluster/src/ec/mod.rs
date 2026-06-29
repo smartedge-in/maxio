@@ -1,4 +1,6 @@
-//! Distributed erasure coding (P1-18 / P1-19).
+//! Distributed erasure coding (P1-18 / P1-19 / P1-25 bitrot).
+
+pub mod bitrot;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -7,6 +9,7 @@ use std::sync::Arc;
 use maxio_common::cluster::EcShardPlacement;
 use maxio_storage::filesystem::FilesystemStorage;
 
+pub use bitrot::{BitrotMetrics, BitrotScannerConfig};
 pub use maxio_common::cluster::EcShardPlacement as EcShardMap;
 
 /// Round-robin placement of K+M shards across `node_ids`.
@@ -56,7 +59,18 @@ pub async fn write_shard(
     );
     tokio::fs::create_dir_all(path.parent().unwrap()).await?;
     tokio::fs::write(&path, bytes).await?;
+    bitrot::write_checksum_sidecar(&path, bytes).await?;
     Ok(())
+}
+
+/// Path to a cluster EC shard file (exported for HTTP shard API).
+pub fn cluster_shard_path(
+    data_root: &Path,
+    bucket: &str,
+    key: &str,
+    shard: u32,
+) -> std::path::PathBuf {
+    shard_path(data_root, bucket, key, shard)
 }
 
 /// Read shard from local disk or peer node data root (P1-19).
