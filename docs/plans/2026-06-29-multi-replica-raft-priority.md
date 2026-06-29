@@ -64,3 +64,7 @@ P3-09, P3-11, P3-12 (operator/agent replication) may be revisited **after** P1-1
 - [ ] 2+ server pods behind Service LB; routing survives storage leader change
 - [ ] 2+ UI replicas; colocated single-node mode still works (Raft off, embed UI)
 - [ ] All new deps pass `make deny`
+
+## After P1-14
+
+Enterprise production path is **Phase 2 (GA)** then **Phase 3 (GA+)** in `docs/BACKLOG.md` — epic **P3-52** → milestone **P3-44**. Raft-first; Helm deferred; plain K8s + bare metal.

@@ -6,7 +6,7 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | Field | Meaning |
 |-------|---------|
-| **Priority** | P0 = production blocker · P1 = security/reliability · **P1-MR = multi-replica & EC (product #1)** · P2 = maintainability · P3 = nice-to-have / deferred |
+| **Priority** | P0 = production blocker · P1 = security/reliability · **P1-MR = multi-replica & EC (product #1)** · **P1-GA = enterprise GA gate (post-cluster)** · **P1-ENT = enterprise GA+ (regulated / multi-tenant)** · P2 = maintainability · P3 = deferred / future |
 | **Effort** | S (< 1 day) · M (1–3 days) · L (3–7 days) · XL (> 1 week) |
 | **Area** | ci · ops · security · storage · api · auth · ui · docs |
 
@@ -44,6 +44,85 @@ P1-25 (after P1-18)
 **Sprint order (Priority 1):** P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19 → P1-20 → P1-21 → P1-24 → P1-25 → **P1-14 closes**
 
 **Supporting (parallel, not blocking Raft core):** P3-24 (license gate for Raft dep), P3-45/46 (Cilium docs + plain K8s YAML when on K8s). **Helm (P3-19) is future improvement — not on Priority 1 path.**
+
+---
+
+## Enterprise GA — production gate (post P1-14)
+
+**Goal:** Remove the README production warning and ship a supportable enterprise **single-region HA** cluster. Requires **P1-14 closed** first. Plain K8s YAML + bare metal (not Helm). Plan: closes via epic **P3-52** → **P3-44**.
+
+| Order | ID | Title | Area | Effort | Description | Acceptance criteria |
+|-------|-----|-------|------|--------|-------------|-------------------|
+| — | **P3-52** | **Enterprise GA epic** | ops | L | **Epic** — closes when P3-44 criteria met (all rows below + P1-14). | GA checklist complete; README warning removed; CHANGELOG GA entry. |
+| 1 | P3-18 | Bare metal deployment pack | ops | M | systemd units, Caddy example, multi-host layout. Permissive edge only (P3-26). | `deploy/systemd/maxio.service`; bare-metal runbook; smoke via `maxio healthcheck`. |
+| 2 | P3-26 | Permissive ingress & HA runbook | ops | S | No GPL edge (keepalived, HAProxy CE). Caddy, Traefik, MetalLB, kube-vip. | Operations + deploy examples use Caddy; GPL tools marked not recommended. |
+| 3 | P3-36 | Published S3 compatibility matrix | docs | S | Procurement / integration teams need operation × status matrix. | Checked-in matrix; CI or PR checklist sync with integration tests; linked from README. |
+| 4 | P3-37 | Observability reference stack | ops | M | Metrics exist (P2-07); enterprises need dashboards and optional tracing. | `deploy/compose/observability.yml`; sample Grafana dashboard JSON; OTel doc optional. |
+| 5 | P3-08 | Keycloak console UI login | ui | M | Server APIs exist; console still access/secret only. Enterprise SSO blocker. | `Login.svelte` Keycloak path; silent refresh; Playwright smoke (extends P3-06). |
+| 6 | P3-06 | UI E2E tests (Playwright) | ui | M | Browser-level regression for console flows. | Login → bucket → upload → download → delete; runs in CI on main. |
+| 7 | P3-48 | Backup automation & verified restore | ops | M | Manual `data_dir` copy is not enough for production ops. | Scheduled backup script or `maxio-admin backup`; checksum verify; restore drill documented; optional encrypted off-site. |
+| 8 | P3-49 | Disaster recovery runbook (RPO/RTO) | docs | M | Formal DR for single-node and P1-14 cluster; failover drills. | `docs/operations.md` DR section; RPO/RTO targets; cluster + BM scenarios; drill checklist tied to P1-24. |
+| 9 | P3-50 | Security audit & hardening checklist | security | M | Formal pen-test prep — not just a P3-44 checkbox. | `docs/security-audit.md` checklist; threat model summary; network/auth/encryption/audit coverage; findings tracked. |
+| 10 | P3-51 | Production SLA & incident response | ops | S | Support expectations and on-call playbook. | `docs/operations.md` SLA section; severity levels; escalation; key metrics from P2-07 / P3-37. |
+| 11 | P3-24 | Permissive-only license policy | ci | S | Mandatory for enterprise artifacts and Raft deps (P1-16). | `docs/licensing.md`; `deny.toml`; `make deny` in CI; npm license audit for `ui/`. |
+| 12 | P3-05 | ARM64 release binaries | ci | S | Multi-arch for edge and ARM servers. | amd64 + arm64 Docker image and GitHub release assets. |
+| — | **P3-44** | **Production GA milestone** | ops | M | **Milestone** — README warning removed when P3-52 epic closes. | P1-14 + P3-52 items done; P3-06 green; P3-50 checklist complete; Helm (P3-19) not required. |
+
+**GA sprint order:** P1-14 close → P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-24 → P3-05 → **P3-44 / P3-52 close**
+
+**Parallel after GA cluster work starts:** P3-17 (admin CLI boundary), P3-23 (crate boundary CI).
+
+---
+
+## Enterprise GA+ — regulated & multi-tenant (post GA)
+
+**Goal:** Features enterprise buyers in finance, healthcare, and SaaS typically require **after** initial GA. Subordinate to P1-14; does not block P3-44 unless pilot demands it.
+
+| Order | ID | Title | Area | Effort | Description | Acceptance criteria |
+|-------|-----|-------|------|--------|-------------|-------------------|
+| — | **P3-43** | **RustFS / enterprise parity epic** | storage | XL | **Epic** — competitive and compliance gaps. Closes when Tier 1–3 complete. | See tier table below. |
+| 1 | P3-28 | IAM bucket policies v2 | api | L | Deny, conditions, expanded actions — least-privilege. | Deny precedence; `Condition` operators; integration tests; `docs/s3-compatibility.md` updated. |
+| 2 | P3-35 | External KMS (SSE-KMS compatible) | security | L | SSE-S3/SSE-C only today; regulated workloads need KMS. | Pluggable KMS trait; Vault transit or equivalent; `aws:kms` path; deny.toml-clean deps. |
+| 3 | P3-29 | Multi-tenancy | auth | L | Static credentials without tenant boundary. | Tenant ID on buckets/credentials; scoped requests; admin lists tenant only; default tenant migration. |
+| 4 | P3-38 | OIDC claims in bucket policies | auth | L | Keycloak console (P3-08) does not feed IAM evaluation. | Policy conditions on `jwt:groups` / `jwt:roles`; Entra/Keycloak example; mock OIDC tests. |
+| 5 | P3-39 | S3 server access logging | api | M | stderr audit (P2-08) ≠ per-bucket delivery to target bucket. | `?logging` config; log delivery to target bucket; integration test. |
+| 6 | P3-27 | S3 event notifications | api | L | Audit log only; no webhook/subscriber integrations. | Webhook target minimum; durable spool; `ObjectCreated` / `ObjectRemoved`; integration test. |
+| 7 | P3-47 | Object lock / WORM / legal hold | storage | L | Immutability for compliance — not in backlog before. | Governance retention; legal hold API subset; tests; docs vs versioning. |
+| 8 | P3-33 | Lifecycle transitions & non-current expiry | storage | M | P3-01 expiration only. | `transition_days`; `noncurrent_expiration_days`; versioned purge tests. |
+
+**GA+ sprint order:** P3-28 → P3-35 → P3-29 → P3-38 → P3-39 → P3-27 → P3-47 → P3-33 → **P3-43 Tier 1–3 close**
+
+### Geo-DR & replication (deferred — after Raft)
+
+| ID | Title | Notes |
+|----|-------|-------|
+| P3-34 | S3 bucket replication API (CRR) | Builds on mutation log; primary→standby; extends deferred P3-09–12 |
+| P3-09 | Operator sync runbook | Geo-DR tooling revisit **after** P1-14 — not Raft substitute |
+
+### RustFS parity tiers (P3-43)
+
+| Tier | IDs | When |
+|------|-----|------|
+| Tier 1 (ops/docs) | P3-36, P3-37, P3-41, P3-05 | **Pulled into Enterprise GA** (P3-36, P3-37, P3-05) |
+| Tier 2 (S3 product) | P3-27, P3-28, P3-33, P3-39 | Enterprise GA+ |
+| Tier 3 (enterprise) | P3-29, P3-35, P3-38, **P3-47** | Enterprise GA+ |
+| Tier 4 (protocol) | P3-30, P3-31, P3-34 | Deferred unless OpenStack / CRR required |
+
+---
+
+## Future / deferred
+
+| ID | Title | Notes |
+|----|-------|-------|
+| P3-19 | Kubernetes Helm chart | Future improvement — plain `deploy/k8s/` for P1-14 |
+| P3-45 | Cilium eBPF deployment guide | After P1-24 harness |
+| P3-46 | Multi-node Service topology (K8s) | Plain YAML per tier |
+| P3-30 | OpenStack Swift API | XL — only if OpenStack required |
+| P3-31 | OpenStack Keystone auth | L — pairs with P3-30 |
+| P3-40 | Storage API fuzz testing in CI | Nightly acceptable |
+| P3-41 | One-click bare-metal install script | Post P3-18 |
+| P3-42 | Optional native TLS termination | Edge/single-node convenience |
+| P3-20 | Deployment targets epic | Closes P3-18 + plain K8s; Helm optional |
 
 ---
 
@@ -127,7 +206,9 @@ P1-25 (after P1-18)
 
 ---
 
-## P3 — Nice-to-have / future
+## P3 — Full item registry
+
+Canonical list of all P3 IDs. **Priority order** is in sections above: **P1-MR** → **Enterprise GA** → **Enterprise GA+** → **Future / deferred**.
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
@@ -135,10 +216,10 @@ P1-25 (after P1-18)
 | ~~P3-02~~ | ~~Replication / federation~~ | storage | XL | Done (RFC) — `docs/plans/2026-06-29-replication-federation.md`; implementation deferred to Phase 1+ runbook. | — |
 | ~~P3-03~~ | ~~SQLite metadata index~~ | storage | L | Done — `MAXIO_METADATA_INDEX` enables `{data_dir}/.maxio-metadata.db`; upsert on write/delete; rebuild on startup; walk fallback. | — |
 | ~~P3-04~~ | ~~Workspace crate split~~ | storage | L | Done — `crates/maxio-storage` (filesystem, crypto, keys, policy, quota) and `crates/maxio-server` (HTTP/S3 API, auth, embedded UI); root `maxio` is a facade binary + re-exports; `map_storage_upload_error` lives in server `error` module. | — |
-| P3-05 | ARM64 release binaries | ci | S | Release workflow may be x86-only today. | Multi-arch Docker image and GitHub release assets. |
-| P3-06 | UI E2E tests (Playwright) | ui | M | No browser-level tests for upload/download flows. | Smoke test: login → create bucket → upload → download → delete. |
+| P3-05 | ARM64 release binaries | ci | S | **P1-GA** — multi-arch for edge and ARM servers. | Multi-arch Docker image and GitHub release assets. |
+| P3-06 | UI E2E tests (Playwright) | ui | M | **P1-GA** — browser-level console regression. | Smoke test: login → create bucket → upload → download → delete; CI on main. |
 | ~~P3-07~~ | ~~Per-bucket erasure coding toggle~~ | storage | L | Done — `BucketMeta.erasure_coding` override; `PUT/GET ?erasure`; writes use `effective_erasure_coding()`; reads layout-based; existing flat objects unchanged. | — |
-| P3-08 | Keycloak console UI login | ui | M | Server exposes `/api/auth/keycloak-config`, `keycloak-login`, and `keycloak-refresh`; Svelte console still uses access/secret login only. | `Login.svelte` reads `keycloak-config` on load; when enabled, username/password form calls `keycloak-login` and reuses cookie session; silent refresh before expiry; access/secret form hidden when Keycloak-only; Playwright smoke test for Keycloak path (extends P3-06). |
+| P3-08 | Keycloak console UI login | ui | M | **P1-GA** — enterprise SSO; server APIs exist, UI still access/secret. | `Login.svelte` Keycloak path; silent refresh; Playwright smoke (extends P3-06). |
 | ~~P3-09~~ | ~~Replication Phase 1 — operator sync runbook~~ | ops | M | **Deferred** — not on Raft-first critical path (see Priority 1). May revisit for geo-DR tooling after P1-14. | — |
 | ~~P3-10~~ | ~~Replication Phase 2 — mutation event log~~ | storage | XL | **Superseded by P1-15** — `StorageBackend` trait is the Raft-first entry; optional append-only log deferred unless needed for audit. | — |
 | ~~P3-11~~ | ~~Replication Phase 3 — replication agent~~ | storage | XL | **Deferred** — `maxio-replicate` sidecar not on critical path; Raft + distributed EC is Priority 1. | — |
@@ -148,67 +229,54 @@ P1-25 (after P1-18)
 | ~~P3-15~~ | ~~Server tier Raft consensus~~ | api | XL | **Superseded by P1-20**. | — |
 | ~~P3-16~~ | ~~UI crate — stateless scale-out~~ | ui | L | **Superseded by P1-21**. | — |
 | P3-17 | Admin CLI crate boundary | ops | M | `maxio-admin` is a workspace member (P2-12) but depends on root `maxio` facade, coupling the CLI to server+storage re-exports. Must be a standalone crate: `maxio-storage` for local `--data-dir` commands only; `reqwest` for remote API — never `maxio-server`. Stateless operator client, not a cluster tier. See `docs/plans/2026-06-29-admin-cli-crate.md`. | No `maxio` or `maxio-server` path dep in `maxio-admin/Cargo.toml`; local doctor/keyring use `maxio-storage` directly; separate release binary/artifact; crate-boundary CI check; docs updated in `docs/operations.md`. |
-| P3-18 | Bare metal deployment pack | ops | M | MaxIO must support native Linux bare-metal/VM installs, not only containers. TLS/LB via **permissive** edge only (Caddy/Traefik — P3-26); **no keepalived/nginx** in official runbooks. See `docs/plans/2026-06-29-deployment-targets.md`. | `deploy/systemd/maxio.service`; bare-metal section with Caddy example; multi-host LB without GPL VIP; P3-26 aligned; smoke test via `maxio healthcheck`. |
-| P3-19 | Kubernetes Helm chart | ops | L | **Future improvement** — not required for P1-14 or GA. Today only a minimal Deployment YAML snippet exists in `docs/operations.md`. See `docs/plans/2026-06-29-deployment-targets.md`. | Official `deploy/helm/maxio` chart; single-node + `values-distributed.yaml` for P1-14 tiers; `helm lint` + `helm template` in CI; README section. |
-| P3-20 | Deployment targets epic (bare metal + K8s) | ops | L | **Epic** — bare metal first (P3-18); K8s via plain YAML/manifests for P1-14; **Helm optional** (P3-19 future). | P3-18 complete; distributed scale-out documented with BM + plain K8s examples; P3-19 optional follow-on. |
+| P3-18 | Bare metal deployment pack | ops | M | **P1-GA** — native Linux bare-metal/VM; permissive edge only (P3-26). See `docs/plans/2026-06-29-deployment-targets.md`. | `deploy/systemd/maxio.service`; Caddy example; multi-host LB without GPL VIP; smoke via `maxio healthcheck`. |
+| P3-19 | Kubernetes Helm chart | ops | L | **Future** — not required for P1-14 or GA. Plain `deploy/k8s/` for cluster. | `deploy/helm/maxio`; `helm lint` + `helm template` in CI; README section. |
+| P3-20 | Deployment targets epic (bare metal + K8s) | ops | L | **Future** — closes when P3-18 + plain K8s done; Helm optional (P3-19). | P3-18 complete; distributed BM + plain K8s documented. |
 | P3-21 | Shared library strategy (epic) | storage | M | **Epic** — thin shared types without a monolithic “god crate”. `maxio-storage` remains storage SSOT; new `maxio-common` for cross-component contracts; root facade not a sibling dependency (P3-17). UI stays npm-only. See `docs/plans/2026-06-29-shared-libraries.md`. | P3-22 + P3-23 + P3-17 complete; dependency graph documented; no `axum`/`reqwest` in `maxio-common`. |
 | ~~P3-22~~ | ~~`maxio-common` crate~~ | storage | M | **Promoted to P1-22** on Priority 1 critical path. | — |
 | P3-23 | Crate boundary CI enforcement | ci | S | Automate dependency rules from P3-04 / shared-library plan: e.g. `maxio-admin` must not depend on `maxio` or `maxio-server`; `maxio-common` must not depend on `axum` or `maxio-storage`. | `cargo deny` bans or CI script fails on forbidden edges; documented in `docs/plans/2026-06-29-shared-libraries.md`; passes on current graph after P3-17/P3-22. |
-| P3-24 | Permissive-only license policy (mandatory) | ci | S | **Requirement** — no copyleft, weak copyleft, or non-standard licenses in production artifacts; prefer Apache-2.0/MIT for new deps. Partially enforced via `deny.toml` + CI `licenses` job; npm/UI path needs explicit check. See `docs/licensing.md`. | `docs/licensing.md` mandatory section + PR checklist; `deny.toml` documents forbidden categories; `make deny` in CI (existing); add `ui/` npm license audit step (allow-list Apache/MIT/BSD/ISC/0BSD/CC0); contributors reference policy in README or CONTRIBUTING. |
-| ~~P3-25~~ | ~~Optional edge LB (`maxio-edge` / Pingora)~~ | ops | L | **Moved to [knx-edge](https://github.com/smartedge-in/knx-edge)** — out of tree. MaxIO uses **Caddy** (Apache-2.0), **Traefik** (MIT), or K8s **MetalLB** / Ingress (P3-26); embedded Pingora in `maxio-server` rejected. See `docs/out-of-tree/knx-edge.md`. | — |
-| P3-26 | Permissive ingress & HA runbook | ops | S | **Requirement** — official MaxIO deployment docs must not prescribe GPL edge/HA (keepalived, HAProxy CE). Prefer Caddy, Traefik, Envoy, MetalLB, kube-vip. See `docs/plans/2026-06-29-permissive-ingress-ha.md`. | Operations + P3-18/19 examples use Caddy; GPL tools marked not recommended; HA patterns without keepalived documented. |
+| P3-24 | Permissive-only license policy (mandatory) | ci | S | **P1-GA** — no copyleft in production artifacts; Raft deps (P1-16) must pass. See `docs/licensing.md`. | `deny.toml`; `make deny` in CI; npm license audit for `ui/`. |
+| ~~P3-25~~ | ~~Optional edge LB (`maxio-edge` / Pingora)~~ | ops | L | **Moved to [knx-edge](https://github.com/smartedge-in/knx-edge)** — out of tree. See `docs/out-of-tree/knx-edge.md`. | — |
+| P3-26 | Permissive ingress & HA runbook | ops | S | **P1-GA** — no GPL edge (keepalived, HAProxy CE). See `docs/plans/2026-06-29-permissive-ingress-ha.md`. | Caddy-first examples; GPL tools not recommended; HA without keepalived. |
+| P3-27 | S3 event notifications | api | L | **P1-ENT** — webhook/subscriber integrations. | Webhook target; durable spool; `ObjectCreated` / `ObjectRemoved`; integration test. |
+| P3-28 | IAM bucket policies v2 | api | L | **P1-ENT** — Deny, conditions, expanded actions. | Deny precedence; `Condition` operators; `docs/s3-compatibility.md` updated. |
+| P3-29 | Multi-tenancy | auth | L | **P1-ENT** — tenant boundary on buckets and credentials. | Tenant-scoped requests; admin lists tenant only; default tenant migration. |
+| P3-30 | OpenStack Swift API | api | XL | **Future** — only if OpenStack required. | Swift object paths; container listing; smoke test. |
+| P3-31 | OpenStack Keystone authentication | auth | L | **Future** — pairs with P3-30. | Keystone token validation; optional feature flag. |
+| ~~P3-32~~ | ~~Bitrot scanner & healing~~ | storage | L | **Promoted to P1-25**. | — |
+| P3-33 | Lifecycle transitions & non-current expiry | storage | M | **P1-ENT** — extend P3-01 expiration. | `transition_days`; `noncurrent_expiration_days`; versioned purge tests. |
+| P3-34 | S3 bucket replication API (CRR) | storage | XL | **Deferred** — geo-DR after P1-14; builds on mutation log. | `PutBucketReplication` / `Get` / `Delete`; primary→standby test; lag metrics. |
+| P3-35 | External KMS (SSE-KMS compatible) | security | L | **P1-ENT** — regulated workloads. | Pluggable KMS; Vault transit or equivalent; `aws:kms` path; deny.toml-clean. |
+| P3-36 | Published S3 compatibility matrix | docs | S | **P1-GA** — procurement / integration gate. | Matrix in repo; CI sync with tests; linked from README. |
+| P3-37 | Observability reference stack | ops | M | **P1-GA** — dashboards beyond `/metrics`. | `deploy/compose/observability.yml`; Grafana JSON; OTel doc optional. |
+| P3-38 | OIDC claims in bucket policies | auth | L | **P1-ENT** — after P3-08 + P3-28. | `jwt:groups` / `jwt:roles` conditions; Entra/Keycloak example. |
+| P3-39 | S3 server access logging | api | M | **P1-ENT** — per-bucket log delivery. | `?logging` config; deliver to target bucket; integration test. |
+| P3-40 | Storage API fuzz testing in CI | ci | M | **Future** — nightly acceptable. | Fuzz harness for SigV4, paths, policy; seed corpus. |
+| P3-41 | One-click bare-metal install script | ops | S | **Future** — after P3-18. | `scripts/install-maxio.sh`; checksum verify; README link. |
+| P3-42 | Optional native TLS termination | ops | M | **Future** — edge/single-node convenience. | `--tls-cert` / `--tls-key`; proxy path remains default. |
+| P3-43 | RustFS / enterprise parity epic | storage | XL | **P1-ENT** — see Enterprise GA+ tiers above. | Tier 2–3 complete after GA. |
+| P3-44 | Production GA milestone | ops | M | **Milestone** — closes when **P3-52** epic done. | P1-14 + P3-52; README warning removed; CHANGELOG GA; Helm not required. |
+| P3-45 | Cilium eBPF deployment guide | ops | M | **Future** — plain K8s YAML; after P1-24. See `docs/plans/2026-06-29-cilium-ebpf-deployment.md`. | Doc + `deploy/k8s/` examples; server-tier LB notes. |
+| P3-46 | Multi-node Service topology (K8s) | ops | M | **Future** — safe Service patterns for P1-14 tiers. | Plain YAML per tier; NetworkPolicy examples. |
+| P3-47 | Object lock / WORM / legal hold | storage | L | **P1-ENT** — immutability for regulated industries. | Governance retention; legal hold API subset; tests; docs vs versioning. |
+| P3-48 | Backup automation & verified restore | ops | M | **P1-GA** — scheduled backup beyond manual copy. | Backup script or `maxio-admin backup`; checksum verify; restore drill. |
+| P3-49 | Disaster recovery runbook (RPO/RTO) | docs | M | **P1-GA** — formal DR for single-node and cluster. | DR section in `docs/operations.md`; failover drills; tied to P1-24. |
+| P3-50 | Security audit & hardening checklist | security | M | **P1-GA** — pen-test prep. | `docs/security-audit.md`; threat model; remediated findings tracked. |
+| P3-51 | Production SLA & incident response | ops | S | **P1-GA** — support and on-call playbook. | SLA section in `docs/operations.md`; severity levels; key metrics. |
+| P3-52 | Enterprise GA epic | ops | L | **P1-GA epic** — see Enterprise GA section. | All GA rows + P1-14; P3-44 milestone closes. |
 
-### RustFS parity gaps
+### Capability map (reference)
 
-Items below close feature and ops gaps identified vs [RustFS](https://github.com/rustfs/rustfs) (2026-06). Overlaps with existing epics (P3-09–16, P3-19) are called out; new work is additive. Tracked under epic **P3-43**.
-
-| ID | Title | Area | Effort | Description | Acceptance criteria |
-|----|-------|------|--------|-------------|-------------------|
-| P3-27 | S3 event notifications | api | L | RustFS ships webhook/SQS-style event delivery on object/bucket mutations. MaxIO has audit log only — no subscriber integrations. | `PUT/GET/DELETE ?notification` (or equivalent config API); at least **webhook** target; durable queue/spool on disk; `ObjectCreated` / `ObjectRemoved` / `BucketCreated` event types; integration test with test HTTP receiver; env-config quickstart in `docs/operations.md`. |
-| P3-28 | IAM bucket policies v2 | api | L | MaxIO policy v1 is Allow-only, `Principal:*`, two actions. RustFS supports IAM-style `2012-10-17` policies with Deny, conditions, and richer actions. | Parser/evaluator for Deny precedence, `Condition` operators (`StringEquals`, `IpAddress`, etc.), expanded action set (`s3:*` subset documented); integration tests for deny-wins and condition match; `docs/s3-compatibility.md` updated. |
-| P3-29 | Multi-tenancy | auth | L | RustFS has first-class multi-tenant isolation. MaxIO has multiple static credentials in `.maxio-credentials.json` but no tenant boundary on buckets or admin scope. | Tenant ID on buckets and credentials; requests scoped to tenant; admin API lists only tenant buckets; cross-tenant access denied; migration path for single-tenant deployments (default tenant). |
-| P3-30 | OpenStack Swift API | api | XL | RustFS exposes Swift object API alongside S3. MaxIO is S3-only. | Swift `PUT/GET/HEAD/DELETE` object paths; container listing; `X-Auth-Token` auth path or documented bridge to Keystone (P3-31); compatibility matrix row per endpoint; integration smoke test. |
-| P3-31 | OpenStack Keystone authentication | auth | L | RustFS integrates Keystone for Swift and console. MaxIO has Keycloak for console (P3-08) but not Keystone/`X-Auth-Token`. | Keystone token validation middleware; configurable Keystone URL; Swift and/or S3 requests accept valid service tokens; docs for OpenStack deployment; optional dependency feature flag. |
-| ~~P3-32~~ | ~~Bitrot scanner & healing~~ | storage | L | **Promoted to P1-25** (cluster-aware EC scanner on Priority 1). | — |
-| P3-33 | Lifecycle transitions & non-current expiry | storage | M | P3-01 covers prefix **expiration** only. RustFS lifecycle includes transitions and non-current version rules (under broader lifecycle). | `LifecycleRule` supports `transition_days` / storage class stub and `noncurrent_expiration_days` for versioned buckets; housekeeping applies rules; `PUT/GET ?lifecycle` schema versioned; tests for versioned non-current purge. |
-| P3-34 | S3 bucket replication API (CRR) | storage | XL | RustFS has **bucket replication** available. MaxIO defers to operator sync (P3-09) and internal log/agent (P3-10/11) without S3 CRR XML. | `PutBucketReplication` / `GetBucketReplication` / `DeleteBucketReplication`; replicate to standby MaxIO endpoint; replication status headers on objects; lag metrics; builds on P3-10 event log; integration test primary→standby; extends P3-12 epic. |
-| P3-35 | External KMS (SSE-KMS compatible) | security | L | RustFS is adding KMS. MaxIO supports SSE-S3/SSE-C only and rejects AWS SSE-KMS requests today. | Pluggable KMS backend trait; at least one backend (e.g. HashiCorp Vault transit or static key service); `aws:kms` SSE header path documented; keys never logged; deny.toml-clean deps; integration test encrypt/decrypt roundtrip. |
-| P3-36 | Published S3 compatibility matrix | docs | S | RustFS maintains `docs/architecture/s3-compatibility-matrix.md`. MaxIO has narrative docs only. | Checked-in matrix (operation × status: supported / partial / N/A); CI or PR checklist keeps matrix in sync with integration tests; linked from README and `docs/s3-compatibility.md`. |
-| P3-37 | Observability reference stack | ops | M | RustFS documents Compose profiles with Grafana, Prometheus, Jaeger. MaxIO exposes `/metrics` but no reference dashboards or tracing. | `deploy/compose/observability.yml` (or Helm subchart) scraping MaxIO metrics; sample Grafana dashboard JSON; optional OpenTelemetry trace export doc; README quickstart. |
-| P3-38 | OIDC claims in bucket policies | auth | L | RustFS maps OIDC `groups`/`roles` (e.g. Entra `roles_claim`) into IAM evaluation. MaxIO Keycloak (P3-08) is console-only — policies do not see JWT claims. | After P3-08 + P3-28: policy conditions on `jwt:groups`, `jwt:roles` (configurable claims); console admin role via policy; Entra/Keycloak example in docs; integration test with mock OIDC claims. |
-| P3-39 | S3 server access logging | api | M | RustFS supports access logging. MaxIO has structured audit log to stderr but not S3-style per-bucket delivery to another bucket. | `PUT/GET/DELETE ?logging` per bucket; log lines (combined log format or S3 canonical); deliver to target bucket prefix; configurable enable; integration test validates log object creation. |
-| P3-40 | Storage API fuzz testing in CI | ci | M | RustFS includes `fuzz/` targets. MaxIO relies on integration tests only. | `cargo-fuzz` or libFuzzer harness for SigV4 parser, path/key validation, policy parser; CI job on main (nightly acceptable); seed corpus committed; documented in `CLAUDE.md`. |
-| P3-41 | One-click bare-metal install script | ops | S | RustFS provides `curl \| bash` installer. MaxIO documents manual build/Docker only. | `scripts/install-maxio.sh` (or documented curl pipe) for Linux amd64/arm64; installs binary + systemd unit stub; checksum verification; linked from README. |
-| P3-42 | Optional native TLS termination | ops | M | RustFS supports `RUSTFS_TLS_PATH`. MaxIO requires external Caddy/Traefik (P3-26). Optional native TLS reduces moving parts for edge/single-node. | `--tls-cert` / `--tls-key` or env equivalents; TLS on S3 and console listeners; documented as optional (proxy path remains default); integration test with self-signed cert. |
-| P3-43 | RustFS parity epic | storage | XL | **Epic** — competitive gaps vs RustFS; **subordinate to P1-14** (multi-replica ships first). | Tier 1 (ops/docs): P3-36, P3-37, P3-41, P3-05. Tier 2 (S3 product): P3-27, P3-28, P3-33, P3-39. Tier 3 (enterprise): P3-29, P3-35, P3-38. Tier 4 (protocol): P3-30, P3-31, P3-34. Epic closes when Tier 1–3 complete after P1-14. |
-| P3-44 | Production GA milestone | ops | M | README warns against production use. | Remove dev-only warning when criteria met: **P1-14** + P3-18 + P3-26 done; P3-06 smoke tests green; security audit checklist; CHANGELOG GA entry; `docs/operations.md` production SLA section. Helm (P3-19) not required. |
-
-### Kubernetes / Cilium (eBPF)
-
-MaxIO on Kubernetes with [Cilium](https://cilium.io/) as CNI: use eBPF for datapath throughput and observability. **eBPF does not replace Raft** — pair with **P1-14** distributed tiers. See `docs/plans/2026-06-29-cilium-ebpf-deployment.md`.
-
-| ID | Title | Area | Effort | Description | Acceptance criteria |
-|----|-------|------|--------|-------------|-------------------|
-| P3-45 | Cilium eBPF deployment guide | ops | M | Document MaxIO on Cilium: kube-proxy replacement, eBPF Service LB, Gateway/Ingress TLS, optional WireGuard, Hubble. Plain K8s YAML examples — no Helm required. | Doc in `docs/operations.md`; example manifests under `deploy/k8s/`; server-tier LB for P1-20; streaming upload notes. |
-| P3-46 | Multi-node Service topology (K8s) | ops | M | Safe Service patterns for **P1-14** tiers — not single-PVC multi-replica. | Plain YAML per tier in `deploy/k8s/`; NetworkPolicy examples; documents unsafe combined-stack multi-replica. |
-
-**Suggested Cilium order:** P1-24 harness → P3-45 → P3-46. Helm (P3-19) optional later.
-
-**RustFS parity — already covered elsewhere (no new ID)**
-
-| RustFS capability | MaxIO backlog |
-|-------------------|---------------|
-| Distributed / multi-node mode | **P1-14** → P1-17, P1-20, P1-21 |
-| Operator + agent replication | Deferred (P3-09–P3-11) |
-| Kubernetes Helm chart | P3-19 (future; plain K8s YAML for P1-14) |
-| ARM64 images | P3-05 |
-| OIDC console login | P3-08 (+ P3-38 for IAM) |
-| Lifecycle (basic expiration) | ~~P3-01~~ (extend via P3-33) |
-| Erasure coding | Single-node shipped; **distributed EC via P1-18, P1-19, P1-25** |
-| Prometheus metrics | ~~P2-07~~ (dashboards via P3-37) |
-| Versioning, multipart, encryption | Shipped |
-
-**Suggested RustFS parity order:** P3-36 → P3-27 → P3-28 → P3-33 → P3-32 → P3-37 → P3-34 (with P3-10) → P3-29 → P3-30/31 (if OpenStack required).
+| Capability | Backlog |
+|------------|---------|
+| Multi-node cluster | **P1-14** → P1-17, P1-20, P1-21, P1-24 |
+| Distributed EC | P1-18, P1-19, P1-25 |
+| Enterprise GA | **P3-52** → P3-18, P3-26, P3-36, P3-37, P3-08, P3-06, P3-48–51, P3-24, P3-05 |
+| Regulated / multi-tenant | **P3-43** → P3-28, P3-35, P3-29, P3-38, P3-39, P3-27, P3-47, P3-33 |
+| Geo-DR / CRR | Deferred — P3-34, P3-09 |
+| Edge LB (Pingora) | [knx-edge](https://github.com/smartedge-in/knx-edge) (P3-25 moved) |
+| Helm | P3-19 (future) |
+| Cilium eBPF | P3-45, P3-46 (future) |
 
 ---
 
@@ -232,11 +300,21 @@ Reference only — no backlog action unless regressions appear.
 
 ## Suggested sprint order
 
-**Completed (foundation):** P0, P1 security, P1 S3 compat, single-node EC (P1-12/13, P2-09/10/11), P2 ops tooling ✓
+**Phase 0 — Done (foundation):** P0, P1 security, P1 S3 compat, single-node EC, P2 ops tooling ✓
 
-**Active — Priority 1 (multi-replica & distributed EC):** P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19 → P1-20 → P1-21 → P1-24 → P1-25 → **P1-14 epic close**
+**Phase 1 — Multi-replica & distributed EC (product #1):**
+P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19 → P1-20 → P1-21 → P1-24 → P1-25 → **P1-14 close**
+(parallel: P3-24 license gate for Raft dep)
 
-**After P1-14:** P3-18 (bare metal), P3-24, P3-08, P3-43 RustFS parity (subordinate), P3-44 GA. **Future:** P3-19 Helm, P3-45/46 Cilium polish.
+**Phase 2 — Enterprise GA (single-region HA production):**
+P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-05 → **P3-52 / P3-44 close**
+
+**Phase 3 — Enterprise GA+ (regulated / multi-tenant):**
+P3-28 → P3-35 → P3-29 → P3-38 → P3-39 → P3-27 → P3-47 → P3-33 → **P3-43 close**
+
+**Phase 4 — Future / optional:**
+P3-34 CRR · P3-09 operator sync · P3-19 Helm · P3-45/46 Cilium · P3-40 fuzz · P3-41 install · P3-42 native TLS · P3-30/31 OpenStack
+(parallel anytime: P3-17 admin CLI boundary, P3-23 crate boundary CI)
 
 ---
 
