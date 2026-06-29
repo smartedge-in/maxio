@@ -55,7 +55,12 @@ Floating VIP (VRRP) is optional; **permissive VIP** on K8s uses **MetalLB / kube
 
 ### First-party `maxio-edge` (Pingora)
 
-**Remains dropped (P3-25)** for maintenance cost. **Caddy** (Apache-2.0) covers the same permissive-license goal without a MaxIO-owned proxy binary. Revisit Pingora only if a concrete gap in Caddy/Traefik/MetalLB appears.
+**Remains dropped (P3-25)** inside MaxIO. **Caddy** (Apache-2.0) is the default permissive path.
+
+**Optional sibling project:** a **separate repo** (not MaxIO) could build an Apache-2.0
+L7 gateway on Pingora — nginx-like in Phase 1, permissive VIP in Phase 2. See
+[`docs/out-of-tree/permissive-ha-gateway-rfc.md`](../out-of-tree/permissive-ha-gateway-rfc.md).
+MaxIO may document example configs but does not own that project.
 
 ## P3-18 / P3-19 deliverables (updated)
 
