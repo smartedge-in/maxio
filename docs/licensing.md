@@ -23,9 +23,9 @@ A full graph check — advisories, duplicate crates, sources — is available vi
 
 `deny.toml` allows only licenses present in the production dependency graph:
 
-- Apache-2.0, MIT, BSD-3-Clause, Unicode-3.0
+- Apache-2.0, MIT, BSD-3-Clause, ISC, Unicode-3.0
 
-Other common permissive identifiers (ISC, Zlib, BSD-2-Clause, CC0-1.0, 0BSD) are acceptable
+Other common permissive identifiers (Zlib, BSD-2-Clause, CC0-1.0, 0BSD) are acceptable
 in principle but are not listed until a dependency actually requires them.
 
 ### Advisory policy
@@ -45,11 +45,13 @@ runtime behavior. These are documented and ignored in `deny.toml`:
 | Change | Rationale |
 |--------|-----------|
 | Replaced `dirs` in `maxio-admin` with `XDG_CONFIG_HOME` / `HOME` resolution | Removes MPL-2.0 `option-ext` from the workspace |
-| Switched `reqwest` from `rustls-tls` to `native-tls-vendored` | Avoids `ring` (dual Apache/ISC) and `webpki-roots` (CDLA-Permissive-2.0); bundles OpenSSL (Apache-2.0) for portable builds |
+| `reqwest` uses `native-tls-vendored` (maxio-server, maxio-admin, integration tests) | Avoids `webpki-roots` (CDLA-Permissive-2.0) and rustls-only deps; bundles OpenSSL (Apache-2.0) for portable builds |
+| `jsonwebtoken` (Keycloak JWT validation) | Adds `ring` (Apache-2.0 AND ISC) and `simple_asn1` (ISC); ISC added to `deny.toml` allow-list |
 | Embedded UI fonts: Inter + JetBrains Mono | Replaces OFL-1.1 Geist fonts with MIT-licensed `@fontsource` packages |
 
-`maxio-admin` and integration tests use OpenSSL via `reqwest`'s `native-tls-vendored` feature
-(bundled at build time). Runtime images ship `ca-certificates` for TLS trust anchors.
+`maxio-server` (Keycloak client), `maxio-admin`, and integration tests use OpenSSL via
+`reqwest`'s `native-tls-vendored` feature (bundled at build time). Runtime images ship
+`ca-certificates` for TLS trust anchors.
 
 ## UI (npm) dependencies
 
