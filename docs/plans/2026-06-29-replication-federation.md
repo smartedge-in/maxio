@@ -58,6 +58,8 @@ Federate bucket listings across independent MaxIO nodes; objects fetched on dema
 3. **Phase 2 (P3-10):** Storage trait + durable mutation event log.
 4. **Phase 3 (P3-11):** Replication agent applying the log on a standby node.
 
+**Scale-out track (separate):** Live multi-node replicas use **dual independent Raft** clusters (P3-13 → P3-14 storage, P3-15 server). See `docs/plans/2026-06-29-distributed-scale-raft.md`. P3-09–P3-11 remain the interim operator DR path without Raft.
+
 ---
 
 ## Phase 1 — Operator sync runbook (P3-09)

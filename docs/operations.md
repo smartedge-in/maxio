@@ -320,9 +320,19 @@ Not implemented. Design and phased rollout:
 
 Erasure coding (above) is single-node bitrot recovery, not geo-replication.
 
-### Asymmetric scale-out (planned, P3-13)
+### Asymmetric scale-out (planned, P3-13+)
 
-The `maxio-storage` / `maxio-server` crate split (P3-04) does not yet allow different replica counts per tier. Today every pod is a full stack with its own `data_dir`. Future work (P3-13, depends on P3-10 `StorageBackend`) will let operators scale API/console pods independently of storage nodes.
+The `maxio-storage` / `maxio-server` crate split (P3-04) does not yet allow different replica counts per tier. Today every pod is a full stack with its own `data_dir`.
+
+Target architecture (`docs/plans/2026-06-29-distributed-scale-raft.md`):
+
+| Tier | Raft | Backlog |
+|------|------|---------|
+| `maxio-storage` | Independent storage Raft quorum | P3-14 |
+| `maxio-server` | Independent server Raft quorum | P3-15 |
+| Epic (asymmetric replicas) | Both tiers | P3-13 |
+
+Each tier elects its own leader and maintains its own log. Replica counts may differ (e.g. 5 storage nodes, 3 server nodes).
 
 ## Docker
 
