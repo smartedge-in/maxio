@@ -6,7 +6,7 @@
 
 ## Project
 
-**[knx-edge](https://github.com/smartedge-in/knx-edge)** — separate Apache-2.0 repo (Pingora L7 gateway).
+**knx-edge** (working title) — separate Apache-2.0 repository (Pingora L7 gateway), not part of MaxIO.
 
 ## Problem
 
@@ -141,7 +141,7 @@ remains the **official** permissive path.
 
 ## Suggested next steps (if approved)
 
-1. Repo: [`github.com/smartedge-in/knx-edge`](https://github.com/smartedge-in/knx-edge) (Apache-2.0).
+1. Publish as a separate Apache-2.0 repository (out of tree from MaxIO).
 2. Spike: Pingora proxy → 2 static upstreams, health check, TLS.
 3. Publish MaxIO example config (reference only, in both repos).
 4. Phase 2 RFC only after Phase 1 adoption feedback.

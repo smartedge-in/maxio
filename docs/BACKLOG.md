@@ -148,6 +148,17 @@ Items below close feature and ops gaps identified vs [RustFS](https://github.com
 | P3-43 | RustFS parity epic | storage | XL | **Epic** — track closing competitive gaps vs RustFS without abandoning MaxIO principles (filesystem simplicity, permissive-only deps). Distinct from but overlaps P3-12 (replication), P3-13 (distributed), P3-19 (Helm). | Tier 1 (ops/docs): P3-36, P3-37, P3-41, P3-05. Tier 2 (S3 product): P3-27, P3-28, P3-33, P3-39. Tier 3 (enterprise): P3-29, P3-35, P3-38. Tier 4 (scale/protocol): P3-30, P3-31, P3-34 + P3-12/13. Tier 5 (data integrity): P3-32. Epic closes when Tier 1–3 complete and Tier 4 has RFC or shipped path. |
 | P3-44 | Production GA milestone | ops | M | README warns against production use. RustFS ships beta/production releases with install/Helm paths. | Remove dev-only warning when criteria met: P3-18 + P3-19 + P3-26 done; P3-06 smoke tests green; security audit checklist; CHANGELOG GA entry; `docs/operations.md` production SLA section. |
 
+### Kubernetes / Cilium (eBPF)
+
+MaxIO on Kubernetes with [Cilium](https://cilium.io/) as CNI: use eBPF for datapath throughput and observability. **eBPF does not replace storage replication** — pair with P3-09–12 (active-passive) or P3-13–16 (distributed tiers). See `docs/plans/2026-06-29-cilium-ebpf-deployment.md`.
+
+| ID | Title | Area | Effort | Description | Acceptance criteria |
+|----|-------|------|--------|-------------|-------------------|
+| P3-45 | Cilium eBPF deployment guide & Helm overlay | ops | M | Document MaxIO on Cilium: kube-proxy replacement, eBPF Service LB, Gateway/Ingress TLS, optional WireGuard node encryption, Hubble flow visibility. Clarify what eBPF improves (client→Service, server↔storage RPC, replication traffic) vs what MaxIO must implement (multi-node consistency). | `docs/plans/2026-06-29-cilium-ebpf-deployment.md`; `deploy/helm/maxio/values-cilium.yaml` (requires P3-19 chart): `kubeProxyReplacement`, socket LB, Ingress/Gateway, `MAXIO_TRUSTED_PROXIES` for pod/ingress CIDRs; **primary-only** Service endpoints for active-passive (P3-09); server-tier LB pattern for P3-15; streaming upload notes (no buffering); Hubble + Prometheus troubleshooting section in `docs/operations.md`. |
+| P3-46 | Multi-node Service topology for replication | ops | M | Kubernetes `replicas>1` on one RWO PVC is unsafe. Define Cilium-friendly Service/EndpointSlice patterns for primary + standby + `maxio-replicate` (P3-11) and future server/storage tiers (P3-13). | Helm templates: primary Service (write traffic), optional internal Service for replication agent; standby excluded from client Endpoints until failover; NetworkPolicy examples (Cilium CRD); failover runbook updates P3-09; integration test or documented manual failover on kind+cilium. |
+
+**Suggested Cilium order:** P3-19 (base chart) → P3-45 → P3-46 (with P3-09); revisit when P3-13 server/storage tiers land.
+
 **RustFS parity — already covered elsewhere (no new ID)**
 
 | RustFS capability | MaxIO backlog |
