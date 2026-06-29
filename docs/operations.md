@@ -326,13 +326,14 @@ The `maxio-storage` / `maxio-server` crate split (P3-04) does not yet allow diff
 
 Target architecture (`docs/plans/2026-06-29-distributed-scale-raft.md`):
 
-| Tier | Raft | Backlog |
-|------|------|---------|
-| `maxio-storage` | Independent storage Raft quorum | P3-14 |
+| Tier | Consensus | Backlog |
+|------|-----------|---------|
+| `maxio-ui` | None (stateless static SPA) | P3-16 |
 | `maxio-server` | Independent server Raft quorum | P3-15 |
-| Epic (asymmetric replicas) | Both tiers | P3-13 |
+| `maxio-storage` | Independent storage Raft quorum | P3-14 |
+| Epic (asymmetric replicas) | All three tiers | P3-13 |
 
-Each tier elects its own leader and maintains its own log. Replica counts may differ (e.g. 5 storage nodes, 3 server nodes).
+Storage and server each elect their own Raft leader. UI replicas are interchangeable and hold no session state. Replica counts may differ (e.g. 3 UI, 3 server, 5 storage). See `docs/plans/2026-06-29-ui-scale-out.md`.
 
 ## Docker
 

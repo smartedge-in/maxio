@@ -10,8 +10,10 @@ Split the monolithic `maxio` library into `maxio-storage` and `maxio-server` cra
 maxio/                  # facade + binary
 crates/
   maxio-storage/        # filesystem, crypto, keys, policy, quota
-  maxio-server/         # api, auth, server, embedded UI, metrics, audit
+  maxio-server/         # api, auth, metrics, audit (UI embed → P3-16 extract)
+  maxio-ui/             # planned (P3-16) — stateless static console server
   maxio-admin/          # unchanged; depends on facade
+ui/                     # Svelte source → built assets for maxio-ui
 ```
 
 ## Boundaries
@@ -41,4 +43,4 @@ Clients ──► maxio-server × N   Server Raft (own quorum, P3-15)
             maxio-storage × M   Storage Raft (own quorum, P3-14)
 ```
 
-Design: `docs/plans/2026-06-29-distributed-scale-raft.md`. Today both crates ship in one process with a local `data_dir` and no Raft.
+Design: `docs/plans/2026-06-29-distributed-scale-raft.md`, `docs/plans/2026-06-29-ui-scale-out.md`. Today server embeds UI and both ship with a local `data_dir` and no Raft.

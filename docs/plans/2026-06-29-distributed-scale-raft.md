@@ -26,11 +26,17 @@ Coupling both tiers into one Raft group would force identical replica counts and
 
 ## Target topology
 
+Three tiers scale **asymmetrically**. Only storage and server use Raft; UI is stateless static (P3-16).
+
 ```
-                         ┌─────────────────────────────────────┐
+                    ┌─────────────────────────┐
+                    │   maxio-ui × K          │  no Raft — static SPA only
+ Browser ──────────►└───────────┬─────────────┘
+              /api, S3         │
+                         ┌─────▼───────────────────────────────┐
                          │         Server Raft cluster          │
                          │  (maxio-server × N, own quorum)      │
- Clients ──HTTP/S3──────►│  leader: config epoch, route table   │
+                         │  leader: config epoch, route table   │
                          │  followers: serve reads, forward     │
                          │           control writes to leader   │
                          └──────────────────┬──────────────────┘
@@ -44,6 +50,8 @@ Coupling both tiers into one Raft group would force identical replica counts and
                          │             + local object payloads  │
                          └─────────────────────────────────────┘
 ```
+
+UI separation: `docs/plans/2026-06-29-ui-scale-out.md`.
 
 ### Storage Raft replicates (v1 sketch)
 
@@ -90,11 +98,17 @@ P3-09–P3-11 remain valid for geo-DR and migration. P3-13+ is the supported way
 - Stateless S3 workers join server cluster; pull routing snapshot
 - Health: `/readyz` fails when server cannot reach storage Raft quorum
 
-### Phase C — Asymmetric operations (P3-13 closes)
+### Phase C — Stateless UI tier (P3-16)
 
-- Helm/K8s charts with independent `replicas` and PDBs per tier
-- HPA on server tier; storage tier scaled manually or via custom metric (Raft lag)
-- Integration test: 3 storage + 2 server nodes; kill storage leader → elect new leader → PUT/GET succeed
+- `crates/maxio-ui` serves static assets; remove `rust-embed` from distributed `maxio-server`
+- Ingress: `/ui` → UI service, `/api` + S3 → server service
+- See `docs/plans/2026-06-29-ui-scale-out.md`
+
+### Phase D — Asymmetric operations (P3-13 closes)
+
+- Helm/K8s charts with independent `replicas` and PDBs per tier (UI, server, storage)
+- HPA on UI and server tiers; storage tier scaled manually or via Raft lag metric
+- Integration test: 2 UI + 2 server + 3 storage; kill storage leader → elect new leader → PUT/GET succeed
 
 ## Non-goals (v1 Raft)
 
@@ -113,6 +127,7 @@ P3-09–P3-11 remain valid for geo-DR and migration. P3-13+ is the supported way
 ## Acceptance (epic P3-13)
 
 - [ ] Storage and server each run a distinct Raft cluster with independent quorums
-- [ ] Asymmetric replica counts documented and tested (e.g. 5 storage + 3 server)
-- [ ] Leader failover integration tests per tier
-- [ ] Single-node colocated mode remains default (Raft disabled, `replicas=1`)
+- [ ] UI runs as stateless `maxio-ui` tier with independent replica count (P3-16)
+- [ ] Asymmetric replica counts documented and tested (e.g. 3 UI + 3 server + 5 storage)
+- [ ] Leader failover integration tests for storage and server tiers
+- [ ] Single-node colocated mode remains default (Raft disabled, optional UI embed)
