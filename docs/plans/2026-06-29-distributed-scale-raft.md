@@ -4,7 +4,7 @@
 
 **Priority 1** — active product direction. See `docs/plans/2026-06-29-multi-replica-raft-priority.md`.
 
-**Completed prerequisites:** P1-15 (`StorageBackend`), P1-16 (OpenRaft spike), P1-22 (`maxio-common`). **Active:** P1-17 storage Raft scaffolding in `crates/maxio-storage/src/raft/`.
+**Completed:** P1-14 epic closed. Storage Raft in `crates/maxio-cluster/`; mutation types in `crates/maxio-storage/src/raft/`. Server tier uses routing snapshot (`ClusterState`); full Server OpenRaft quorum is future hardening.
 
 ## Requirement
 

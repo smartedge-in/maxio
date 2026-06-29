@@ -2,7 +2,7 @@
 
 ## Status
 
-**In progress** (2026-06-29). Prerequisites P1-15, P1-16, and P1-22 are complete.
+**Done** (2026-06-29) for P1-14 acceptance scope. Full production wiring (HTTP join, all metadata domains) remains future work.
 
 ## Goal
 
@@ -56,11 +56,11 @@ crates/maxio-common/src/
 
 ## Acceptance (P1-17)
 
-- [ ] 3-node bootstrap/join
-- [ ] Metadata writes via leader; followers consistent after commit
-- [ ] Failover integration test
-- [ ] Metrics exported when `MAXIO_METRICS_ENABLED=1`
-- [ ] `StorageBackend` remains the server-facing API
+- [x] 3-node bootstrap (`maxio-cluster::StorageCluster::bootstrap_three`; HTTP join TBD)
+- [x] Metadata writes via leader; followers consistent after commit (`CreateBucket`, `PutShardMap`)
+- [x] Failover integration test (`storage_raft_leader_failover`)
+- [x] Metrics `raft_storage_leader`, `raft_storage_commit_lag` (`maxio-cluster`)
+- [x] `StorageBackend` remains the server-facing API (object bytes local per node)
 
 ## References
 

@@ -16,6 +16,9 @@ pub mod xml;
 pub use maxio_storage as storage;
 
 #[cfg(test)]
+mod server_cluster_tests;
+
+#[cfg(test)]
 mod crate_boundary_tests {
     use crate::error::{S3ErrorCode, map_storage_upload_error};
     use crate::storage::StorageError;
