@@ -53,14 +53,14 @@ Option C — DNS only
 
 Floating VIP (VRRP) is optional; **permissive VIP** on K8s uses **MetalLB / kube-vip**, not keepalived.
 
-### First-party `maxio-edge` (Pingora)
+### Pingora edge (`knx-edge`)
 
-**Remains dropped (P3-25)** inside MaxIO. **Caddy** (Apache-2.0) is the default permissive path.
+**Not in MaxIO.** Backlog P3-25 (`maxio-edge`) is dropped. **Caddy** (Apache-2.0) is the
+default permissive path.
 
-**Optional sibling project:** out-of-tree **knx-edge** (Apache-2.0 Pingora L7 gateway;
-Phase 1 proxy/LB, Phase 2 permissive VIP research). See
-[`docs/out-of-tree/permissive-ha-gateway-rfc.md`](../out-of-tree/permissive-ha-gateway-rfc.md).
-MaxIO may document example configs but does not own that project.
+**Optional alternative:** [knx-edge](https://github.com/smartedge-in/knx-edge) — separate
+Apache-2.0 Pingora L7 gateway (Phase 1 proxy/LB shipped; Phase 2 permissive VIP research).
+MaxIO links example configs only. See [`docs/out-of-tree/knx-edge.md`](../out-of-tree/knx-edge.md).
 
 ## P3-18 / K8s deliverables (updated)
 
