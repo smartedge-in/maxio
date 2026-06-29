@@ -137,6 +137,14 @@ mod tests {
             metrics_port: 0,
             audit_log: false,
             metadata_index: false,
+            keycloak_enabled: false,
+            keycloak_base_url: String::new(),
+            keycloak_realm: "kubenexis".into(),
+            keycloak_client_id: "maxio-ui".into(),
+            keycloak_client_secret: None,
+            keycloak_skip_tls_verify: false,
+            keycloak_jwks_url: None,
+            keycloak_issuer: None,
         }
     }
 

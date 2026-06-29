@@ -148,6 +148,66 @@ pub struct Config {
     /// Enable optional SQLite metadata index for faster ListObjects on large buckets.
     #[arg(long, env = "MAXIO_METADATA_INDEX", default_value = "false")]
     pub metadata_index: bool,
+
+    /// Enable Keycloak OIDC for console authentication (S3 SigV4 keys remain unchanged).
+    #[arg(long, env = "MAXIO_KEYCLOAK_ENABLED", default_value = "false")]
+    pub keycloak_enabled: bool,
+
+    /// Keycloak base URL, e.g. `https://keycloak.example` (no trailing slash).
+    #[arg(long, env = "MAXIO_KEYCLOAK_BASE_URL", default_value = "")]
+    pub keycloak_base_url: String,
+
+    /// Keycloak realm name.
+    #[arg(long, env = "MAXIO_KEYCLOAK_REALM", default_value = "kubenexis")]
+    pub keycloak_realm: String,
+
+    /// OIDC client id used for the console (resource-owner password + refresh grants).
+    #[arg(long, env = "MAXIO_KEYCLOAK_CLIENT_ID", default_value = "maxio-ui")]
+    pub keycloak_client_id: String,
+
+    /// Optional OIDC client secret (confidential clients).
+    #[arg(long, env = "MAXIO_KEYCLOAK_CLIENT_SECRET")]
+    pub keycloak_client_secret: Option<String>,
+
+    /// Skip TLS certificate verification when calling Keycloak (development only).
+    #[arg(long, env = "MAXIO_KEYCLOAK_SKIP_TLS_VERIFY", default_value = "false")]
+    pub keycloak_skip_tls_verify: bool,
+
+    /// Override JWKS URL (default: `{base_url}/realms/{realm}/protocol/openid-connect/certs`).
+    #[arg(long, env = "MAXIO_KEYCLOAK_JWKS_URL")]
+    pub keycloak_jwks_url: Option<String>,
+
+    /// Override OIDC issuer URL (default: `{base_url}/realms/{realm}`).
+    #[arg(long, env = "MAXIO_KEYCLOAK_ISSUER")]
+    pub keycloak_issuer: Option<String>,
+}
+
+impl Config {
+    /// Validates Keycloak settings when enabled.
+    pub fn validate_keycloak(&self) -> anyhow::Result<()> {
+        if !self.keycloak_enabled {
+            return Ok(());
+        }
+        if self.keycloak_base_url.trim().is_empty() {
+            anyhow::bail!(
+                "MAXIO_KEYCLOAK_ENABLED requires MAXIO_KEYCLOAK_BASE_URL (or --keycloak-base-url)"
+            );
+        }
+        if self.keycloak_realm.trim().is_empty() {
+            anyhow::bail!("MAXIO_KEYCLOAK_REALM must not be empty when Keycloak is enabled");
+        }
+        if self.keycloak_client_id.trim().is_empty() {
+            anyhow::bail!(
+                "MAXIO_KEYCLOAK_CLIENT_ID must not be empty when Keycloak is enabled"
+            );
+        }
+        if !self.allow_insecure_dev && self.keycloak_skip_tls_verify {
+            anyhow::bail!(
+                "MAXIO_KEYCLOAK_SKIP_TLS_VERIFY is only allowed with --allow-insecure-dev"
+            );
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

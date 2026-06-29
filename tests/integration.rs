@@ -60,6 +60,14 @@ fn default_test_config(data_dir: String) -> Config {
         metrics_port: 0,
         audit_log: false,
         metadata_index: false,
+        keycloak_enabled: false,
+        keycloak_base_url: String::new(),
+        keycloak_realm: "kubenexis".to_string(),
+        keycloak_client_id: "maxio-ui".to_string(),
+        keycloak_client_secret: None,
+        keycloak_skip_tls_verify: false,
+        keycloak_jwks_url: None,
+        keycloak_issuer: None,
     }
 }
 
@@ -97,6 +105,7 @@ async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> S
         Arc::new(config.clone()),
         Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
         credentials,
+        None,
         Some(addr.port()),
     );
 
@@ -2602,6 +2611,33 @@ async fn test_console_login_rate_limit() {
         .unwrap();
     assert_eq!(resp.status(), 429);
     assert!(resp.headers().contains_key("retry-after"));
+}
+
+#[tokio::test]
+async fn test_keycloak_config_disabled_by_default() {
+    let (base_url, _tmp) = start_server().await;
+
+    let resp = client()
+        .get(format!("{}/api/auth/keycloak-config", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["enabled"], false);
+}
+
+#[tokio::test]
+async fn test_keycloak_login_returns_503_when_disabled() {
+    let (base_url, _tmp) = start_server().await;
+
+    let resp = client()
+        .post(format!("{}/api/auth/keycloak-login", base_url))
+        .json(&serde_json::json!({"username": "alice", "password": "secret"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 503);
 }
 
 #[tokio::test]
@@ -7631,6 +7667,7 @@ async fn start_server_with_server_host(
         Arc::new(config),
         Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
         credentials,
+        None,
         Some(addr.port()),
     );
     let app = server::build_router(state);
@@ -7946,6 +7983,7 @@ async fn test_metrics_dedicated_port() {
         Arc::new(config.clone()),
         Arc::new(maxio::rate_limit::LoginRateLimiter::new()),
         credentials,
+        None,
         Some(main_addr.port()),
     );
 

@@ -95,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = cli.config;
+    config.validate_keycloak()?;
 
     if config.access_key == "maxioadmin"
         && config.secret_key == "maxioadmin"
@@ -158,6 +159,19 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let keycloak = if config.keycloak_enabled {
+        let auth = auth::keycloak::KeycloakAuth::from_config(&config)?;
+        tracing::info!(
+            realm = %config.keycloak_realm,
+            client_id = %config.keycloak_client_id,
+            issuer = %auth.settings().issuer_url(),
+            "Keycloak OIDC enabled for console authentication"
+        );
+        Some(Arc::new(auth))
+    } else {
+        None
+    };
+
     let addr = format!("{}:{}", config.address, config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     let listen_port = listener.local_addr()?.port();
@@ -166,6 +180,7 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(config.clone()),
         login_rate_limiter,
         credentials,
+        keycloak,
         Some(listen_port),
     );
 

@@ -14,6 +14,7 @@ use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
 use crate::audit::audit_middleware;
+use crate::auth::keycloak::{KeycloakError, KeycloakTokenResponse};
 use crate::auth::signature_v4;
 use crate::server::AppState;
 use crate::storage::filesystem::FilesystemStorage;
@@ -103,12 +104,29 @@ fn extract_cookie(headers: &HeaderMap) -> Option<String> {
 }
 
 fn make_cookie(value: &str, max_age: i64, secure: bool) -> String {
+    make_named_cookie(COOKIE_NAME, value, max_age, secure)
+}
+
+fn make_named_cookie(name: &str, value: &str, max_age: i64, secure: bool) -> String {
     let secure_flag = if secure { "; Secure" } else { "" };
 
     format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}",
-        COOKIE_NAME, value, max_age, secure_flag
+        "{name}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure_flag}"
     )
+}
+
+fn cookie_secure(state: &AppState) -> bool {
+    state.config.secure_cookies && !state.config.allow_insecure_dev
+}
+
+async fn verify_console_session(state: &AppState, token: &str) -> bool {
+    if crate::auth::keycloak::is_legacy_console_session(token) {
+        return verify_token(&token, &state.config.access_key, &state.config.secret_key);
+    }
+    if let Some(keycloak) = &state.keycloak {
+        return keycloak.validate_access_token(token).await.is_ok();
+    }
+    false
 }
 
 async fn console_auth_middleware(
@@ -116,9 +134,10 @@ async fn console_auth_middleware(
     request: Request,
     next: Next,
 ) -> Response {
-    let authenticated = extract_cookie(request.headers())
-        .map(|token| verify_token(&token, &state.config.access_key, &state.config.secret_key))
-        .unwrap_or(false);
+    let authenticated = match extract_cookie(request.headers()) {
+        Some(token) => verify_console_session(&state, &token).await,
+        None => false,
+    };
 
     if !authenticated {
         return (
@@ -188,9 +207,10 @@ pub async fn login(
 }
 
 pub async fn check(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
-    let authenticated = extract_cookie(&headers)
-        .map(|token| verify_token(&token, &state.config.access_key, &state.config.secret_key))
-        .unwrap_or(false);
+    let authenticated = match extract_cookie(&headers) {
+        Some(token) => verify_console_session(&state, &token).await,
+        None => false,
+    };
 
     if authenticated {
         (StatusCode::OK, Json(serde_json::json!({"ok": true})))
@@ -203,18 +223,183 @@ pub async fn check(State(state): State<AppState>, headers: HeaderMap) -> impl In
 }
 
 pub async fn logout(State(state): State<AppState>) -> impl IntoResponse {
-    let cookie = make_cookie(
-        "",
-        0,
-        state.config.secure_cookies && !state.config.allow_insecure_dev,
-    );
+    let secure = cookie_secure(&state);
     let mut resp_headers = HeaderMap::new();
-    resp_headers.insert("Set-Cookie", cookie.parse().unwrap());
+    resp_headers.insert("Set-Cookie", make_cookie("", 0, secure).parse().unwrap());
+    if state.keycloak.is_some() {
+        resp_headers.insert(
+            "Set-Cookie",
+            make_named_cookie(crate::auth::keycloak::REFRESH_COOKIE_NAME, "", 0, secure)
+                .parse()
+                .unwrap(),
+        );
+    }
     (
         StatusCode::OK,
         resp_headers,
         Json(serde_json::json!({"ok": true})),
     )
+}
+
+pub async fn keycloak_config(State(state): State<AppState>) -> impl IntoResponse {
+    if let Some(keycloak) = &state.keycloak {
+        (
+            StatusCode::OK,
+            Json(keycloak.settings().config_response()),
+        )
+    } else {
+        (
+            StatusCode::OK,
+            Json(crate::auth::keycloak::KeycloakConfigResponse {
+                enabled: false,
+                realm: None,
+                client_id: None,
+            }),
+        )
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct KeycloakLoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+fn keycloak_error_response(err: KeycloakError) -> Response {
+    match err {
+        KeycloakError::InvalidCredentials => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid credentials"})),
+        )
+            .into_response(),
+        KeycloakError::NotConfigured => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "Keycloak is not configured"})),
+        )
+            .into_response(),
+        KeycloakError::Unreachable(msg) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": format!("Keycloak unreachable: {msg}")})),
+        )
+            .into_response(),
+        KeycloakError::TokenEndpoint(msg) | KeycloakError::InvalidToken(msg) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response(),
+    }
+}
+
+fn set_keycloak_session_cookies(
+    headers: &mut HeaderMap,
+    state: &AppState,
+    tokens: &KeycloakTokenResponse,
+) {
+    let secure = cookie_secure(state);
+    let refresh_name = state
+        .keycloak
+        .as_ref()
+        .expect("keycloak session cookies require keycloak")
+        .refresh_cookie_name();
+    headers.insert(
+        "Set-Cookie",
+        make_cookie(&tokens.access_token, tokens.expires_in, secure)
+            .parse()
+            .unwrap(),
+    );
+    headers.insert(
+        "Set-Cookie",
+        make_named_cookie(
+            refresh_name,
+            &tokens.refresh_token,
+            tokens.refresh_expires_in,
+            secure,
+        )
+        .parse()
+        .unwrap(),
+    );
+}
+
+pub async fn keycloak_login(
+    State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<KeycloakLoginRequest>,
+) -> Response {
+    let Some(keycloak) = state.keycloak.clone() else {
+        return keycloak_error_response(KeycloakError::NotConfigured);
+    };
+
+    let ip = state.trusted_proxies.client_ip(&headers, &addr);
+    if let Some(retry_after) = state.login_rate_limiter.check_and_increment(&ip).await {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(axum::http::header::RETRY_AFTER, retry_after.to_string())],
+            Json(serde_json::json!({"error": "Too many login attempts. Try again later."})),
+        )
+            .into_response();
+    }
+
+    match keycloak.password_login(&body.username, &body.password).await {
+        Ok(tokens) => {
+            let mut resp_headers = HeaderMap::new();
+            set_keycloak_session_cookies(&mut resp_headers, &state, &tokens);
+            (StatusCode::OK, resp_headers, Json(tokens)).into_response()
+        }
+        Err(err) => keycloak_error_response(err),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeycloakRefreshRequest {
+    pub refresh_token: Option<String>,
+}
+
+fn extract_refresh_cookie(headers: &HeaderMap, cookie_name: &str) -> Option<String> {
+    headers
+        .get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|cookies| {
+            let prefix = format!("{cookie_name}=");
+            cookies
+                .split(';')
+                .map(|c| c.trim())
+                .find(|c| c.starts_with(&prefix))
+                .map(|c| c[prefix.len()..].to_string())
+        })
+}
+
+pub async fn keycloak_refresh(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<KeycloakRefreshRequest>,
+) -> Response {
+    let Some(keycloak) = state.keycloak.clone() else {
+        return keycloak_error_response(KeycloakError::NotConfigured);
+    };
+
+    let refresh_name = keycloak.refresh_cookie_name();
+    let refresh_token = body
+        .refresh_token
+        .or_else(|| extract_refresh_cookie(&headers, refresh_name));
+
+    let Some(refresh_token) = refresh_token.filter(|t| !t.is_empty()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "refresh token required"})),
+        )
+            .into_response();
+    };
+
+    match keycloak.refresh(&refresh_token).await {
+        Ok(tokens) => {
+            let mut resp_headers = HeaderMap::new();
+            set_keycloak_session_cookies(&mut resp_headers, &state, &tokens);
+            (StatusCode::OK, resp_headers, Json(tokens)).into_response()
+        }
+        Err(err) => keycloak_error_response(err),
+    }
 }
 
 async fn console_csrf_middleware(
@@ -1101,6 +1286,9 @@ pub fn console_router(state: AppState) -> Router<AppState> {
     let public = Router::new()
         .route("/auth/login", post(login))
         .route("/auth/check", get(check))
+        .route("/auth/keycloak-config", get(keycloak_config))
+        .route("/auth/keycloak-login", post(keycloak_login))
+        .route("/auth/keycloak-refresh", post(keycloak_refresh))
         .layer(json_body_limit);
 
     let protected_limited = Router::new()

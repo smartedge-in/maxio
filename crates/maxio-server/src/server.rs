@@ -16,6 +16,7 @@ use crate::api::router::s3_router;
 use crate::api::virtual_host::virtual_host_middleware;
 use crate::audit::audit_middleware;
 use crate::auth::credentials::CredentialStore;
+use crate::auth::keycloak::KeycloakAuth;
 use crate::auth::middleware::auth_middleware;
 use crate::config::Config;
 use crate::embedded::ui_handler;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub started_at: Instant,
     pub last_housekeeping_at: Arc<AtomicI64>,
     pub credentials: Arc<CredentialStore>,
+    pub keycloak: Option<Arc<KeycloakAuth>>,
     pub server_host: String,
     pub metrics: Arc<crate::metrics::Metrics>,
 }
@@ -247,6 +249,7 @@ pub fn new_app_state(
     config: Arc<Config>,
     login_rate_limiter: Arc<LoginRateLimiter>,
     credentials: Arc<CredentialStore>,
+    keycloak: Option<Arc<KeycloakAuth>>,
     listen_port: Option<u16>,
 ) -> AppState {
     AppState {
@@ -267,6 +270,7 @@ pub fn new_app_state(
         started_at: Instant::now(),
         last_housekeeping_at: Arc::new(AtomicI64::new(0)),
         credentials,
+        keycloak,
         server_host: crate::api::virtual_host::effective_server_host(&config, listen_port),
         metrics: Arc::new(crate::metrics::Metrics::default()),
     }
