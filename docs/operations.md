@@ -2,6 +2,8 @@
 
 Production deployment checklist for MaxIO: networking, credentials, storage health, quotas, and backups.
 
+**Deployment targets:** MaxIO must support **bare metal** (systemd + native binary) and **Kubernetes** (Helm chart) as first-class production paths — see backlog P3-18, P3-19, epic P3-20, and `docs/plans/2026-06-29-deployment-targets.md`. Docker is supported as a packaging format for both.
+
 ## Bind address and exposure
 
 MaxIO binds **`0.0.0.0` (all interfaces) by default** (`MAXIO_ADDRESS`). That exposes the S3 API and web console on every network interface on the host, which is convenient for containers but risky on machines with a public IP.
@@ -352,9 +354,13 @@ docker run -d \
 
 Mount the data volume on durable storage (SSD, network block volume). Bind-mounting an NFS path works but latency affects listing performance.
 
+## Bare metal (planned, P3-18)
+
+Target layout: release binary, dedicated `maxio` user, `MAXIO_DATA_DIR` on local SSD, systemd unit, TLS at host reverse proxy. Multi-host tier separation (storage / server / UI) aligns with P3-13. Full runbook: `docs/plans/2026-06-29-deployment-targets.md`.
+
 ## Kubernetes
 
-Minimal Deployment pattern:
+Official Helm chart planned (P3-19). Until then, use this minimal Deployment pattern (`replicas: 1` — required until distributed tiers, P3-13):
 
 ```yaml
 apiVersion: apps/v1
