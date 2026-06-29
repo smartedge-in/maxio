@@ -13,14 +13,17 @@ MaxIO **must** support **two production deployment models** as equal citizens:
 
 Docker remains a packaging format; bare metal and K8s are the operator-facing targets.
 
+**Airgap (primary enterprise path):** Install from offline release bundle (P3-54) and container image pack (P3-55). No `cargo build`, `docker pull` from public registries, or ACME on production hosts. See backlog **P3-53**.
+
 ## Deployment matrix
 
 | Profile | Bare metal | Kubernetes |
 |---------|------------|------------|
 | **Single-node** (today) | systemd + one host, one `data_dir` | Deployment `replicas: 1` + PVC |
-| **Distributed** (P3-13+) | systemd per tier or role-specific units on distinct hosts | StatefulSet (storage) + Deployment (server, UI) + Ingress split |
-| **TLS / LB** | Caddy or Traefik (Apache-2.0 / MIT); no keepalived | Ingress + MetalLB or cert-manager (P3-26) |
-| **Ops CLI** | `maxio-admin` on jump host | `maxio-admin` Job/CronJob or out-of-cluster |
+| **Distributed** (P1-14) | systemd per tier on distinct hosts | StatefulSet (storage) + Deployment (server, UI) + Ingress split |
+| **Airgap** | P3-54 bundle → systemd; internal CA (P3-57) | P3-55 images → private registry; P3-60 manifests |
+| **TLS / LB** | Caddy or Traefik with **org-issued certs**; no keepalived | Ingress + MetalLB; internal PKI (P3-26) |
+| **Ops CLI** | `maxio-admin` on jump host (from same bundle) | `maxio-admin` Job/CronJob or out-of-cluster |
 
 ## Bare metal (P3-18)
 

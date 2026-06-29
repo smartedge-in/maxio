@@ -10,6 +10,8 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | **Effort** | S (< 1 day) · M (1–3 days) · L (3–7 days) · XL (> 1 week) |
 | **Area** | ci · ops · security · storage · api · auth · ui · docs |
 
+**Deployment focus:** Enterprise production assumes **airgapped** (or strictly egress-controlled) environments — offline artifacts, private registries, internal CA, no runtime internet dependency. Internet-connected install paths are optional convenience only.
+
 ---
 
 ## Priority 1 — Multi-replica architecture & erasure coding (Raft-first)
@@ -29,7 +31,7 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | 6 | P1-19 | Multi-node EC read & rebuild | storage | L | On shard loss, fetch parity from peer storage nodes and reconstruct. Extends `VerifiedChunkReader` / RS path for remote shard RPC. | Read path pulls missing shard from peer; rebuild after one node down (with sufficient parity); tests with induced shard loss. |
 | 7 | P1-20 | Server tier Raft | api | XL | Independent server quorum: membership, storage endpoint map, credential epoch. Stateless S3 workers use routing snapshot. *Was P3-15.* | 2+ server quorum; storage leader change reflected without manual config; `/readyz` reflects storage quorum; integration test with P1-17. |
 | 8 | P1-21 | Stateless UI tier (`maxio-ui`) | ui | L | Extract embedded SPA; scale UI independently. *Was P3-16.* | `crates/maxio-ui`; distributed deploy; Ingress split `/ui` vs S3; ≥2 UI replicas in test manifest. |
-| 9 | P1-24 | Multi-node CI / dev harness | ci | M | Automated 3-node (storage) cluster test in CI or documented `kind` recipe. Plain K8s YAML or bare-metal scripts — **not** Helm. | Script or CI job: bootstrap Raft, PUT/GET, kill leader, EC shard placement smoke; runs on main or nightly. |
+| 9 | P1-24 | Multi-node CI / dev harness | ci | M | Automated 3-node (storage) cluster test in CI or documented `kind` recipe. Plain K8s YAML or bare-metal scripts — **not** Helm. Airgap variant: deploy from **P3-54** offline bundle / **P3-55** pre-loaded images only. | Script or CI job: bootstrap Raft, PUT/GET, kill leader, EC shard placement smoke; runs on main or nightly; documented airgap recipe uses private registry + no `cargo build` on target. |
 | 10 | P1-25 | EC bitrot scanner (cluster-aware) | storage | L | Proactive shard checksum scan; heal from parity/peers. *Elevated from P3-32 for EC priority.* | Background scanner; cross-node heal when local shard corrupt; Prometheus counters; ops tuning doc. |
 
 **P1-MR dependency graph**
@@ -49,26 +51,43 @@ P1-25 (after P1-18)
 
 ## Enterprise GA — production gate (post P1-14)
 
-**Goal:** Remove the README production warning and ship a supportable enterprise **single-region HA** cluster. Requires **P1-14 closed** first. Plain K8s YAML + bare metal (not Helm). Plan: closes via epic **P3-52** → **P3-44**.
+**Goal:** Remove the README production warning and ship a supportable enterprise **single-region HA** cluster in **airgapped** environments. Requires **P1-14 closed** first. Plain K8s YAML + bare metal (not Helm); **no internet on install or steady-state** for core MaxIO. Closes via **P3-53** (airgap) + **P3-52** → **P3-44**.
+
+### Airgap deployment (primary enterprise path)
 
 | Order | ID | Title | Area | Effort | Description | Acceptance criteria |
 |-------|-----|-------|------|--------|-------------|-------------------|
-| — | **P3-52** | **Enterprise GA epic** | ops | L | **Epic** — closes when P3-44 criteria met (all rows below + P1-14). | GA checklist complete; README warning removed; CHANGELOG GA entry. |
-| 1 | P3-18 | Bare metal deployment pack | ops | M | systemd units, Caddy example, multi-host layout. Permissive edge only (P3-26). | `deploy/systemd/maxio.service`; bare-metal runbook; smoke via `maxio healthcheck`. |
-| 2 | P3-26 | Permissive ingress & HA runbook | ops | S | No GPL edge (keepalived, HAProxy CE). Caddy, Traefik, MetalLB, kube-vip. | Operations + deploy examples use Caddy; GPL tools marked not recommended. |
-| 3 | P3-36 | Published S3 compatibility matrix | docs | S | Procurement / integration teams need operation × status matrix. | Checked-in matrix; CI or PR checklist sync with integration tests; linked from README. |
-| 4 | P3-37 | Observability reference stack | ops | M | Metrics exist (P2-07); enterprises need dashboards and optional tracing. | `deploy/compose/observability.yml`; sample Grafana dashboard JSON; OTel doc optional. |
-| 5 | P3-08 | Keycloak console UI login | ui | M | Server APIs exist; console still access/secret only. Enterprise SSO blocker. | `Login.svelte` Keycloak path; silent refresh; Playwright smoke (extends P3-06). |
-| 6 | P3-06 | UI E2E tests (Playwright) | ui | M | Browser-level regression for console flows. | Login → bucket → upload → download → delete; runs in CI on main. |
-| 7 | P3-48 | Backup automation & verified restore | ops | M | Manual `data_dir` copy is not enough for production ops. | Scheduled backup script or `maxio-admin backup`; checksum verify; restore drill documented; optional encrypted off-site. |
-| 8 | P3-49 | Disaster recovery runbook (RPO/RTO) | docs | M | Formal DR for single-node and P1-14 cluster; failover drills. | `docs/operations.md` DR section; RPO/RTO targets; cluster + BM scenarios; drill checklist tied to P1-24. |
-| 9 | P3-50 | Security audit & hardening checklist | security | M | Formal pen-test prep — not just a P3-44 checkbox. | `docs/security-audit.md` checklist; threat model summary; network/auth/encryption/audit coverage; findings tracked. |
-| 10 | P3-51 | Production SLA & incident response | ops | S | Support expectations and on-call playbook. | `docs/operations.md` SLA section; severity levels; escalation; key metrics from P2-07 / P3-37. |
-| 11 | P3-24 | Permissive-only license policy | ci | S | Mandatory for enterprise artifacts and Raft deps (P1-16). | `docs/licensing.md`; `deny.toml`; `make deny` in CI; npm license audit for `ui/`. |
-| 12 | P3-05 | ARM64 release binaries | ci | S | Multi-arch for edge and ARM servers. | amd64 + arm64 Docker image and GitHub release assets. |
-| — | **P3-44** | **Production GA milestone** | ops | M | **Milestone** — README warning removed when P3-52 epic closes. | P1-14 + P3-52 items done; P3-06 green; P3-50 checklist complete; Helm (P3-19) not required. |
+| — | **P3-53** | **Airgap deployment epic** | ops | L | **Epic** — MaxIO installs and runs without outbound internet. Closes when P3-54–P3-60 done. Required for P3-52 / P3-44. | Airgap acceptance checklist in runbook; CI/release ships offline artifacts; no undocumented egress. |
+| 1 | P3-54 | Offline release bundle | ci | M | Single transferable artifact for BM install — not `curl \| bash` or on-target `cargo build`. | Release tarball: `maxio` + `maxio-admin` (amd64/arm64), `SHA256SUMS`, CycloneDX SBOM, `LICENSES.txt`; optional cosign/sigstore signatures; documented verify-before-install. |
+| 2 | P3-55 | Offline container image pack | ci | M | Airgap K8s needs pre-exported images, not `docker pull` from public registries. | `docker save` tarballs (or OCI layout) per arch; `images.txt` manifest with digests; `scripts/load-images.sh` for private registry; release CI publishes alongside P3-54. |
+| 3 | P3-56 | Airgap deployment runbook | docs | M | End-to-end install/upgrade without internet: BM, K8s, jump host tooling. | `docs/operations.md` § Airgap: sneakernet bundle ingest, private registry, systemd/K8s paths; **no build-from-source on classified hosts**; links P3-54/55. |
+| 4 | P3-57 | Internal CA & TLS (no public PKI) | ops | S | Airgap cannot use public ACME or external CAs. Permissive edge with **file certs** or org PKI. | Caddy/Traefik examples use org-issued certs; document cert rotation offline; dev `tls internal` marked non-production; P3-26 updated. |
+| 5 | P3-58 | Offline upgrade & rollback bundles | ops | M | Patch cadence without GitHub/Docker Hub access. | Versioned upgrade tarball procedure; rollback to N-1 documented; checksum verify; keyring + `data_dir` backup before upgrade. |
+| 6 | P3-59 | Runtime egress & dependency matrix | docs | S | Prove core MaxIO needs no outbound internet; document optional deps only. | Table: required (none) vs optional (Redis login limit, internal Keycloak, webhooks P3-27, internal Vault P3-35); code review confirms no telemetry/update phone-home; P3-50 includes egress checks. |
+| 7 | P3-60 | Private-registry K8s manifests | ops | M | Default YAML must not assume `docker.io` or `:latest` pulls. | `deploy/k8s/` uses `image: REGISTRY/maxio:VERSION` placeholders; `imagePullSecrets`; airgap install doc; pairs with P3-55 and P1-24. |
 
-**GA sprint order:** P1-14 close → P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-24 → P3-05 → **P3-44 / P3-52 close**
+**Airgap sprint order:** P3-54 → P3-55 → P3-56 → P3-57 → P3-58 → P3-59 → P3-60 → **P3-53 close**
+
+### Enterprise GA (general)
+
+| Order | ID | Title | Area | Effort | Description | Acceptance criteria |
+|-------|-----|-------|------|--------|-------------|-------------------|
+| — | **P3-52** | **Enterprise GA epic** | ops | L | **Epic** — closes when P3-44 criteria met (**P3-53 airgap** + rows below + P1-14). | GA checklist complete; README warning removed; CHANGELOG GA entry. |
+| 1 | P3-18 | Bare metal deployment pack | ops | M | systemd units, permissive edge (P3-26). **Airgap:** install from P3-54 bundle only on target hosts. | `deploy/systemd/maxio.service`; offline install path; smoke via `maxio healthcheck`. |
+| 2 | P3-26 | Permissive ingress & HA runbook | ops | S | No GPL edge. **Airgap:** internal CA (P3-57), no ACME. | Caddy/Traefik file-cert examples; GPL tools not recommended. |
+| 3 | P3-36 | Published S3 compatibility matrix | docs | S | Procurement / integration gate. | Matrix in repo; CI sync; linked from README. |
+| 4 | P3-37 | Observability reference stack | ops | M | Dashboards beyond `/metrics`. **Airgap:** images via P3-55 private registry; no Grafana Cloud. | `deploy/compose/observability.yml`; offline image list; Grafana JSON bundled in repo. |
+| 5 | P3-08 | Keycloak console UI login | ui | M | Enterprise SSO. **Airgap:** `MAXIO_KEYCLOAK_*` points to **internal** IdP only. | Keycloak UI path; silent refresh; Playwright smoke; doc internal-URL constraints. |
+| 6 | P3-06 | UI E2E tests (Playwright) | ui | M | Console regression (CI may use network; product must not require it). | Login → bucket → upload → download → delete; CI on main. |
+| 7 | P3-48 | Backup automation & verified restore | ops | M | **Airgap:** backup to removable media / offline vault; no cloud backup assumption. | Scheduled backup; checksum verify; restore drill; encrypted offline copy documented. |
+| 8 | P3-49 | Disaster recovery runbook (RPO/RTO) | docs | M | DR without external dependencies. | DR section; cluster + BM; offline restore from P3-48; drill checklist. |
+| 9 | P3-50 | Security audit & hardening checklist | security | M | Pen-test prep incl. airgap supply chain. | `docs/security-audit.md`; threat model; P3-59 egress; SBOM review from P3-54. |
+| 10 | P3-51 | Production SLA & incident response | ops | S | On-call without vendor SaaS dependencies. | SLA section; severity levels; metrics from P2-07 / P3-37 (on-prem). |
+| 11 | P3-24 | Permissive-only license policy | ci | S | Mandatory for artifacts crossing airgap boundary. | `deny.toml`; `make deny`; npm license audit; `LICENSES.txt` in P3-54 bundle. |
+| 12 | P3-05 | ARM64 release binaries | ci | S | Both arches in offline bundle. | amd64 + arm64 in P3-54 tarball and P3-55 image pack. |
+| — | **P3-44** | **Production GA milestone** | ops | M | README warning removed when **P3-52** + **P3-53** done. | P1-14 + airgap epic + GA rows; P3-06 green; P3-50 complete; Helm not required. |
+
+**GA sprint order:** P1-14 close → **P3-54 → P3-55 → P3-56 → P3-57 → P3-58 → P3-59 → P3-60 → P3-53** → P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-24 → P3-05 → **P3-44 / P3-52 close**
 
 **Parallel after GA cluster work starts:** P3-17 (admin CLI boundary), P3-23 (crate boundary CI).
 
@@ -82,11 +101,11 @@ P1-25 (after P1-18)
 |-------|-----|-------|------|--------|-------------|-------------------|
 | — | **P3-43** | **RustFS / enterprise parity epic** | storage | XL | **Epic** — competitive and compliance gaps. Closes when Tier 1–3 complete. | See tier table below. |
 | 1 | P3-28 | IAM bucket policies v2 | api | L | Deny, conditions, expanded actions — least-privilege. | Deny precedence; `Condition` operators; integration tests; `docs/s3-compatibility.md` updated. |
-| 2 | P3-35 | External KMS (SSE-KMS compatible) | security | L | SSE-S3/SSE-C only today; regulated workloads need KMS. | Pluggable KMS trait; Vault transit or equivalent; `aws:kms` path; deny.toml-clean deps. |
+| 2 | P3-35 | External KMS (SSE-KMS compatible) | security | L | SSE-S3/SSE-C only today; regulated workloads need KMS. **Airgap:** on-prem Vault/HSM on internal network only — no cloud KMS. | Pluggable KMS trait; Vault transit or equivalent; `aws:kms` path; deny.toml-clean deps; offline KMS bootstrap doc. |
 | 3 | P3-29 | Multi-tenancy | auth | L | Static credentials without tenant boundary. | Tenant ID on buckets/credentials; scoped requests; admin lists tenant only; default tenant migration. |
 | 4 | P3-38 | OIDC claims in bucket policies | auth | L | Keycloak console (P3-08) does not feed IAM evaluation. | Policy conditions on `jwt:groups` / `jwt:roles`; Entra/Keycloak example; mock OIDC tests. |
 | 5 | P3-39 | S3 server access logging | api | M | stderr audit (P2-08) ≠ per-bucket delivery to target bucket. | `?logging` config; log delivery to target bucket; integration test. |
-| 6 | P3-27 | S3 event notifications | api | L | Audit log only; no webhook/subscriber integrations. | Webhook target minimum; durable spool; `ObjectCreated` / `ObjectRemoved`; integration test. |
+| 6 | P3-27 | S3 event notifications | api | L | Audit log only; no webhook/subscriber integrations. **Airgap:** webhook targets must be internal URLs only; no SaaS endpoints. | Webhook target minimum; durable spool; `ObjectCreated` / `ObjectRemoved`; integration test; egress doc updated (P3-59). |
 | 7 | P3-47 | Object lock / WORM / legal hold | storage | L | Immutability for compliance — not in backlog before. | Governance retention; legal hold API subset; tests; docs vs versioning. |
 | 8 | P3-33 | Lifecycle transitions & non-current expiry | storage | M | P3-01 expiration only. | `transition_days`; `noncurrent_expiration_days`; versioned purge tests. |
 
@@ -103,7 +122,7 @@ P1-25 (after P1-18)
 
 | Tier | IDs | When |
 |------|-----|------|
-| Tier 1 (ops/docs) | P3-36, P3-37, P3-41, P3-05 | **Pulled into Enterprise GA** (P3-36, P3-37, P3-05) |
+| Tier 1 (ops/docs) | P3-36, P3-37, P3-05, **P3-53–P3-60** | **Pulled into Enterprise GA** (airgap + ops/docs) |
 | Tier 2 (S3 product) | P3-27, P3-28, P3-33, P3-39 | Enterprise GA+ |
 | Tier 3 (enterprise) | P3-29, P3-35, P3-38, **P3-47** | Enterprise GA+ |
 | Tier 4 (protocol) | P3-30, P3-31, P3-34 | Deferred unless OpenStack / CRR required |
@@ -120,7 +139,7 @@ P1-25 (after P1-18)
 | P3-30 | OpenStack Swift API | XL — only if OpenStack required |
 | P3-31 | OpenStack Keystone auth | L — pairs with P3-30 |
 | P3-40 | Storage API fuzz testing in CI | Nightly acceptable |
-| P3-41 | One-click bare-metal install script | Post P3-18 |
+| P3-41 | Offline bare-metal install helper | Post P3-54 — local bundle only |
 | P3-42 | Optional native TLS termination | Edge/single-node convenience |
 | P3-20 | Deployment targets epic | Closes P3-18 + plain K8s; Helm optional |
 
@@ -219,7 +238,7 @@ Canonical list of all P3 IDs. **Priority order** is in sections above: **P1-MR**
 | P3-05 | ARM64 release binaries | ci | S | **P1-GA** — multi-arch for edge and ARM servers. | Multi-arch Docker image and GitHub release assets. |
 | P3-06 | UI E2E tests (Playwright) | ui | M | **P1-GA** — browser-level console regression. | Smoke test: login → create bucket → upload → download → delete; CI on main. |
 | ~~P3-07~~ | ~~Per-bucket erasure coding toggle~~ | storage | L | Done — `BucketMeta.erasure_coding` override; `PUT/GET ?erasure`; writes use `effective_erasure_coding()`; reads layout-based; existing flat objects unchanged. | — |
-| P3-08 | Keycloak console UI login | ui | M | **P1-GA** — enterprise SSO; server APIs exist, UI still access/secret. | `Login.svelte` Keycloak path; silent refresh; Playwright smoke (extends P3-06). |
+| P3-08 | Keycloak console UI login | ui | M | **P1-GA** — internal Keycloak URL only (airgap). | Keycloak UI path; silent refresh; Playwright smoke; no external IdP. |
 | ~~P3-09~~ | ~~Replication Phase 1 — operator sync runbook~~ | ops | M | **Deferred** — not on Raft-first critical path (see Priority 1). May revisit for geo-DR tooling after P1-14. | — |
 | ~~P3-10~~ | ~~Replication Phase 2 — mutation event log~~ | storage | XL | **Superseded by P1-15** — `StorageBackend` trait is the Raft-first entry; optional append-only log deferred unless needed for audit. | — |
 | ~~P3-11~~ | ~~Replication Phase 3 — replication agent~~ | storage | XL | **Deferred** — `maxio-replicate` sidecar not on critical path; Raft + distributed EC is Priority 1. | — |
@@ -229,7 +248,7 @@ Canonical list of all P3 IDs. **Priority order** is in sections above: **P1-MR**
 | ~~P3-15~~ | ~~Server tier Raft consensus~~ | api | XL | **Superseded by P1-20**. | — |
 | ~~P3-16~~ | ~~UI crate — stateless scale-out~~ | ui | L | **Superseded by P1-21**. | — |
 | P3-17 | Admin CLI crate boundary | ops | M | `maxio-admin` is a workspace member (P2-12) but depends on root `maxio` facade, coupling the CLI to server+storage re-exports. Must be a standalone crate: `maxio-storage` for local `--data-dir` commands only; `reqwest` for remote API — never `maxio-server`. Stateless operator client, not a cluster tier. See `docs/plans/2026-06-29-admin-cli-crate.md`. | No `maxio` or `maxio-server` path dep in `maxio-admin/Cargo.toml`; local doctor/keyring use `maxio-storage` directly; separate release binary/artifact; crate-boundary CI check; docs updated in `docs/operations.md`. |
-| P3-18 | Bare metal deployment pack | ops | M | **P1-GA** — native Linux bare-metal/VM; permissive edge only (P3-26). See `docs/plans/2026-06-29-deployment-targets.md`. | `deploy/systemd/maxio.service`; Caddy example; multi-host LB without GPL VIP; smoke via `maxio healthcheck`. |
+| P3-18 | Bare metal deployment pack | ops | M | **P1-GA** — offline install from P3-54 bundle; permissive edge (P3-26, P3-57). See `docs/plans/2026-06-29-deployment-targets.md`. | `deploy/systemd/maxio.service`; airgap install path; smoke via `maxio healthcheck`. |
 | P3-19 | Kubernetes Helm chart | ops | L | **Future** — not required for P1-14 or GA. Plain `deploy/k8s/` for cluster. | `deploy/helm/maxio`; `helm lint` + `helm template` in CI; README section. |
 | P3-20 | Deployment targets epic (bare metal + K8s) | ops | L | **Future** — closes when P3-18 + plain K8s done; Helm optional (P3-19). | P3-18 complete; distributed BM + plain K8s documented. |
 | P3-21 | Shared library strategy (epic) | storage | M | **Epic** — thin shared types without a monolithic “god crate”. `maxio-storage` remains storage SSOT; new `maxio-common` for cross-component contracts; root facade not a sibling dependency (P3-17). UI stays npm-only. See `docs/plans/2026-06-29-shared-libraries.md`. | P3-22 + P3-23 + P3-17 complete; dependency graph documented; no `axum`/`reqwest` in `maxio-common`. |
@@ -237,8 +256,8 @@ Canonical list of all P3 IDs. **Priority order** is in sections above: **P1-MR**
 | P3-23 | Crate boundary CI enforcement | ci | S | Automate dependency rules from P3-04 / shared-library plan: e.g. `maxio-admin` must not depend on `maxio` or `maxio-server`; `maxio-common` must not depend on `axum` or `maxio-storage`. | `cargo deny` bans or CI script fails on forbidden edges; documented in `docs/plans/2026-06-29-shared-libraries.md`; passes on current graph after P3-17/P3-22. |
 | P3-24 | Permissive-only license policy (mandatory) | ci | S | **P1-GA** — no copyleft in production artifacts; Raft deps (P1-16) must pass. See `docs/licensing.md`. | `deny.toml`; `make deny` in CI; npm license audit for `ui/`. |
 | ~~P3-25~~ | ~~Optional edge LB (`maxio-edge` / Pingora)~~ | ops | L | **Moved to [knx-edge](https://github.com/smartedge-in/knx-edge)** — out of tree. See `docs/out-of-tree/knx-edge.md`. | — |
-| P3-26 | Permissive ingress & HA runbook | ops | S | **P1-GA** — no GPL edge (keepalived, HAProxy CE). See `docs/plans/2026-06-29-permissive-ingress-ha.md`. | Caddy-first examples; GPL tools not recommended; HA without keepalived. |
-| P3-27 | S3 event notifications | api | L | **P1-ENT** — webhook/subscriber integrations. | Webhook target; durable spool; `ObjectCreated` / `ObjectRemoved`; integration test. |
+| P3-26 | Permissive ingress & HA runbook | ops | S | **P1-GA** — no GPL edge; **airgap:** internal CA (P3-57), no ACME. | Caddy file-cert examples; GPL tools not recommended. |
+| P3-27 | S3 event notifications | api | L | **P1-ENT** — internal webhook targets only (airgap). | Webhook target; durable spool; `ObjectCreated` / `ObjectRemoved`; P3-59 egress doc. |
 | P3-28 | IAM bucket policies v2 | api | L | **P1-ENT** — Deny, conditions, expanded actions. | Deny precedence; `Condition` operators; `docs/s3-compatibility.md` updated. |
 | P3-29 | Multi-tenancy | auth | L | **P1-ENT** — tenant boundary on buckets and credentials. | Tenant-scoped requests; admin lists tenant only; default tenant migration. |
 | P3-30 | OpenStack Swift API | api | XL | **Future** — only if OpenStack required. | Swift object paths; container listing; smoke test. |
@@ -246,24 +265,32 @@ Canonical list of all P3 IDs. **Priority order** is in sections above: **P1-MR**
 | ~~P3-32~~ | ~~Bitrot scanner & healing~~ | storage | L | **Promoted to P1-25**. | — |
 | P3-33 | Lifecycle transitions & non-current expiry | storage | M | **P1-ENT** — extend P3-01 expiration. | `transition_days`; `noncurrent_expiration_days`; versioned purge tests. |
 | P3-34 | S3 bucket replication API (CRR) | storage | XL | **Deferred** — geo-DR after P1-14; builds on mutation log. | `PutBucketReplication` / `Get` / `Delete`; primary→standby test; lag metrics. |
-| P3-35 | External KMS (SSE-KMS compatible) | security | L | **P1-ENT** — regulated workloads. | Pluggable KMS; Vault transit or equivalent; `aws:kms` path; deny.toml-clean. |
+| P3-35 | External KMS (SSE-KMS compatible) | security | L | **P1-ENT** — on-prem Vault/HSM only in airgap. | Pluggable KMS; Vault transit; `aws:kms` path; offline KMS bootstrap doc. |
 | P3-36 | Published S3 compatibility matrix | docs | S | **P1-GA** — procurement / integration gate. | Matrix in repo; CI sync with tests; linked from README. |
-| P3-37 | Observability reference stack | ops | M | **P1-GA** — dashboards beyond `/metrics`. | `deploy/compose/observability.yml`; Grafana JSON; OTel doc optional. |
+| P3-37 | Observability reference stack | ops | M | **P1-GA** — on-prem only; images via P3-55 private registry. | `deploy/compose/observability.yml`; offline image manifest; Grafana JSON in repo. |
 | P3-38 | OIDC claims in bucket policies | auth | L | **P1-ENT** — after P3-08 + P3-28. | `jwt:groups` / `jwt:roles` conditions; Entra/Keycloak example. |
 | P3-39 | S3 server access logging | api | M | **P1-ENT** — per-bucket log delivery. | `?logging` config; deliver to target bucket; integration test. |
 | P3-40 | Storage API fuzz testing in CI | ci | M | **Future** — nightly acceptable. | Fuzz harness for SigV4, paths, policy; seed corpus. |
-| P3-41 | One-click bare-metal install script | ops | S | **Future** — after P3-18. | `scripts/install-maxio.sh`; checksum verify; README link. |
+| P3-41 | Offline bare-metal install helper | ops | S | **Future** — wraps **P3-54** bundle (not internet `curl \| bash`). | `scripts/install-maxio-offline.sh`; verifies `SHA256SUMS`; installs binary + systemd stub from local path only. |
 | P3-42 | Optional native TLS termination | ops | M | **Future** — edge/single-node convenience. | `--tls-cert` / `--tls-key`; proxy path remains default. |
 | P3-43 | RustFS / enterprise parity epic | storage | XL | **P1-ENT** — see Enterprise GA+ tiers above. | Tier 2–3 complete after GA. |
-| P3-44 | Production GA milestone | ops | M | **Milestone** — closes when **P3-52** epic done. | P1-14 + P3-52; README warning removed; CHANGELOG GA; Helm not required. |
+| P3-44 | Production GA milestone | ops | M | **Milestone** — closes when **P3-52** + **P3-53** done. | P1-14 + airgap + GA rows; README warning removed; Helm not required. |
 | P3-45 | Cilium eBPF deployment guide | ops | M | **Future** — plain K8s YAML; after P1-24. See `docs/plans/2026-06-29-cilium-ebpf-deployment.md`. | Doc + `deploy/k8s/` examples; server-tier LB notes. |
 | P3-46 | Multi-node Service topology (K8s) | ops | M | **Future** — safe Service patterns for P1-14 tiers. | Plain YAML per tier; NetworkPolicy examples. |
 | P3-47 | Object lock / WORM / legal hold | storage | L | **P1-ENT** — immutability for regulated industries. | Governance retention; legal hold API subset; tests; docs vs versioning. |
-| P3-48 | Backup automation & verified restore | ops | M | **P1-GA** — scheduled backup beyond manual copy. | Backup script or `maxio-admin backup`; checksum verify; restore drill. |
+| P3-48 | Backup automation & verified restore | ops | M | **P1-GA** — offline/removable media; no cloud backup. | Backup script or `maxio-admin backup`; checksum verify; offline restore drill. |
 | P3-49 | Disaster recovery runbook (RPO/RTO) | docs | M | **P1-GA** — formal DR for single-node and cluster. | DR section in `docs/operations.md`; failover drills; tied to P1-24. |
-| P3-50 | Security audit & hardening checklist | security | M | **P1-GA** — pen-test prep. | `docs/security-audit.md`; threat model; remediated findings tracked. |
+| P3-50 | Security audit & hardening checklist | security | M | **P1-GA** — pen-test prep incl. airgap supply chain. | `docs/security-audit.md`; threat model; P3-59 egress; SBOM review from P3-54. |
 | P3-51 | Production SLA & incident response | ops | S | **P1-GA** — support and on-call playbook. | SLA section in `docs/operations.md`; severity levels; key metrics. |
-| P3-52 | Enterprise GA epic | ops | L | **P1-GA epic** — see Enterprise GA section. | All GA rows + P1-14; P3-44 milestone closes. |
+| P3-52 | Enterprise GA epic | ops | L | **P1-GA epic** — requires **P3-53** airgap + Enterprise GA rows + P1-14. | P3-44 milestone closes. |
+| P3-53 | Airgap deployment epic | ops | L | **P1-GA epic** — primary enterprise install path. See Airgap section. | P3-54–P3-60 complete; airgap checklist signed off. |
+| P3-54 | Offline release bundle | ci | M | **P1-GA / airgap** — transferable BM artifact. | See Airgap section. |
+| P3-55 | Offline container image pack | ci | M | **P1-GA / airgap** — K8s private registry ingest. | See Airgap section. |
+| P3-56 | Airgap deployment runbook | docs | M | **P1-GA / airgap** — no-internet install guide. | See Airgap section. |
+| P3-57 | Internal CA & TLS | ops | S | **P1-GA / airgap** — org PKI, no ACME. | See Airgap section. |
+| P3-58 | Offline upgrade & rollback bundles | ops | M | **P1-GA / airgap** — patch without upstream access. | See Airgap section. |
+| P3-59 | Runtime egress & dependency matrix | docs | S | **P1-GA / airgap** — document optional outbound only. | See Airgap section. |
+| P3-60 | Private-registry K8s manifests | ops | M | **P1-GA / airgap** — no public registry defaults. | See Airgap section. |
 
 ### Capability map (reference)
 
@@ -271,7 +298,8 @@ Canonical list of all P3 IDs. **Priority order** is in sections above: **P1-MR**
 |------------|---------|
 | Multi-node cluster | **P1-14** → P1-17, P1-20, P1-21, P1-24 |
 | Distributed EC | P1-18, P1-19, P1-25 |
-| Enterprise GA | **P3-52** → P3-18, P3-26, P3-36, P3-37, P3-08, P3-06, P3-48–51, P3-24, P3-05 |
+| **Airgap deploy** | **P3-53** → P3-54–P3-60 (required for GA) |
+| Enterprise GA | **P3-52** → P3-53 + P3-18, P3-26, P3-36, P3-37, P3-08, P3-06, P3-48–51, P3-24, P3-05 |
 | Regulated / multi-tenant | **P3-43** → P3-28, P3-35, P3-29, P3-38, P3-39, P3-27, P3-47, P3-33 |
 | Geo-DR / CRR | Deferred — P3-34, P3-09 |
 | Edge LB (Pingora) | [knx-edge](https://github.com/smartedge-in/knx-edge) (P3-25 moved) |
@@ -291,6 +319,7 @@ Reference only — no backlog action unless regressions appear.
 | SSE-S3 / SSE-C / keyring rotation CLI | Implemented with AAD-bound frames |
 | Default credential production guard | Refuses `maxioadmin` without `--allow-insecure-dev` |
 | Docker non-root runtime | `USER maxio` in Dockerfile |
+| Airgap-friendly core | Single static binary; UI embedded; no runtime DB or external service required |
 | Integration test suite | ~160 tests in `tests/integration.rs`; `cargo test` in CI |
 | Erasure coding (single-node) | Chunked PUT/GET, range reads, parity RS recovery, encrypt-then-EC, ~20 EC/parity integration tests |
 | Public bucket anonymous access | Query sub-resource blocklist on bypass |
@@ -306,8 +335,8 @@ Reference only — no backlog action unless regressions appear.
 P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19 → P1-20 → P1-21 → P1-24 → P1-25 → **P1-14 close**
 (parallel: P3-24 license gate for Raft dep)
 
-**Phase 2 — Enterprise GA (single-region HA production):**
-P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-05 → **P3-52 / P3-44 close**
+**Phase 2 — Enterprise GA (airgap-first, single-region HA):**
+**P3-54 → P3-55 → P3-56 → P3-57 → P3-58 → P3-59 → P3-60 → P3-53** → P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-24 → P3-05 → **P3-52 / P3-44 close**
 
 **Phase 3 — Enterprise GA+ (regulated / multi-tenant):**
 P3-28 → P3-35 → P3-29 → P3-38 → P3-39 → P3-27 → P3-47 → P3-33 → **P3-43 close**

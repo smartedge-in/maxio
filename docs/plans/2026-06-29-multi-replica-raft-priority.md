@@ -67,4 +67,4 @@ P3-09, P3-11, P3-12 (operator/agent replication) may be revisited **after** P1-1
 
 ## After P1-14
 
-Enterprise production path is **Phase 2 (GA)** then **Phase 3 (GA+)** in `docs/BACKLOG.md` — epic **P3-52** → milestone **P3-44**. Raft-first; Helm deferred; plain K8s + bare metal.
+Enterprise production path is **Phase 2 (GA)** then **Phase 3 (GA+)** in `docs/BACKLOG.md` — **P3-53 airgap** + epic **P3-52** → milestone **P3-44**. Raft-first; airgap-first install; Helm deferred; plain K8s + bare metal.
