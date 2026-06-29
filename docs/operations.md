@@ -308,7 +308,16 @@ Versioned buckets skip automatic expiration in v1.
 
 ## Replication / federation
 
-Not implemented. See `docs/plans/2026-06-29-replication-federation.md` for the Phase 0 RFC and proposed rollout.
+Not implemented. Design and phased rollout:
+
+| Phase | Backlog | Scope |
+|-------|---------|-------|
+| 0 | ~~P3-02~~ | RFC — constraints and options (`docs/plans/2026-06-29-replication-federation.md`) |
+| 1 | P3-09 | Operator `rclone`/`rsync` runbook + bucket inventory export |
+| 2 | P3-10 | Storage trait + mutation event log |
+| 3 | P3-11 | `maxio-replicate` agent (active-passive apply) |
+
+Erasure coding (above) is single-node bitrot recovery, not geo-replication.
 
 ## Docker
 
