@@ -4,9 +4,9 @@
 > (its own repo, release cycle, and maintainers). MaxIO may *consume* it as an optional
 > edge tier (like Caddy or Traefik) but will not embed or ship it in the `maxio` binary.
 
-## Working title
+## Project
 
-`forge-edge` / `pingora-gateway` / `rivet-lb` — name TBD when the repo is created.
+**[knx-edge](https://github.com/smartedge-in/knx-edge)** — separate Apache-2.0 repo (Pingora L7 gateway).
 
 ## Problem
 
@@ -57,12 +57,12 @@ not a GPL VRRP reimplementation.
 
 ## Proposed architecture (separate repo)
 
-### Phase 1 — L7 gateway (`forge-edge` binary)
+### Phase 1 — L7 gateway (`knx-edge` binary)
 
 Apache-2.0 stack: **Pingora** + config file (TOML/YAML) + upstream pools.
 
 ```
-Clients ──► forge-edge (Pingora) ──► upstream pool
+Clients ──► knx-edge (Pingora) ──► upstream pool
                                       ├─ app-1:9000
                                       ├─ app-2:9000
                                       └─ app-3:9000
@@ -90,14 +90,14 @@ Alternatives to GPL **keepalived**:
 | **Delegate to MetalLB / kube-vip** | Apache-2.0 | K8s-only; document integration, don’t reimplement |
 | **VRRP in Rust** | Apache-2.0 possible | High effort; security audit burden |
 
-Suggested Phase 2 MVP: **small `forge-vip` sidecar** — watches Raft/etcd/lease API; on
+Suggested Phase 2 MVP: **small `knx-vip` sidecar** — watches Raft/etcd/lease API; on
 leadership, `ip addr add VIP/32`; on step-down, removes. Not full VRRP; good enough for
 many bare-metal pairs.
 
 ```
 ┌──────────────┐     leader lease      ┌──────────────┐
-│  forge-vip   │ ◄──────────────────► │  forge-vip   │
-│  + forge-edge│                      │  (standby)   │
+│  knx-vip     │ ◄──────────────────► │  knx-vip     │
+│  + knx-edge  │                      │  (standby)   │
 │  holds VIP   │                      │  no VIP      │
 └──────────────┘                      └──────────────┘
 ```
@@ -110,7 +110,7 @@ many bare-metal pairs.
 | License | Apache-2.0 | Apache-2.0 (proposed) |
 | Scope | S3 storage, server, UI | Generic L7 edge (+ optional VIP) |
 | Backlog | P3-25 dropped | Own roadmap |
-| Docs | Points to Caddy **or** optional `forge-edge` | Installation, HA patterns |
+| Docs | Points to Caddy **or** optional `knx-edge` | Installation, HA patterns |
 
 MaxIO **does not** need to own or block on this project. P3-26 (Caddy/Traefik/MetalLB)
 remains the **official** permissive path.
@@ -141,7 +141,7 @@ remains the **official** permissive path.
 
 ## Suggested next steps (if approved)
 
-1. Create repo `github.com/<org>/forge-edge` (name TBD) with Apache-2.0 LICENSE.
+1. Repo: [`github.com/smartedge-in/knx-edge`](https://github.com/smartedge-in/knx-edge) (Apache-2.0).
 2. Spike: Pingora proxy → 2 static upstreams, health check, TLS.
 3. Publish MaxIO example config (reference only, in both repos).
 4. Phase 2 RFC only after Phase 1 adoption feedback.
