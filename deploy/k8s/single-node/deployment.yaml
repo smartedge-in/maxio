@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maxio
+  namespace: maxio
+  labels:
+    app.kubernetes.io/name: maxio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: maxio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maxio
+    spec:
+      containers:
+        - name: maxio
+          image: REGISTRY/maxio:VERSION
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - --data-dir=/data
+            - --port=9000
+            - --address=0.0.0.0
+            - --serve-ui
+            - --metrics-enabled
+          ports:
+            - name: http
+              containerPort: 9000
+          envFrom:
+            - secretRef:
+                name: maxio-credentials
+                optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: maxio-data

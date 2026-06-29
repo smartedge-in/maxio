@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: maxio
+  namespace: maxio
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: maxio.example.com
+      http:
+        paths:
+          - path: /ui
+            pathType: Prefix
+            backend:
+              service:
+                name: maxio-ui
+                port:
+                  number: 9080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: maxio-server
+                port:
+                  number: 9000

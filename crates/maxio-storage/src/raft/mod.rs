@@ -15,12 +15,23 @@ pub struct RaftNodeConfig {
     pub peers: Vec<StorageEndpoint>,
 }
 
-/// Ordered mutation applied on the Raft leader and followers (v1 sketch).
+/// Ordered mutation applied on the Raft leader and followers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum StorageMutation {
-    CreateBucket { name: String, region: String },
-    DeleteBucket { name: String },
+    CreateBucket {
+        name: String,
+        region: String,
+    },
+    DeleteBucket {
+        name: String,
+    },
+    /// Distributed EC shard placement map (P1-18) — replicated metadata only.
+    PutShardMap {
+        bucket: String,
+        key: String,
+        map: maxio_common::cluster::EcShardPlacement,
+    },
 }
 
 #[cfg(test)]

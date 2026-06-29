@@ -1,0 +1,27 @@
+[package]
+name = "maxio-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Stateless static web console server for MaxIO (P1-21)"
+keywords = ["maxio", "s3", "ui", "static"]
+categories = ["web-programming::http-server"]
+
+[[bin]]
+name = "maxio-ui"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+maxio-common = { path = "../maxio-common" }
+rust-embed = "8"
+mime_guess = "2"
+hex = "0.4"
+http = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"

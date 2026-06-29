@@ -18,6 +18,7 @@ use crate::audit::audit_middleware;
 use crate::auth::credentials::CredentialStore;
 use crate::auth::keycloak::KeycloakAuth;
 use crate::auth::middleware::auth_middleware;
+use crate::cluster::ClusterState;
 use crate::config::Config;
 use crate::embedded::ui_handler;
 use crate::metrics::{metrics_handler, metrics_middleware};
@@ -48,6 +49,7 @@ pub struct AppState {
     pub keycloak: Option<Arc<KeycloakAuth>>,
     pub server_host: String,
     pub metrics: Arc<crate::metrics::Metrics>,
+    pub cluster: Option<ClusterState>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -95,10 +97,14 @@ pub fn build_router(state: AppState) -> Router {
         router = router.route("/metrics", get(metrics_handler));
     }
 
+    if state.config.serve_ui {
+        router = router
+            .route("/ui", get(ui_handler))
+            .route("/ui/", get(ui_handler))
+            .route("/ui/{*path}", get(ui_handler));
+    }
+
     router
-        .route("/ui", get(ui_handler))
-        .route("/ui/", get(ui_handler))
-        .route("/ui/{*path}", get(ui_handler))
         .merge(s3_routes)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -197,6 +203,17 @@ async fn healthz(State(state): State<AppState>, Query(query): Query<HealthQuery>
 }
 
 async fn readyz(State(state): State<AppState>) -> StatusCode {
+    if state.config.cluster_mode {
+        let quorum_ok = match &state.cluster {
+            Some(cluster) => cluster.storage_quorum_ok().await,
+            None => false,
+        };
+        if !quorum_ok {
+            tracing::warn!("readiness check failed: storage quorum not ok");
+            return StatusCode::SERVICE_UNAVAILABLE;
+        }
+    }
+
     match state.storage.check_readiness().await {
         Ok(()) => StatusCode::OK,
         Err(e) => {
@@ -273,5 +290,6 @@ pub fn new_app_state(
         keycloak,
         server_host: crate::api::virtual_host::effective_server_host(&config, listen_port),
         metrics: Arc::new(crate::metrics::Metrics::default()),
+        cluster: config.cluster_mode.then(ClusterState::new),
     }
 }

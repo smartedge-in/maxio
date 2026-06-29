@@ -133,6 +133,8 @@ mod tests {
             trusted_proxies: String::new(),
             login_rate_limit_redis_url: None,
             server_host: String::new(),
+            serve_ui: true,
+            cluster_mode: false,
             metrics_enabled: false,
             metrics_port: 0,
             audit_log: false,

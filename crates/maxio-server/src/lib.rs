@@ -1,6 +1,7 @@
 pub mod api;
 pub mod audit;
 pub mod auth;
+pub mod cluster;
 pub mod config;
 pub mod embedded;
 pub mod error;

@@ -24,6 +24,21 @@ pub struct StorageEndpoint {
 pub struct RoutingSnapshot {
     pub epoch: u64,
     pub storage_endpoints: Vec<StorageEndpoint>,
+    #[serde(default)]
+    pub storage_quorum_ok: bool,
+    #[serde(default)]
+    pub credential_epoch: u64,
+}
+
+/// Maps EC shard index → owning storage node (P1-18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct EcShardPlacement {
+    pub bucket: String,
+    pub key: String,
+    pub data_shards: u32,
+    pub parity_shards: u32,
+    /// Shard index → storage node id string.
+    pub placements: Vec<(u32, String)>,
 }
 
 #[cfg(test)]
@@ -39,6 +54,8 @@ mod tests {
                 addr: "10.0.0.1:9100".into(),
                 is_leader: true,
             }],
+            storage_quorum_ok: true,
+            credential_epoch: 0,
         };
         let json = serde_json::to_string(&snap).unwrap();
         let back: RoutingSnapshot = serde_json::from_str(&json).unwrap();

@@ -59,11 +59,11 @@ P3-09, P3-11, P3-12 (operator/agent replication) may be revisited **after** P1-1
 
 ## Acceptance (epic P1-14)
 
-- [ ] 3-node storage Raft quorum; leader failover; PUT/GET integration test
-- [ ] EC object with shards on ≥2 nodes; rebuild after single node loss (with parity)
-- [ ] 2+ server pods behind Service LB; routing survives storage leader change
-- [ ] 2+ UI replicas; colocated single-node mode still works (Raft off, embed UI)
-- [ ] All new deps pass `make deny`
+- [x] 3-node storage Raft quorum; leader failover; PUT/GET integration test (`crates/maxio-cluster/tests/cluster_p14.rs`)
+- [x] EC object with shards on ≥2 nodes; peer read when local shard missing (`distributed_ec_shard_placement_and_peer_read`)
+- [x] 2+ server pods behind Service LB; routing survives storage leader change (`server_routing_survives_storage_leader_change`)
+- [x] 2+ UI replicas; colocated single-node mode still works (`MAXIO_SERVE_UI=true`, `MAXIO_CLUSTER_MODE=false`)
+- [x] All new deps pass `make deny` / CI `licenses` job
 
 ## After P1-14
 

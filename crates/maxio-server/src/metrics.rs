@@ -98,6 +98,25 @@ impl Metrics {
         out.push_str("# TYPE maxio_active_multipart_uploads gauge\n");
         out.push_str(&format!("maxio_active_multipart_uploads {multipart}\n"));
 
+        if state.config.cluster_mode
+            && let Some(cluster) = &state.cluster
+        {
+            let epoch = cluster.routing_epoch().await;
+            let quorum = if cluster.storage_quorum_ok().await {
+                1
+            } else {
+                0
+            };
+            out.push_str("# HELP maxio_cluster_routing_epoch Server routing snapshot epoch\n");
+            out.push_str("# TYPE maxio_cluster_routing_epoch gauge\n");
+            out.push_str(&format!("maxio_cluster_routing_epoch {epoch}\n"));
+            out.push_str(
+                "# HELP maxio_cluster_storage_quorum_ok 1 when storage Raft quorum is healthy\n",
+            );
+            out.push_str("# TYPE maxio_cluster_storage_quorum_ok gauge\n");
+            out.push_str(&format!("maxio_cluster_storage_quorum_ok {quorum}\n"));
+        }
+
         if let Some((total, free)) = disk_space_bytes(state.storage.data_root()) {
             out.push_str("# HELP maxio_disk_total_bytes Total bytes on data volume\n");
             out.push_str("# TYPE maxio_disk_total_bytes gauge\n");

@@ -12,7 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `StorageBackend` trait (P1-15): all S3 metadata and object mutations go through `DynStorage` (`Arc<dyn StorageBackend>`) in `maxio-server`; `FilesystemStorage` is the default implementation; prerequisite for Raft apply path (`crates/maxio-storage/src/backend.rs`).
 - Raft library spike (P1-16): OpenRaft `0.9` selected; optional `raft-spike` feature and CI smoke test; documented in `docs/plans/2026-06-29-raft-library-spike.md`.
 - `maxio-common` crate (P1-22): shared `VERSION`, admin API JSON types (`StatusResponse`, `InfoResponse`, `DoctorResponse`), and cluster routing DTOs (`Tier`, `StorageEndpoint`, `RoutingSnapshot`); imported by `maxio-server`, `maxio-storage`, and `maxio-admin`.
-- Storage Raft scaffolding (P1-17, in progress): `raft` feature, `crates/maxio-storage/src/raft/` with `RaftNodeConfig` and `StorageMutation`; implementation plan in `docs/plans/2026-06-29-storage-raft-implementation.md`.
+- Multi-replica cluster epic (P1-14): `crates/maxio-cluster` with storage Raft (P1-17), distributed EC shard placement + peer read (P1-18/P1-19), server routing snapshot (P1-20), and `ClusterHarness` acceptance tests (P1-24).
+- Stateless UI tier (P1-21): `crates/maxio-ui` binary serving the embedded SPA; `MAXIO_SERVE_UI` on `maxio-server` (default `true`; set `false` when UI runs separately).
+- Cluster server mode (P1-20): `MAXIO_CLUSTER_MODE` gates `/readyz` on storage quorum; Prometheus gauges `maxio_cluster_routing_epoch` and `maxio_cluster_storage_quorum_ok`.
+- Kubernetes manifests (P1-24): `deploy/k8s/single-node/` and `deploy/k8s/distributed/` (3 storage StatefulSet, 2 server Deployment, 2 UI Deployment, Ingress split `/ui` vs S3).
+- Cluster CI harness (P1-24): `scripts/cluster-test.sh` and GitHub Actions `cluster` job.
+- Storage Raft types (P1-17): `raft` feature, `crates/maxio-storage/src/raft/` with `RaftNodeConfig`, `StorageMutation` (including `PutShardMap` for distributed EC).
 - npm runtime license audit (P3-24): `scripts/check-npm-licenses.sh` in CI; local `make npm-licenses`; documented in `docs/licensing.md`.
 
 - SQLite metadata index (P3-03): `MAXIO_METADATA_INDEX` / `--metadata-index` maintains `{data_dir}/.maxio-metadata.db` for fast `ListObjects`; rebuild on startup; filesystem walk fallback.

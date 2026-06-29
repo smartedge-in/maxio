@@ -133,6 +133,14 @@ pub struct Config {
     #[arg(long, env = "MAXIO_SERVER_HOST", default_value = "")]
     pub server_host: String,
 
+    /// Serve embedded web console at `/ui` (disable when using standalone `maxio-ui`).
+    #[arg(long, env = "MAXIO_SERVE_UI", default_value = "true")]
+    pub serve_ui: bool,
+
+    /// Distributed cluster mode: `/readyz` requires storage quorum in routing snapshot.
+    #[arg(long, env = "MAXIO_CLUSTER_MODE", default_value = "false")]
+    pub cluster_mode: bool,
+
     /// Expose Prometheus metrics at `GET /metrics` on the main HTTP listener.
     #[arg(long, env = "MAXIO_METRICS_ENABLED", default_value = "false")]
     pub metrics_enabled: bool,
@@ -217,6 +225,24 @@ mod tests {
     struct TestCli {
         #[command(flatten)]
         config: Config,
+    }
+
+    #[test]
+    fn serve_ui_defaults_true() {
+        unsafe {
+            std::env::remove_var("MAXIO_SERVE_UI");
+        }
+        let cli = TestCli::parse_from(["maxio"]);
+        assert!(cli.config.serve_ui);
+    }
+
+    #[test]
+    fn cluster_mode_defaults_false() {
+        unsafe {
+            std::env::remove_var("MAXIO_CLUSTER_MODE");
+        }
+        let cli = TestCli::parse_from(["maxio"]);
+        assert!(!cli.config.cluster_mode);
     }
 
     #[test]

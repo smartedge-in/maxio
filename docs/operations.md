@@ -324,7 +324,7 @@ Single-node deployments use `FilesystemStorage` behind the `StorageBackend` trai
 |-----------|----------|
 | Trait + `dyn_storage()` | `crates/maxio-storage/src/backend.rs` |
 | Server wiring | `AppState.storage: DynStorage` in `maxio-server` |
-| Raft apply path (planned) | P1-17 — mutations ordered on storage Raft leader, applied locally |
+| Raft apply path | P1-17 — `maxio-cluster` storage Raft; mutations ordered on leader, applied locally |
 
 Today all I/O is local filesystem. Integration tests exercise the trait boundary unchanged.
 
@@ -334,28 +334,27 @@ Not implemented. **Priority 1** path is **Raft-first multi-replica** (not operat
 
 | Backlog | Scope |
 |---------|-------|
-| **P1-14** (epic) | Live multi-node: dual Raft + distributed EC — `docs/plans/2026-06-29-multi-replica-raft-priority.md` |
+| ~~P1-14~~ ✓ | Live multi-node: dual Raft + distributed EC — `docs/plans/2026-06-29-multi-replica-raft-priority.md` |
 | ~~P1-15~~ ✓ | `StorageBackend` trait — prerequisite for Raft apply |
 | ~~P1-16~~ ✓ | OpenRaft `0.9` spike + license gate — `docs/plans/2026-06-29-raft-library-spike.md` |
 | ~~P1-22~~ ✓ | `maxio-common` — shared `VERSION`, admin DTOs, routing snapshots |
-| **P1-17** (active) | Storage tier Raft — `docs/plans/2026-06-29-storage-raft-implementation.md` |
-| P1-18–P1-21 | Distributed EC → Server Raft → stateless UI |
+| ~~P1-17~~ ✓ | Storage tier Raft — `docs/plans/2026-06-29-storage-raft-implementation.md` |
+| ~~P1-18–P1-21~~ ✓ | Distributed EC → Server routing → stateless `maxio-ui` |
+| ~~P1-24~~ ✓ | `scripts/cluster-test.sh`; `deploy/k8s/distributed/` |
 | ~~P3-09–P3-11~~ | Operator `rsync`/agent track — **deferred** |
 
-Erasure coding (above) is single-node today; **P1-18/P1-19** extend EC across storage nodes.
+Erasure coding supports single-node (default) and distributed shard placement (`maxio-cluster`, P1-18/P1-19).
 
-### Asymmetric scale-out (planned, P1-14)
+### Asymmetric scale-out (P1-14)
 
-The `maxio-storage` / `maxio-server` crate split (P3-04) does not yet allow different replica counts per tier. Today every pod is a full stack with its own `data_dir`.
+Distributed layouts use separate replica counts per tier (`deploy/k8s/distributed/`). Single-node colocated mode remains the default (`MAXIO_CLUSTER_MODE=false`, embedded UI).
 
-Target architecture (`docs/plans/2026-06-29-distributed-scale-raft.md`):
-
-| Tier | Consensus | Backlog |
-|------|-----------|---------|
-| `maxio-ui` | None (stateless static SPA) | P3-16 |
-| `maxio-server` | Independent server Raft quorum | P3-15 |
-| `maxio-storage` | Independent storage Raft quorum | P3-14 |
-| Epic (asymmetric replicas) | All three tiers | P1-14 |
+| Tier | Consensus | Status |
+|------|-----------|--------|
+| `maxio-ui` | None (stateless static SPA) | Shipped (`crates/maxio-ui`) |
+| `maxio-server` | Routing snapshot (`ClusterState`) | Shipped (`MAXIO_CLUSTER_MODE`) |
+| `maxio-storage` | Storage Raft quorum (`maxio-cluster`) | Shipped (in-process; HTTP join TBD) |
+| Epic (asymmetric replicas) | All three tiers | P1-14 closed |
 
 Storage and server each elect their own Raft leader. UI replicas are interchangeable and hold no session state. Replica counts may differ (e.g. 3 UI, 3 server, 5 storage). See `docs/plans/2026-06-29-ui-scale-out.md`.
 
@@ -380,7 +379,20 @@ Target layout: release binary, dedicated `maxio` user, `MAXIO_DATA_DIR` on local
 
 ## Kubernetes
 
-Use this minimal Deployment pattern (`replicas: 1` — required until distributed tiers, P1-14). Official manifests will live under `deploy/k8s/` (P1-24); Helm chart is optional later (P3-19):
+Official manifests live under `deploy/k8s/` — single-node (`single-node/`) and distributed tiers (`distributed/`). Helm chart is optional later (P3-19).
+
+**Distributed cluster (P1-14):**
+
+```bash
+kubectl apply -f deploy/k8s/distributed/
+# Replace REGISTRY/maxio:VERSION and REGISTRY/maxio-ui:VERSION in manifests before apply.
+```
+
+**Server tier flags:** `MAXIO_SERVE_UI=false` when using standalone `maxio-ui`; `MAXIO_CLUSTER_MODE=true` so `/readyz` requires storage quorum in the routing snapshot.
+
+**Local harness:** `bash scripts/cluster-test.sh` runs in-process 3-node Raft acceptance tests.
+
+Single-node minimal pattern (`replicas: 1`):
 
 ```yaml
 apiVersion: apps/v1

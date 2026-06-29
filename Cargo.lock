@@ -1404,6 +1404,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "maxio-cluster"
+version = "0.4.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures",
+ "maxio-common",
+ "maxio-storage",
+ "openraft",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "maxio-common"
 version = "0.4.2"
 dependencies = [
@@ -1485,6 +1504,23 @@ dependencies = [
  "tracing",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "maxio-ui"
+version = "0.4.2"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "hex",
+ "http",
+ "maxio-common",
+ "mime_guess",
+ "rust-embed",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1633,6 +1669,7 @@ dependencies = [
  "maplit",
  "openraft-macros",
  "rand 0.8.6",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

@@ -1,4 +1,4 @@
-# Storage tier Raft implementation (P1-17)
+# Storage tier Raft implementation (P1-17) — **Done**
 
 ## Status
 

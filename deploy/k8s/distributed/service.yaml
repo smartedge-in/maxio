@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: maxio-storage
+  namespace: maxio
+  labels:
+    app.kubernetes.io/name: maxio
+    app.kubernetes.io/component: storage
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: maxio
+    app.kubernetes.io/component: storage
+  ports:
+    - name: http
+      port: 9100
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: maxio-server
+  namespace: maxio
+  labels:
+    app.kubernetes.io/name: maxio
+    app.kubernetes.io/component: server
+spec:
+  selector:
+    app.kubernetes.io/name: maxio
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: maxio-ui
+  namespace: maxio
+  labels:
+    app.kubernetes.io/name: maxio
+    app.kubernetes.io/component: ui
+spec:
+  selector:
+    app.kubernetes.io/name: maxio
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      port: 9080
+      targetPort: http
