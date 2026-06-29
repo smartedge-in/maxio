@@ -103,6 +103,7 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | P3-05 | ARM64 release binaries | ci | S | Release workflow may be x86-only today. | Multi-arch Docker image and GitHub release assets. |
 | P3-06 | UI E2E tests (Playwright) | ui | M | No browser-level tests for upload/download flows. | Smoke test: login → create bucket → upload → download → delete. |
 | ~~P3-07~~ | ~~Per-bucket erasure coding toggle~~ | storage | L | Done — `BucketMeta.erasure_coding` override; `PUT/GET ?erasure`; writes use `effective_erasure_coding()`; reads layout-based; existing flat objects unchanged. | — |
+| P3-08 | Keycloak console UI login | ui | M | Server exposes `/api/auth/keycloak-config`, `keycloak-login`, and `keycloak-refresh` on `feat/keycloak-auth`; Svelte console still uses access/secret login only. | `Login.svelte` reads `keycloak-config` on load; when enabled, username/password form calls `keycloak-login` and reuses cookie session; silent refresh before expiry; access/secret form hidden when Keycloak-only; Playwright smoke test for Keycloak path (extends P3-06). |
 
 ---
 
