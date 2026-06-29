@@ -21,18 +21,24 @@ In Docker/Kubernetes, binding `0.0.0.0` inside the pod is normal when the Servic
 
 ## TLS termination
 
-MaxIO serves plain HTTP. Terminate TLS at your load balancer, ingress, or reverse proxy (nginx, Caddy, Traefik, etc.) and forward to MaxIO over HTTP on a trusted network.
+MaxIO serves plain HTTP. Terminate TLS at your load balancer, ingress, or reverse proxy and forward to MaxIO over HTTP on a trusted network.
 
-Example nginx snippet:
+**Permissive-licensed proxies (recommended):** [Caddy](https://caddyserver.com/) (Apache-2.0), [Traefik](https://traefik.io/) (MIT), [Envoy](https://www.envoyproxy.io/) (Apache-2.0). On Kubernetes use Ingress or [MetalLB](https://metallb.io/) (Apache-2.0) — see `docs/plans/2026-06-29-permissive-ingress-ha.md` (P3-26).
 
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:9000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    client_max_body_size 0;  # streaming uploads
+**Not recommended** in MaxIO runbooks: **keepalived** and **HAProxy Community** (GPL-2.0), which conflict with the permissive-only policy in `docs/licensing.md`.
+
+Example **Caddyfile** (reverse proxy to local MaxIO):
+
+```caddyfile
+:443 {
+    tls internal   # replace with your ACME / cert paths in production
+    reverse_proxy 127.0.0.1:9000 {
+        flush_interval -1   # streaming uploads
+    }
 }
 ```
+
+Set `MAXIO_TRUSTED_PROXIES` to your proxy CIDRs so rate limits and audit logs see real client IPs.
 
 Set `MAXIO_SECURE_COOKIES=true` (default) when the console is served over HTTPS so session cookies include the `Secure` flag.
 

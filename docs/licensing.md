@@ -15,6 +15,10 @@ This applies to **every workspace crate** (`maxio`, `maxio-storage`, `maxio-serv
 
 New dependencies require license review before merge. CI **`make deny`** / `cargo deny check licenses` must pass. If a crate is Apache-2.0 **AND** another permissive license (e.g. ISC), both identifiers must be in [`deny.toml`](../deny.toml) `allow`.
 
+### Edge and HA tooling (deployments)
+
+Official MaxIO runbooks (P3-18, P3-19, P3-26) recommend **permissive** ingress/LB only — e.g. **Caddy** (Apache-2.0), **Traefik** (MIT), **MetalLB** (Apache-2.0). **Do not document keepalived or HAProxy CE** as the default path (GPL-2.0). See [`docs/plans/2026-06-29-permissive-ingress-ha.md`](plans/2026-06-29-permissive-ingress-ha.md).
+
 ### Adding a dependency (checklist)
 
 1. Confirm SPDX identifier is on the `deny.toml` allow-list (or add it only if permissive).

@@ -5,7 +5,7 @@
 **P3-25 / `maxio-edge` is not pursued.** Client-facing LB and TLS stay with **standard external components**:
 
 - **Kubernetes:** Ingress + Service (P3-19)
-- **Bare metal:** nginx / Caddy / HAProxy + keepalived VIP (P3-18)
+- **Bare metal:** Caddy / Traefik + optional DNS or K8s MetalLB (P3-26) — **not** keepalived (GPL)
 - **Single-node:** direct bind or local reverse proxy (`docs/operations.md`)
 
 MaxIO focuses on S3 storage and cluster tiers (P3-13+), not shipping a custom edge proxy. Pingora remains a fine choice for operators who build their **own** edge — it is not a MaxIO product requirement.

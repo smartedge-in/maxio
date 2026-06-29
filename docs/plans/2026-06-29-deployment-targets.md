@@ -19,7 +19,7 @@ Docker remains a packaging format; bare metal and K8s are the operator-facing ta
 |---------|------------|------------|
 | **Single-node** (today) | systemd + one host, one `data_dir` | Deployment `replicas: 1` + PVC |
 | **Distributed** (P3-13+) | systemd per tier or role-specific units on distinct hosts | StatefulSet (storage) + Deployment (server, UI) + Ingress split |
-| **TLS** | nginx/Caddy on host | Ingress + cert-manager |
+| **TLS / LB** | Caddy or Traefik (Apache-2.0 / MIT); no keepalived | Ingress + MetalLB or cert-manager (P3-26) |
 | **Ops CLI** | `maxio-admin` on jump host | `maxio-admin` Job/CronJob or out-of-cluster |
 
 ## Bare metal (P3-18)
@@ -33,7 +33,7 @@ Docker remains a packaging format; bare metal and K8s are the operator-facing ta
 │  ├─ systemd: maxio.service              │
 │  ├─ /var/lib/maxio  → MAXIO_DATA_DIR    │
 │  ├─ local SSD / LVM / optional SAN      │
-│  └─ nginx/Caddy TLS → 127.0.0.1:9000    │
+│  └─ Caddy TLS → 127.0.0.1:9000          │
 └─────────────────────────────────────────┘
 ```
 
