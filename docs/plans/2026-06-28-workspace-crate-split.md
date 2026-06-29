@@ -12,7 +12,7 @@ crates/
   maxio-storage/        # filesystem, crypto, keys, policy, quota
   maxio-server/         # api, auth, metrics, audit (UI embed → P3-16 extract)
   maxio-ui/             # planned (P3-16) — stateless static console server
-  maxio-admin/          # unchanged; depends on facade
+  maxio-admin/          # ops CLI — decouple from facade (P3-17)
 ui/                     # Svelte source → built assets for maxio-ui
 ```
 
@@ -21,6 +21,7 @@ ui/                     # Svelte source → built assets for maxio-ui
 - **maxio-storage** has no `axum`, `http`, or S3 XML types. `StorageError` stays in storage.
 - **maxio-server** depends on `maxio-storage` and maps storage errors to `S3Error` via `map_storage_upload_error()`.
 - **maxio** (root) re-exports both crates so `maxio::storage::*` and `maxio::server::*` remain the public API.
+- **maxio-admin** should depend on `maxio-storage` only (P3-17), not the root facade or `maxio-server`.
 
 ## Build
 

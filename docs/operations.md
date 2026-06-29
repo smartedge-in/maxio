@@ -207,6 +207,8 @@ curl -sS -H "Authorization: Bearer $MAXIO_ADMIN_TOKEN" \
 
 ### `maxio-admin` CLI
 
+`maxio-admin` is a **separate workspace crate** (`crates/maxio-admin`) and operator client — it is not deployed as a cluster replica. Target boundary (P3-17): depend on `maxio-storage` for local `--data-dir` commands only; remote commands use the admin HTTP API with no link to `maxio-server`. See `docs/plans/2026-06-29-admin-cli-crate.md`.
+
 Build from the repository root:
 
 ```bash
