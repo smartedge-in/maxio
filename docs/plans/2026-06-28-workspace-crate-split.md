@@ -29,3 +29,16 @@ crates/
 
 - Crate-boundary unit tests in each library (`maxio-storage`, `maxio-server`, root facade).
 - Integration tests remain at `tests/integration.rs` on the root package.
+
+## Follow-on: asymmetric scale-out (P3-13)
+
+The split enables **independent scaling** once a runtime boundary exists:
+
+```
+Clients ──► maxio-server × N   (HTTP/S3, auth, console — stateless)
+                 │
+                 ▼  remote StorageBackend (from P3-10)
+            maxio-storage × M  (filesystem, keys, quota — owns data_dir)
+```
+
+Today both crates still ship in one process with a local `data_dir`. P3-13 tracks deploying and scaling each tier with different replica counts; blocked on `StorageBackend` trait work in P3-10.

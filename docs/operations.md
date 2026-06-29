@@ -320,6 +320,10 @@ Not implemented. Design and phased rollout:
 
 Erasure coding (above) is single-node bitrot recovery, not geo-replication.
 
+### Asymmetric scale-out (planned, P3-13)
+
+The `maxio-storage` / `maxio-server` crate split (P3-04) does not yet allow different replica counts per tier. Today every pod is a full stack with its own `data_dir`. Future work (P3-13, depends on P3-10 `StorageBackend`) will let operators scale API/console pods independently of storage nodes.
+
 ## Docker
 
 ```bash
