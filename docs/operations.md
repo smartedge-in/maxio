@@ -312,6 +312,7 @@ Not implemented. Design and phased rollout:
 
 | Phase | Backlog | Scope |
 |-------|---------|-------|
+| Epic | P3-12 | Multiple replicas support (primary + standby; tracks phases below) |
 | 0 | ~~P3-02~~ | RFC — constraints and options (`docs/plans/2026-06-29-replication-federation.md`) |
 | 1 | P3-09 | Operator `rclone`/`rsync` runbook + bucket inventory export |
 | 2 | P3-10 | Storage trait + mutation event log |
