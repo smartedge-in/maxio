@@ -334,7 +334,7 @@ Not implemented. **Priority 1** path is **Raft-first multi-replica** (not operat
 
 | Backlog | Scope |
 |---------|-------|
-| ~~P1-14~~ ✓ | Live multi-node: dual Raft + distributed EC — `docs/plans/2026-06-29-multi-replica-raft-priority.md` |
+| ~~P1-14~~ ✓ | Live multi-node: storage OpenRaft + server routing snapshot + distributed EC — `docs/plans/2026-06-29-multi-replica-raft-priority.md` |
 | ~~P1-15~~ ✓ | `StorageBackend` trait — prerequisite for Raft apply |
 | ~~P1-16~~ ✓ | OpenRaft `0.9` spike + license gate — `docs/plans/2026-06-29-raft-library-spike.md` |
 | ~~P1-22~~ ✓ | `maxio-common` — shared `VERSION`, admin DTOs, routing snapshots |
@@ -376,11 +376,16 @@ Distributed layouts use separate replica counts per tier (`deploy/k8s/distribute
 | `maxio-storage` | Storage Raft quorum (`maxio-cluster`) | Shipped (in-process; HTTP join TBD) |
 | Epic (asymmetric replicas) | All three tiers | P1-14 closed |
 
-Storage and server each elect their own Raft leader. UI replicas are interchangeable and hold no session state. Replica counts may differ (e.g. 3 UI, 3 server, 5 storage). See `docs/plans/2026-06-29-ui-scale-out.md`.
+Only the **storage** tier runs OpenRaft consensus; **server** replicas share a routing snapshot (`ClusterState`, P1-20) polled from storage leaders — they do not run a separate Raft election. UI replicas are interchangeable and hold no session state. Replica counts may differ (e.g. 3 UI, 3 server, 5 storage). See `docs/plans/2026-06-29-ui-scale-out.md`.
 
 ## Docker
 
+> **Airgap:** Use `REGISTRY/maxio:VERSION` from your private registry after `scripts/load-images.sh`. Do not rely on `:latest` or public registry defaults in production.
+
 ```bash
+REGISTRY=registry.internal:5000/maxio
+VERSION=v0.4.2
+
 docker run -d \
   --name maxio \
   -p 9000:9000 \
@@ -388,8 +393,10 @@ docker run -d \
   -e MAXIO_ACCESS_KEY=... \
   -e MAXIO_SECRET_KEY=... \
   -e MAXIO_MAX_OBJECT_BYTES=5368709120 \
-  ghcr.io/coollabsio/maxio
+  "${REGISTRY}/maxio:${VERSION}"
 ```
+
+Connected dev/lab may use public images with an explicit version tag, e.g. `ghcr.io/coollabsio/maxio:0.4.2`.
 
 Mount the data volume on durable storage (SSD, network block volume). Bind-mounting an NFS path works but latency affects listing performance.
 
@@ -504,7 +511,7 @@ spec:
     spec:
       containers:
         - name: maxio
-          image: ghcr.io/coollabsio/maxio:latest
+          image: REGISTRY/maxio:VERSION
           ports:
             - containerPort: 9000
           env:
@@ -828,6 +835,33 @@ Core MaxIO requires **no outbound internet** for S3 API, console, housekeeping, 
 | Prometheus → MaxIO `/metrics` | Optional | Inbound to MaxIO | `MAXIO_METRICS_ENABLED=true` |
 | MaxIO → Redis | Optional | Outbound to **internal** Redis | `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` (multi-replica console) |
 | MaxIO → Keycloak | Optional | Outbound to **internal** IdP | `MAXIO_KEYCLOAK_ENABLED=true` |
+
+## Keycloak console SSO (P3-08)
+
+Optional OIDC login for the **web console only** — S3 SigV4 access keys are unchanged. Keycloak must be reachable on an **internal** network (airgap sites run their own IdP; no external identity providers).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAXIO_KEYCLOAK_ENABLED` | `false` | Enable Keycloak password + refresh grants for `/ui/` |
+| `MAXIO_KEYCLOAK_BASE_URL` | _(empty)_ | Internal Keycloak base URL, e.g. `https://keycloak.internal` (no trailing slash) |
+| `MAXIO_KEYCLOAK_REALM` | `kubenexis` | Realm name |
+| `MAXIO_KEYCLOAK_CLIENT_ID` | `maxio-ui` | OIDC client id (direct-access / password grant enabled) |
+| `MAXIO_KEYCLOAK_CLIENT_SECRET` | _(empty)_ | Client secret when the Keycloak client is confidential |
+| `MAXIO_KEYCLOAK_JWKS_URL` | _(auto)_ | Override JWKS URL if Keycloak is behind a split-horizon proxy |
+| `MAXIO_KEYCLOAK_ISSUER` | _(auto)_ | Override issuer URL for JWT validation |
+| `MAXIO_KEYCLOAK_SKIP_TLS_VERIFY` | `false` | Dev only; requires `--allow-insecure-dev` |
+
+When enabled, the console fetches `/api/auth/keycloak-config` and shows a username/password SSO form. The UI silently refreshes the session via `/api/auth/keycloak-refresh` (refresh token stored in an HttpOnly cookie). Point all `MAXIO_KEYCLOAK_*` URLs at your **internal** IdP — never at a public SaaS identity provider in classified environments.
+
+Example (single-node, internal Keycloak):
+
+```bash
+export MAXIO_KEYCLOAK_ENABLED=true
+export MAXIO_KEYCLOAK_BASE_URL=https://keycloak.internal
+export MAXIO_KEYCLOAK_REALM=production
+export MAXIO_KEYCLOAK_CLIENT_ID=maxio-ui
+maxio serve --data-dir /data --port 9000
+```
 | MaxIO → webhook targets | Optional (P3-27) | Outbound to **internal** URLs | Event notifications (future) |
 | MaxIO → Vault/KMS | Optional (P3-35) | Outbound to **internal** HSM/Vault | SSE-KMS (future) |
 | Build host → crates.io / bun registry | Build-time only | Outbound | **Not on production hosts** |

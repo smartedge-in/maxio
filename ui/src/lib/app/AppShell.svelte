@@ -15,7 +15,7 @@
   import Moon from "lucide-svelte/icons/moon";
   import Monitor from "lucide-svelte/icons/monitor";
   import { Sonner } from "$lib/components/ui/sonner";
-  import { checkAuth, logout } from "$lib/api/auth";
+  import { checkAuth, getKeycloakConfig, keycloakRefresh, logout } from "$lib/api/auth";
   import { authKeys } from "$lib/api/keys";
   import { queryClient } from "$lib/query/client";
 
@@ -44,6 +44,10 @@
   let themeMode = $state<ThemeMode>("system");
   let isDark = $state(true);
   let pendingPrefix = $state<string | null>(null);
+  let keycloakEnabled = $state(false);
+
+  /** Default silent refresh cadence when Keycloak access token lifetime is unknown. */
+  const KEYCLOAK_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
 
   const themeOptions: { mode: ThemeMode; label: string; icon: typeof Sun }[] = [
     { mode: "light", label: "Light", icon: Sun },
@@ -116,9 +120,38 @@
       applyHash();
     }
 
+    let keycloakRefreshTimer: ReturnType<typeof setInterval> | undefined;
+
+    void getKeycloakConfig()
+      .then((config) => {
+        keycloakEnabled = config.enabled;
+        if (!config.enabled) return;
+
+        const refreshSession = async () => {
+          if (!(authenticatedOverride ?? authQuery.isSuccess)) return;
+          try {
+            await keycloakRefresh();
+          } catch (err) {
+            console.warn("Keycloak silent refresh failed:", err);
+            authenticatedOverride = false;
+            queryClient.invalidateQueries({ queryKey: authKeys.all });
+          }
+        };
+
+        keycloakRefreshTimer = setInterval(() => {
+          void refreshSession();
+        }, KEYCLOAK_REFRESH_INTERVAL_MS);
+      })
+      .catch((err) => {
+        console.warn("Keycloak config unavailable; skipping silent refresh:", err);
+      });
+
     return () => {
       window.removeEventListener("hashchange", applyHash);
       mediaQuery.removeEventListener("change", handleSystemThemeChange);
+      if (keycloakRefreshTimer !== undefined) {
+        clearInterval(keycloakRefreshTimer);
+      }
     };
   });
 

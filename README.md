@@ -82,20 +82,25 @@ requirements and stages that need Docker or bun.
 
 ### Docker
 
+> **Airgap / enterprise:** Production hosts should pull from a **private registry** after ingesting offline image packs (`make offline-images`). Pin `REGISTRY/maxio:VERSION` — not `:latest` or public `docker.io` defaults. See [docs/operations.md](docs/operations.md#airgap-deployment-p3-56).
+
 ```bash
+REGISTRY=registry.internal:5000/maxio
+VERSION=v0.4.2   # match your release tag
+
 docker run -d \
   -p 9000:9000 \
   -v $(pwd)/data:/data \
-  ghcr.io/coollabsio/maxio
+  "${REGISTRY}/maxio:${VERSION}"
 ```
 
-Or from Docker Hub:
+Public registries (connected dev/lab only):
 
 ```bash
 docker run -d \
   -p 9000:9000 \
   -v $(pwd)/data:/data \
-  coollabsio/maxio
+  ghcr.io/coollabsio/maxio:0.4.2
 ```
 
 Configure with environment variables:
@@ -107,7 +112,7 @@ docker run -d \
   -e MAXIO_ACCESS_KEY=myadmin \
   -e MAXIO_SECRET_KEY=mysecret \
   -e MAXIO_DEFAULT_BUCKETS=my-bucket,logs,backups \
-  ghcr.io/coollabsio/maxio
+  "${REGISTRY}/maxio:${VERSION}"
 ```
 
 Docker Compose:
@@ -115,7 +120,7 @@ Docker Compose:
 ```yaml
 services:
   maxio:
-    image: ghcr.io/coollabsio/maxio
+    image: REGISTRY/maxio:VERSION   # e.g. registry.internal:5000/maxio/maxio:v0.4.2
     ports:
       - "9000:9000"
     volumes:

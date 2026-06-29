@@ -1,0 +1,38 @@
+FROM rust:1-bookworm AS builder
+
+ARG MAXIO_VERSION=0.0.0
+
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+WORKDIR /app
+
+COPY ui/package.json ui/bun.lock ./ui/
+RUN cd ui && bun install --frozen-lockfile
+
+COPY VERSION scripts/sync-version.sh Cargo.toml Cargo.lock build.rs ./
+COPY crates ./crates
+COPY src ./src
+COPY ui ./ui
+
+RUN chmod +x scripts/sync-version.sh && ./scripts/sync-version.sh
+RUN cd ui && bun run build
+RUN cargo build --release --locked -p maxio-ui
+
+FROM debian:bookworm-slim AS runtime
+
+ARG MAXIO_VERSION=0.0.0
+LABEL org.opencontainers.image.version="${MAXIO_VERSION}"
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --system --create-home --home-dir /nonexistent --shell /usr/sbin/nologin maxio
+
+COPY --from=builder /app/target/release/maxio-ui /usr/local/bin/maxio-ui
+
+EXPOSE 9080
+USER maxio:maxio
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["curl", "-fsS", "http://127.0.0.1:9080/healthz"]
+
+ENTRYPOINT ["maxio-ui"]

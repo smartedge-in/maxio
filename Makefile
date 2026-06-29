@@ -354,10 +354,25 @@ report: ## Generate JSON Trivy report (suitable for HTML conversion)
 	@printf "$(COLOR_DIM)Convert to HTML with your preferred SARIF/JSON viewer or CI integration.$(COLOR_RESET)\n"
 
 # =============================================================================
-# Container image
+# Offline release artifacts (P3-54 / P3-55)
 # =============================================================================
 
-.PHONY: image trivy-image trivy-image-critical
+.PHONY: offline-bundle offline-images
+
+offline-bundle: sync-version ## Build offline release tarball (maxio, maxio-admin, maxio-ui)
+	$(call log,Building offline release bundle)
+	bash scripts/build-offline-bundle.sh
+	@printf "$(COLOR_GREEN)Offline bundle written to dist/offline-bundle/$(COLOR_RESET)\n"
+
+offline-images: sync-version ## Build and export offline container image pack
+	$(call log,Building offline container image pack)
+	$(call require_cmd,$(DOCKER))
+	bash scripts/build-offline-images.sh
+	@printf "$(COLOR_GREEN)Offline images written to dist/offline-images/$(COLOR_RESET)\n"
+
+# =============================================================================
+# Container image
+# =============================================================================
 
 image: sync-version ## Build Docker container image
 	$(call log,Building Docker image $(IMAGE_REF))
