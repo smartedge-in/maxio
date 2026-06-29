@@ -134,7 +134,7 @@ mod tests {
             std::env::remove_var("MAXIO_CLUSTER_MODE");
             std::env::remove_var("MAXIO_SERVE_UI");
         }
-        let cli = TestCli::parse_from(["maxio", "serve", "--data-dir", "/data"]);
+        let cli = TestCli::parse_from(["maxio", "--data-dir", "/data"]);
         assert!(!cli.config.cluster_mode);
         assert!(cli.config.serve_ui);
     }
