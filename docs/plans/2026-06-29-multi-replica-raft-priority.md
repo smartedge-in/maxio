@@ -40,7 +40,7 @@ Clients → Ingress → maxio-ui × K (stateless)
 | 6 | P1-19 | Multi-node EC read/rebuild — fetch parity from peers |
 | 7 | P1-20 | Server Raft — routing snapshot, scale API pods |
 | 8 | P1-21 | Stateless `maxio-ui` |
-| 9 | P1-23 | Helm `values-distributed.yaml` + 3-node test harness (P1-24) |
+| 9 | P1-24 | 3-node test harness (`kind` / bare metal / plain K8s YAML — not Helm) |
 
 ## Erasure coding: single-node vs cluster
 

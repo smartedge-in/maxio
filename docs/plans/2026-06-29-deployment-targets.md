@@ -9,7 +9,7 @@ Draft — architectural requirement. Docker and a minimal K8s YAML snippet exist
 MaxIO **must** support **two production deployment models** as equal citizens:
 
 1. **Bare metal** (or VM) — native binary on Linux hosts with local or mounted block storage.
-2. **Kubernetes** — Helm-based install with probes, PVCs, Ingress, and optional multi-tier layouts (P3-13+).
+2. **Kubernetes** — plain YAML manifests (`deploy/k8s/`) with probes, PVCs, Ingress, and optional multi-tier layouts (P1-14). Helm chart optional later (P3-19).
 
 Docker remains a packaging format; bare metal and K8s are the operator-facing targets.
 
@@ -53,46 +53,51 @@ Docker remains a packaging format; bare metal and K8s are the operator-facing ta
 - Windows or macOS server support
 - Automated bare-metal cluster bootstrap (Terraform/Ansible optional later)
 
-## Kubernetes (P3-19)
+## Kubernetes (plain YAML — P1-24; Helm optional — P3-19)
 
 ### Target operator flow
 
 ```
-helm install maxio ./charts/maxio \
-  --set credentials.existingSecret=maxio-credentials \
-  --set persistence.size=500Gi
+kubectl apply -f deploy/k8s/single-node/
+# or for distributed tiers (P1-14):
+kubectl apply -f deploy/k8s/distributed/
 ```
 
-### Chart structure (proposed)
+### Manifest layout (proposed)
 
 ```
-deploy/helm/maxio/
-  Chart.yaml
-  values.yaml          # single-node default
-  values-distributed.yaml   # UI + server + storage tiers (P3-13)
-  templates/
-    deployment.yaml    # single-node OR server Deployment
-    statefulset.yaml   # storage tier (optional)
-    ui-deployment.yaml # P3-16
+deploy/k8s/
+  single-node/
+    deployment.yaml
     service.yaml
     ingress.yaml
     pvc.yaml
     secret.yaml
-    servicemonitor.yaml   # optional Prometheus
+  distributed/          # P1-14 tiers
+    storage-statefulset.yaml
+    server-deployment.yaml
+    ui-deployment.yaml
+    service.yaml
+    ingress.yaml
     pdb.yaml
+  cilium/               # P3-45 optional overlay
 ```
 
 ### Deliverables
 
 | Item | Detail |
 |------|--------|
-| Helm chart | Official chart under `deploy/helm/maxio` |
+| Plain manifests | `deploy/k8s/` — single-node and distributed profiles |
 | Single-node profile | `replicas: 1`, RWO PVC, liveness `/healthz`, readiness `/readyz` |
-| Ingress | TLS, body size unlimited for uploads, separate paths for `/ui` and `/api` when P3-16 lands |
+| Ingress | TLS, body size unlimited for uploads, separate paths for `/ui` and `/api` when P1-21 lands |
 | Secrets | `access-key` / `secret-key` via Secret; optional `MAXIO_ADMIN_TOKEN` |
-| CI | `helm template` + kubeconform or `helm lint` in GitHub Actions |
-| Kind smoke test | Optional CI job: helm install → PUT/GET via port-forward |
-| Distributed values | Documented values overlay when P3-13 tiers ship |
+| CI | `kubectl apply --dry-run=client` + kubeconform on manifests |
+| Kind smoke test | P1-24 harness: `kind` bootstrap → PUT/GET via port-forward |
+| Distributed profile | Documented YAML when P1-14 tiers ship |
+
+### Future: Helm chart (P3-19)
+
+Optional convenience wrapper around the same manifests — not required for P1-14 or GA.
 
 ### Kubernetes constraints (documented)
 
@@ -111,12 +116,13 @@ deploy/helm/maxio/
 | ID | Scope |
 |----|-------|
 | **P3-18** | Bare metal deployment pack |
-| **P3-19** | Kubernetes Helm chart |
-| **P3-20** | Epic — first-class deployment targets (closes when P3-18 + P3-19 done) |
+| **P3-19** | Kubernetes Helm chart (future improvement) |
+| **P3-20** | Epic — first-class deployment targets (closes when P3-18 + plain K8s manifests done) |
 
 ## Acceptance (epic P3-20)
 
 - [ ] Bare metal install documented and systemd units shipped
-- [ ] Helm chart installs single-node MaxIO on K8s 1.28+
-- [ ] CI validates chart templates
+- [ ] Plain K8s manifests install single-node MaxIO on K8s 1.28+
+- [ ] CI validates manifests (kubeconform or `kubectl apply --dry-run`)
 - [ ] Both paths listed in README deployment section
+- [ ] Helm chart (P3-19) optional follow-on

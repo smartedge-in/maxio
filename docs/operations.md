@@ -2,7 +2,7 @@
 
 Production deployment checklist for MaxIO: networking, credentials, storage health, quotas, and backups.
 
-**Deployment targets:** MaxIO must support **bare metal** (systemd + native binary) and **Kubernetes** (Helm chart) as first-class production paths — see backlog P3-18, P3-19, epic P3-20, and `docs/plans/2026-06-29-deployment-targets.md`. Docker is supported as a packaging format for both.
+**Deployment targets:** MaxIO must support **bare metal** (systemd + native binary) and **Kubernetes** (plain YAML manifests) as first-class production paths — see backlog P3-18, P1-24, epic P3-20, and `docs/plans/2026-06-29-deployment-targets.md`. Helm chart (P3-19) is a future improvement. Docker is supported as a packaging format for both.
 
 ## Bind address and exposure
 
@@ -364,7 +364,7 @@ Target layout: release binary, dedicated `maxio` user, `MAXIO_DATA_DIR` on local
 
 ## Kubernetes
 
-Official Helm chart planned (P3-19). Until then, use this minimal Deployment pattern (`replicas: 1` — required until distributed tiers, P3-13):
+Use this minimal Deployment pattern (`replicas: 1` — required until distributed tiers, P1-14). Official manifests will live under `deploy/k8s/` (P1-24); Helm chart is optional later (P3-19):
 
 ```yaml
 apiVersion: apps/v1

@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft — backlog P3-45, P3-46. Requires Helm chart (P3-19).
+Draft — backlog P3-45, P3-46. Uses plain K8s manifests under `deploy/k8s/` (Helm optional later — P3-19).
 
 ## Goal
 
@@ -55,15 +55,17 @@ S3 clients → Gateway → Service → maxio-server Deployment (N replicas, eBPF
 
 UI tier (`maxio-ui`, P3-16) is a separate Deployment behind its own Service.
 
-## Helm overlay (proposed)
+## Plain K8s manifests (proposed)
 
-`deploy/helm/maxio/values-cilium.yaml`:
+`deploy/k8s/cilium/` (or annotations on existing manifests):
 
 - Document required Cilium cluster settings (`kubeProxyReplacement`, socket LB)
 - `MAXIO_TRUSTED_PROXIES`: cluster Pod CIDR + ingress CIDR
 - `MAXIO_LOGIN_RATE_LIMIT_REDIS_URL` when server replicas > 1
 - `service.publishNotReadyAddresses: false` for primary-only pattern
 - Optional: Cilium NetworkPolicy manifests for replication agent
+
+Helm overlay (`values-cilium.yaml`) may follow later under P3-19 — not required for P3-45.
 
 ## Observability
 
@@ -75,8 +77,8 @@ UI tier (`maxio-ui`, P3-16) is a separate Deployment behind its own Service.
 
 | ID | Relationship |
 |----|--------------|
-| P3-19 | Base Helm chart |
-| P3-45 | This document + values-cilium overlay |
+| P3-19 | Optional Helm chart (future) |
+| P3-45 | This document + plain K8s Cilium examples |
 | P3-46 | Service topology for primary/standby/replication |
 | P3-09–12 | Replication correctness |
 | P3-13–16 | Server/storage scale-out |
@@ -85,7 +87,7 @@ UI tier (`maxio-ui`, P3-16) is a separate Deployment behind its own Service.
 ## Acceptance (P3-45)
 
 - [ ] Plan published (this file) and linked from `docs/BACKLOG.md`
-- [ ] `values-cilium.yaml` in Helm chart
+- [ ] Cilium-oriented manifests or annotations under `deploy/k8s/`
 - [ ] `docs/operations.md` § Kubernetes + Cilium quickstart
 - [ ] Primary-only and future server-LB patterns documented
 - [ ] Trusted proxy and Redis login-limit notes for multi-replica server tier

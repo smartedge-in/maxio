@@ -4,7 +4,7 @@
 
 **P3-25 / `maxio-edge` is not pursued.** Client-facing LB and TLS stay with **standard external components**:
 
-- **Kubernetes:** Ingress + Service (P3-19)
+- **Kubernetes:** Ingress + Service (plain K8s manifests)
 - **Bare metal:** Caddy / Traefik + optional DNS or K8s MetalLB (P3-26) — **not** keepalived (GPL)
 - **Single-node:** direct bind or local reverse proxy (`docs/operations.md`)
 
@@ -78,7 +78,7 @@ These are solvable but require **S3-aware proxy config**, not stock round-robin.
 | Approach | Backlog / docs |
 |----------|----------------|
 | nginx / Caddy / cloud LB | `docs/operations.md` |
-| Kubernetes Ingress + Service | P3-19 Helm chart |
+| Kubernetes Ingress + Service | `deploy/k8s/` manifests |
 | keepalived VIP (bare metal) | P3-18 |
 | Server / Storage Raft routing | P3-14, P3-15 |
 
@@ -104,7 +104,7 @@ Rebuilding `maxio-server` on Pingora would mean reimplementing the entire HTTP s
 | Mechanism | Layer | Fits MaxIO plan |
 |-----------|--------|-----------------|
 | **VIP / VRRP** (keepalived) | Host / network | Bare metal (P3-18); often **one active** holder, not LB across all nodes |
-| **K8s Service / Ingress** | Cluster | P3-19 Helm |
+| **K8s Service / Ingress** | Cluster | Plain K8s YAML |
 | **Server Raft** (P3-15) | Control plane | Membership, routing epoch, storage leader map |
 | **Pingora inside server** | Application | **Overlaps** Raft + external VIP; adds complexity |
 

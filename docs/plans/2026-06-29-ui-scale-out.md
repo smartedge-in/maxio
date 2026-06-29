@@ -78,4 +78,4 @@ P3-13 asymmetric scale-out closes when **storage Raft**, **server Raft**, and **
 
 - SSR or server-side SvelteKit endpoints in `maxio-ui`
 - UI tier Raft or shared session store
-- Embedding UI in `maxio-server` for production Helm chart (dev/single-binary may retain optional embed)
+- Embedding UI in `maxio-server` for production distributed deploy (dev/single-binary may retain optional embed)

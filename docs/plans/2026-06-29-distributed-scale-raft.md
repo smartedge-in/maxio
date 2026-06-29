@@ -106,7 +106,7 @@ P3-09–P3-11 remain valid for geo-DR and migration. P3-13+ is the supported way
 
 ### Phase D — Asymmetric operations (P3-13 closes)
 
-- Helm/K8s charts with independent `replicas` and PDBs per tier (UI, server, storage)
+- Plain K8s manifests (`deploy/k8s/distributed/`) with independent `replicas` and PDBs per tier (UI, server, storage)
 - HPA on UI and server tiers; storage tier scaled manually or via Raft lag metric
 - Integration test: 2 UI + 2 server + 3 storage; kill storage leader → elect new leader → PUT/GET succeed
 

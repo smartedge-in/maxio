@@ -2,7 +2,7 @@
 
 ## Policy
 
-MaxIO official docs and deployment packs (**P3-18**, **P3-19**) recommend only **permissive-licensed** (P3-24) edge and HA components.
+MaxIO official docs and deployment packs (**P3-18**, plain K8s manifests) recommend only **permissive-licensed** (P3-24) edge and HA components.
 
 **Do not recommend** in MaxIO runbooks:
 
@@ -28,7 +28,7 @@ MaxIO official docs and deployment packs (**P3-18**, **P3-19**) recommend only *
 
 | Tool | License | Notes |
 |------|---------|-------|
-| **Ingress** (Traefik / Caddy ingress controller / Gateway API) | MIT / Apache-2.0 | P3-19 Helm |
+| **Ingress** (Traefik / Caddy ingress controller / Gateway API) | MIT / Apache-2.0 | `deploy/k8s/` manifests |
 | **[MetalLB](https://metallb.io/)** | Apache-2.0 | Bare-metal or on-prem **LoadBalancer** VIP |
 | **[kube-vip](https://kube-vip.io/)** | Apache-2.0 | Control-plane / Service VIP on K8s |
 
@@ -62,15 +62,16 @@ Phase 1 proxy/LB, Phase 2 permissive VIP research). See
 [`docs/out-of-tree/permissive-ha-gateway-rfc.md`](../out-of-tree/permissive-ha-gateway-rfc.md).
 MaxIO may document example configs but does not own that project.
 
-## P3-18 / P3-19 deliverables (updated)
+## P3-18 / K8s deliverables (updated)
 
 - Example **Caddyfile** (not nginx) in `docs/operations.md`
 - Bare-metal multi-node: Caddy or Traefik LB tier — **no keepalived** in official pack
-- Helm: Traefik or Caddy Ingress Controller values; optional **MetalLB** manifest stub
+- Plain K8s: Traefik or Caddy Ingress Controller manifests; optional **MetalLB** manifest stub under `deploy/k8s/`
+- Helm chart (P3-19) optional later — not required for P3-26
 
 ## Acceptance (P3-26)
 
 - [ ] `docs/operations.md` uses Caddy as primary TLS proxy example
 - [ ] GPL edge tools (keepalived, HAProxy CE) listed as **not recommended**
 - [ ] P3-18 runbook references this doc
-- [ ] P3-19 Helm docs reference permissive Ingress / MetalLB options
+- [ ] K8s manifests reference permissive Ingress / MetalLB options

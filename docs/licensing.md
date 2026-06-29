@@ -17,7 +17,7 @@ New dependencies require license review before merge. CI **`make deny`** / `carg
 
 ### Edge and HA tooling (deployments)
 
-Official MaxIO runbooks (P3-18, P3-19, P3-26) recommend **permissive** ingress/LB only — e.g. **Caddy** (Apache-2.0), **Traefik** (MIT), **MetalLB** (Apache-2.0). **Do not document keepalived or HAProxy CE** as the default path (GPL-2.0). See [`docs/plans/2026-06-29-permissive-ingress-ha.md`](plans/2026-06-29-permissive-ingress-ha.md).
+Official MaxIO runbooks (P3-18, plain K8s manifests, P3-26) recommend **permissive** ingress/LB only — e.g. **Caddy** (Apache-2.0), **Traefik** (MIT), **MetalLB** (Apache-2.0). **Do not document keepalived or HAProxy CE** as the default path (GPL-2.0). See [`docs/plans/2026-06-29-permissive-ingress-ha.md`](plans/2026-06-29-permissive-ingress-ha.md).
 
 ### Adding a dependency (checklist)
 
