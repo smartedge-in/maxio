@@ -130,8 +130,9 @@ async fn spawn_test_server(storage: DynStorage, config: Config) -> String {
 async fn start_server() -> (String, TempDir) {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
     (base_url, tmp)
 }
@@ -258,8 +259,9 @@ async fn start_server_with_default_buckets(default_buckets: &str) -> (String, Te
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     maxio::storage::provision_default_buckets(storage.as_ref(), default_buckets, REGION).await;
 
     let mut config = default_test_config(data_dir);
@@ -295,8 +297,9 @@ async fn test_default_buckets_skip_existing() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
 
     // First provision: creates the bucket
     maxio::storage::provision_default_buckets(storage.as_ref(), "existing", REGION).await;
@@ -691,8 +694,9 @@ async fn test_readyz_is_public_and_returns_ok() {
 async fn test_readyz_returns_503_when_data_dir_unwritable() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let base_url = spawn_test_server(storage, default_test_config(data_dir.clone())).await;
 
     let resp = client()
@@ -762,8 +766,9 @@ async fn test_security_headers_are_applied() {
 async fn test_s3_auth_failure_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.s3_rate_auth_max = 3;
     config.s3_rate_auth_window_secs = 300;
@@ -793,8 +798,9 @@ async fn test_s3_auth_failure_rate_limit() {
 async fn test_s3_put_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.s3_rate_put_max = 2;
     config.s3_rate_put_window_secs = 60;
@@ -7517,8 +7523,9 @@ async fn test_healthz_verbose_returns_subsystem_metrics() {
 async fn test_trusted_proxy_uses_x_forwarded_for_for_login_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.trusted_proxies = "127.0.0.0/8".to_string();
     let base_url = spawn_test_server(storage, config).await;
@@ -7689,8 +7696,9 @@ async fn start_server_with_server_host(
 async fn test_virtual_host_style_put_and_get() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let config = default_test_config(data_dir);
     let (base_url, listen, server_host) = start_server_with_server_host(storage, config).await;
 
@@ -7731,8 +7739,9 @@ async fn test_secondary_credential_can_authenticate() {
     )
     .unwrap();
 
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
 
     let url = format!("{base_url}/alt-bucket");
@@ -7843,8 +7852,9 @@ async fn test_bucket_policy_malformed_rejected() {
 async fn test_virtual_host_anonymous_public_read() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let config = default_test_config(data_dir);
     let (base_url, listen, server_host) = start_server_with_server_host(storage, config).await;
 
@@ -7880,8 +7890,9 @@ async fn test_virtual_host_anonymous_public_read() {
 async fn test_metrics_endpoint_when_enabled() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.metrics_enabled = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -7921,8 +7932,9 @@ async fn test_metrics_endpoint_disabled_by_default() {
 async fn test_metrics_records_upload_bytes() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.metrics_enabled = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -7962,8 +7974,9 @@ async fn test_metrics_records_upload_bytes() {
 async fn test_metrics_dedicated_port() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.metrics_enabled = true;
 
@@ -8024,8 +8037,9 @@ async fn test_audit_log_captures_s3_principal_and_object() {
 
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.audit_log = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -8059,8 +8073,9 @@ async fn test_audit_log_skips_get_requests() {
 
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
     let mut config = default_test_config(data_dir);
     config.audit_log = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -8134,8 +8149,9 @@ async fn test_per_bucket_erasure_coding_mixed_layouts() {
     let mut config = default_test_config(data_dir.clone());
     config.erasure_coding = true;
     config.chunk_size = 1024;
-    let storage =
-        dyn_storage(new_test_storage(&data_dir, true, config.chunk_size, 0, unlimited_quota()).await);
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, true, config.chunk_size, 0, unlimited_quota()).await,
+    );
 
     storage
         .create_bucket(&maxio::storage::BucketMeta {

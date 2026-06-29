@@ -762,9 +762,12 @@ pub async fn delete_object_api(
 
     match state.storage.delete_object(&bucket, &key).await {
         Ok(_) => {
-            if let Err(e) =
-                preserve_empty_parent_folder_after_object_delete(state.storage.as_ref(), &bucket, &key)
-                    .await
+            if let Err(e) = preserve_empty_parent_folder_after_object_delete(
+                state.storage.as_ref(),
+                &bucket,
+                &key,
+            )
+            .await
             {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,

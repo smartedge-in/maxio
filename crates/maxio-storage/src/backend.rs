@@ -57,7 +57,8 @@ pub trait StorageBackend: Send + Sync {
     async fn put_bucket_policy(&self, bucket: &str, policy: &str) -> Result<(), StorageError>;
     async fn get_bucket_policy(&self, bucket: &str) -> Result<Option<String>, StorageError>;
     async fn delete_bucket_policy(&self, bucket: &str) -> Result<(), StorageError>;
-    async fn put_bucket_cors(&self, bucket: &str, rules: Vec<CorsRule>) -> Result<(), StorageError>;
+    async fn put_bucket_cors(&self, bucket: &str, rules: Vec<CorsRule>)
+    -> Result<(), StorageError>;
     async fn get_bucket_cors(&self, bucket: &str) -> Result<Option<Vec<CorsRule>>, StorageError>;
     async fn delete_bucket_cors(&self, bucket: &str) -> Result<(), StorageError>;
     async fn put_bucket_encryption(
@@ -193,7 +194,11 @@ pub trait StorageBackend: Send + Sync {
         customer_key: Option<[u8; 32]>,
     ) -> Result<PutResult, StorageError>;
 
-    async fn abort_multipart_upload(&self, bucket: &str, upload_id: &str) -> Result<(), StorageError>;
+    async fn abort_multipart_upload(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+    ) -> Result<(), StorageError>;
     async fn list_parts(
         &self,
         bucket: &str,
@@ -289,7 +294,11 @@ impl StorageBackend for FilesystemStorage {
         self.delete_bucket_policy(bucket).await
     }
 
-    async fn put_bucket_cors(&self, bucket: &str, rules: Vec<CorsRule>) -> Result<(), StorageError> {
+    async fn put_bucket_cors(
+        &self,
+        bucket: &str,
+        rules: Vec<CorsRule>,
+    ) -> Result<(), StorageError> {
         self.put_bucket_cors(bucket, rules).await
     }
 
@@ -519,7 +528,11 @@ impl StorageBackend for FilesystemStorage {
             .await
     }
 
-    async fn abort_multipart_upload(&self, bucket: &str, upload_id: &str) -> Result<(), StorageError> {
+    async fn abort_multipart_upload(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+    ) -> Result<(), StorageError> {
         self.abort_multipart_upload(bucket, upload_id).await
     }
 
@@ -548,7 +561,11 @@ mod tests {
     #[tokio::test]
     async fn dyn_storage_implements_trait() {
         let dir = tempdir().unwrap();
-        let keyring = Arc::new(Keyring::load(dir.path().to_str().unwrap(), None).await.unwrap());
+        let keyring = Arc::new(
+            Keyring::load(dir.path().to_str().unwrap(), None)
+                .await
+                .unwrap(),
+        );
         let fs = FilesystemStorage::new(
             dir.path().to_str().unwrap(),
             false,
