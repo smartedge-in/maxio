@@ -34,6 +34,7 @@ async fn run_local(data_dir: &str, json: bool) -> Result<()> {
         0,
         keyring.clone(),
         QuotaLimits::from_config(0, 0),
+        false,
     )
     .await?;
 

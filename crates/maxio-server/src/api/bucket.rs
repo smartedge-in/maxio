@@ -13,7 +13,7 @@ use super::virtual_host::{VirtualHostContext, resolve_bucket, virtual_host_objec
 use crate::error::S3Error;
 use crate::server::AppState;
 use crate::storage::{
-    BucketEncryptionConfig, BucketMeta, CorsRule, StorageError, is_valid_bucket_name,
+    BucketEncryptionConfig, BucketMeta, CorsRule, LifecycleRule, StorageError, is_valid_bucket_name,
 };
 use crate::xml::{response::to_xml, types::*};
 
@@ -69,6 +69,8 @@ pub async fn create_bucket(
         public_read: false,
         public_list: false,
         bucket_policy: None,
+        erasure_coding: None,
+        lifecycle_rules: None,
     };
 
     let created = state
@@ -120,6 +122,9 @@ pub async fn delete_bucket(
     if params.contains_key("policy") {
         return delete_bucket_policy(state, bucket).await;
     }
+    if params.contains_key("lifecycle") {
+        return delete_bucket_lifecycle(state, bucket).await;
+    }
     match state.storage.delete_bucket(&bucket).await {
         Ok(true) => Ok(Response::builder()
             .status(StatusCode::NO_CONTENT)
@@ -164,6 +169,12 @@ pub async fn handle_bucket_put(
     }
     if params.contains_key("policy") {
         return put_bucket_policy(state, bucket, body).await;
+    }
+    if params.contains_key("lifecycle") {
+        return put_bucket_lifecycle(state, bucket, body).await;
+    }
+    if params.contains_key("erasure") {
+        return put_bucket_erasure(state, bucket, body).await;
     }
     create_bucket(State(state), Path(bucket)).await
 }
@@ -504,6 +515,186 @@ async fn delete_bucket_policy(state: AppState, bucket: String) -> Result<Respons
         .status(StatusCode::NO_CONTENT)
         .body(Body::empty())
         .unwrap())
+}
+
+async fn put_bucket_lifecycle(
+    state: AppState,
+    bucket: String,
+    body: Body,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    let body_bytes = axum::body::to_bytes(body, 1024 * 1024)
+        .await
+        .map_err(S3Error::internal)?;
+    let config: crate::xml::types::LifecycleConfiguration =
+        quick_xml::de::from_str(&String::from_utf8_lossy(&body_bytes))
+            .map_err(|_| S3Error::malformed_xml())?;
+
+    let rules: Vec<LifecycleRule> = config
+        .rules
+        .into_iter()
+        .map(|r| LifecycleRule {
+            id: r.id,
+            prefix: r.prefix,
+            expiration_days: r.expiration.days,
+            enabled: r.status.eq_ignore_ascii_case("Enabled"),
+        })
+        .collect();
+
+    state
+        .storage
+        .put_bucket_lifecycle(&bucket, rules)
+        .await
+        .map_err(map_lifecycle_storage_error)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .unwrap())
+}
+
+pub async fn get_bucket_lifecycle(
+    state: AppState,
+    bucket: String,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    let rules = state
+        .storage
+        .get_bucket_lifecycle(&bucket)
+        .await
+        .map_err(S3Error::internal)?;
+    let rules = rules.ok_or_else(S3Error::no_such_lifecycle_configuration)?;
+
+    let out = crate::xml::types::LifecycleConfigurationOut {
+        rules: rules
+            .into_iter()
+            .map(|r| crate::xml::types::LifecycleRuleOut {
+                id: r.id,
+                prefix: r.prefix,
+                status: if r.enabled {
+                    "Enabled".into()
+                } else {
+                    "Disabled".into()
+                },
+                expiration: crate::xml::types::LifecycleExpirationXml {
+                    days: r.expiration_days,
+                },
+            })
+            .collect(),
+    };
+
+    let xml = to_xml(&out).map_err(S3Error::internal)?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/xml")
+        .body(Body::from(xml))
+        .unwrap())
+}
+
+async fn delete_bucket_lifecycle(
+    state: AppState,
+    bucket: String,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    match state.storage.get_bucket_lifecycle(&bucket).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return Err(S3Error::no_such_lifecycle_configuration()),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    state
+        .storage
+        .delete_bucket_lifecycle(&bucket)
+        .await
+        .map_err(S3Error::internal)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::NO_CONTENT)
+        .body(Body::empty())
+        .unwrap())
+}
+
+async fn put_bucket_erasure(
+    state: AppState,
+    bucket: String,
+    body: Body,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    let body_bytes = axum::body::to_bytes(body, 64 * 1024)
+        .await
+        .map_err(S3Error::internal)?;
+    let body_str = String::from_utf8_lossy(&body_bytes);
+    let enabled = body_str.contains("<Status>Enabled</Status>");
+
+    state
+        .storage
+        .set_bucket_erasure_coding(&bucket, Some(enabled))
+        .await
+        .map_err(S3Error::internal)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .unwrap())
+}
+
+pub async fn get_bucket_erasure(
+    state: AppState,
+    bucket: String,
+) -> Result<Response<Body>, S3Error> {
+    match state.storage.head_bucket(&bucket).await {
+        Ok(true) => {}
+        Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
+        Err(e) => return Err(S3Error::internal(e)),
+    }
+
+    let enabled = state
+        .storage
+        .get_bucket_erasure_coding(&bucket)
+        .await
+        .map_err(S3Error::internal)?;
+
+    let result = crate::xml::types::ErasureConfiguration {
+        status: if enabled {
+            "Enabled".into()
+        } else {
+            "Disabled".into()
+        },
+    };
+    let xml = to_xml(&result).map_err(S3Error::internal)?;
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/xml")
+        .body(Body::from(xml))
+        .unwrap())
+}
+
+fn map_lifecycle_storage_error(err: StorageError) -> S3Error {
+    match err {
+        StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
+        StorageError::NotFound(name) => S3Error::no_such_bucket(&name),
+        other => S3Error::internal(other),
+    }
 }
 
 fn map_policy_storage_error(err: StorageError) -> S3Error {

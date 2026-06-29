@@ -223,6 +223,57 @@ pub struct VersioningConfiguration {
 }
 
 #[derive(Serialize)]
+#[serde(rename = "ErasureConfiguration")]
+pub struct ErasureConfiguration {
+    #[serde(rename = "Status")]
+    pub status: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename = "LifecycleConfiguration")]
+pub struct LifecycleConfiguration {
+    #[serde(rename = "Rule", default)]
+    pub rules: Vec<LifecycleRuleXml>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LifecycleRuleXml {
+    #[serde(rename = "ID")]
+    pub id: String,
+    #[serde(rename = "Prefix", default)]
+    pub prefix: String,
+    #[serde(rename = "Status")]
+    pub status: String,
+    #[serde(rename = "Expiration")]
+    pub expiration: LifecycleExpirationXml,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LifecycleExpirationXml {
+    #[serde(rename = "Days")]
+    pub days: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename = "LifecycleConfiguration")]
+pub struct LifecycleConfigurationOut {
+    #[serde(rename = "Rule", default)]
+    pub rules: Vec<LifecycleRuleOut>,
+}
+
+#[derive(Serialize)]
+pub struct LifecycleRuleOut {
+    #[serde(rename = "ID")]
+    pub id: String,
+    #[serde(rename = "Prefix")]
+    pub prefix: String,
+    #[serde(rename = "Status")]
+    pub status: String,
+    #[serde(rename = "Expiration")]
+    pub expiration: LifecycleExpirationXml,
+}
+
+#[derive(Serialize)]
 #[serde(rename = "ListVersionsResult")]
 pub struct ListVersionsResult {
     #[serde(rename = "Name")]

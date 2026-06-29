@@ -34,6 +34,7 @@ pub enum S3ErrorCode {
     InsufficientStorage,
     ExpiredPresignedUrl,
     NoSuchCORSConfiguration,
+    NoSuchLifecycleConfiguration,
     NoSuchBucketPolicy,
     MalformedPolicy,
     PreconditionFailed,
@@ -68,6 +69,7 @@ impl S3ErrorCode {
             Self::ExpiredPresignedUrl => "AccessDenied",
             Self::PreconditionFailed => "PreconditionFailed",
             Self::NoSuchCORSConfiguration => "NoSuchCORSConfiguration",
+            Self::NoSuchLifecycleConfiguration => "NoSuchLifecycleConfiguration",
             Self::NoSuchBucketPolicy => "NoSuchBucketPolicy",
             Self::MalformedPolicy => "MalformedPolicy",
             Self::SignatureDoesNotMatch => "SignatureDoesNotMatch",
@@ -90,6 +92,7 @@ impl S3ErrorCode {
             | Self::NoSuchUpload
             | Self::NoSuchVersion
             | Self::NoSuchCORSConfiguration
+            | Self::NoSuchLifecycleConfiguration
             | Self::NoSuchBucketPolicy
             | Self::ServerSideEncryptionConfigurationNotFound => StatusCode::NOT_FOUND,
             Self::MalformedPolicy => StatusCode::BAD_REQUEST,
@@ -320,6 +323,15 @@ impl S3Error {
         Self {
             code: S3ErrorCode::NoSuchCORSConfiguration,
             message: "The CORS configuration does not exist".into(),
+            resource: None,
+            retry_after_secs: None,
+        }
+    }
+
+    pub fn no_such_lifecycle_configuration() -> Self {
+        Self {
+            code: S3ErrorCode::NoSuchLifecycleConfiguration,
+            message: "The lifecycle configuration does not exist".into(),
             resource: None,
             retry_after_secs: None,
         }

@@ -1,10 +1,11 @@
 use super::chunk_reader::VerifiedChunkReader;
 use super::crypto::{AadBuilder, FRAME_CHUNK_SIZE, FrameDecryptor};
 use super::keys::Keyring;
+use super::metadata_index::MetadataIndex;
 use super::quota::{QuotaLimits, QuotaReader, map_read_quota_error};
 use super::{
     BucketEncryptionConfig, BucketMeta, ByteStream, ChecksumAlgorithm, ChunkInfo, ChunkKind,
-    ChunkManifest, DeleteResult, EncryptionMeta, EncryptionMode, EncryptionRequest,
+    ChunkManifest, DeleteResult, EncryptionMeta, EncryptionMode, EncryptionRequest, LifecycleRule,
     MultipartUploadMeta, ObjectMeta, PartMeta, PutResult, StorageError, UploadEncryptionSpec,
     validate_bucket_name,
 };
@@ -28,8 +29,12 @@ const IO_BUFFER_SIZE: usize = 256 * 1024;
 const SMALL_OBJECT_THRESHOLD: u64 = 256 * 1024;
 
 mod common;
+#[cfg(test)]
+mod ec_policy_tests;
 mod encryption_io;
 mod housekeeping;
+#[cfg(test)]
+mod index_parity_tests;
 mod listing;
 mod multipart;
 mod object_io;
@@ -81,6 +86,7 @@ pub struct FilesystemStorage {
     pub(super) parity_shards: u32,
     pub(super) keyring: Arc<Keyring>,
     pub(super) quota: QuotaLimits,
+    pub(super) metadata_index: Option<Arc<MetadataIndex>>,
 }
 
 impl FilesystemStorage {
@@ -91,11 +97,17 @@ impl FilesystemStorage {
         parity_shards: u32,
         keyring: Arc<Keyring>,
         quota: QuotaLimits,
+        metadata_index_enabled: bool,
     ) -> Result<Self, anyhow::Error> {
         let data_root = Path::new(data_dir).to_path_buf();
         let buckets_dir = data_root.join("buckets");
         fs::create_dir_all(&buckets_dir).await?;
-        Ok(Self {
+        let metadata_index = if metadata_index_enabled {
+            Some(Arc::new(MetadataIndex::open(&data_root)?))
+        } else {
+            None
+        };
+        let storage = Self {
             data_root,
             buckets_dir,
             erasure_coding,
@@ -103,7 +115,135 @@ impl FilesystemStorage {
             parity_shards,
             keyring,
             quota,
-        })
+            metadata_index,
+        };
+        if metadata_index_enabled {
+            storage.rebuild_all_metadata_indexes().await?;
+        }
+        Ok(storage)
+    }
+
+    pub fn metadata_index_enabled(&self) -> bool {
+        self.metadata_index.is_some()
+    }
+
+    pub(super) fn index_upsert(&self, bucket: &str, meta: &ObjectMeta) {
+        if let Some(index) = &self.metadata_index
+            && let Err(err) = index.upsert(bucket, meta)
+        {
+            tracing::warn!(
+                "metadata index upsert failed for {bucket}/{}: {err}",
+                meta.key
+            );
+        }
+    }
+
+    pub(super) fn index_remove(&self, bucket: &str, key: &str) {
+        if let Some(index) = &self.metadata_index
+            && let Err(err) = index.remove(bucket, key)
+        {
+            tracing::warn!("metadata index remove failed for {bucket}/{key}: {err}");
+        }
+    }
+
+    pub async fn rebuild_all_metadata_indexes(&self) -> Result<(), StorageError> {
+        let Some(index) = &self.metadata_index else {
+            return Ok(());
+        };
+        for bucket in self.list_buckets().await? {
+            let objects = self.list_objects_walk(&bucket.name, "").await?;
+            index.rebuild_bucket(&bucket.name, &objects)?;
+            tracing::info!(
+                "metadata index: rebuilt {} objects for bucket {}",
+                objects.len(),
+                bucket.name
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn effective_erasure_coding(&self, bucket: &str) -> Result<bool, StorageError> {
+        if !self.erasure_coding {
+            return Ok(false);
+        }
+        let meta = self.read_bucket_meta(bucket).await?;
+        Ok(meta.erasure_coding.unwrap_or(true))
+    }
+
+    pub(super) async fn read_bucket_meta(&self, bucket: &str) -> Result<BucketMeta, StorageError> {
+        validate_bucket_name(bucket)?;
+        let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
+        let data = fs::read_to_string(&meta_path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StorageError::NotFound(bucket.to_string())
+            } else {
+                StorageError::Io(e)
+            }
+        })?;
+        Ok(serde_json::from_str(&data)?)
+    }
+
+    pub async fn set_bucket_erasure_coding(
+        &self,
+        bucket: &str,
+        enabled: Option<bool>,
+    ) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
+        if enabled == Some(true) && !self.erasure_coding {
+            return Err(StorageError::InvalidKey(
+                "per-bucket erasure coding requires server-wide MAXIO_ERASURE_CODING".into(),
+            ));
+        }
+        let mut meta = self.read_bucket_meta(bucket).await?;
+        meta.erasure_coding = enabled;
+        let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
+        fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        Ok(())
+    }
+
+    pub async fn get_bucket_erasure_coding(&self, bucket: &str) -> Result<bool, StorageError> {
+        self.effective_erasure_coding(bucket).await
+    }
+
+    pub async fn put_bucket_lifecycle(
+        &self,
+        bucket: &str,
+        rules: Vec<LifecycleRule>,
+    ) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
+        for rule in &rules {
+            if rule.id.is_empty() {
+                return Err(StorageError::InvalidKey(
+                    "lifecycle rule id must not be empty".into(),
+                ));
+            }
+            if rule.expiration_days == 0 {
+                return Err(StorageError::InvalidKey(
+                    "lifecycle rule expiration_days must be > 0".into(),
+                ));
+            }
+        }
+        let mut meta = self.read_bucket_meta(bucket).await?;
+        meta.lifecycle_rules = Some(rules);
+        let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
+        fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        Ok(())
+    }
+
+    pub async fn get_bucket_lifecycle(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<Vec<LifecycleRule>>, StorageError> {
+        Ok(self.read_bucket_meta(bucket).await?.lifecycle_rules)
+    }
+
+    pub async fn delete_bucket_lifecycle(&self, bucket: &str) -> Result<(), StorageError> {
+        validate_bucket_name(bucket)?;
+        let mut meta = self.read_bucket_meta(bucket).await?;
+        meta.lifecycle_rules = None;
+        let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
+        fs::write(&meta_path, serde_json::to_string_pretty(&meta)?).await?;
+        Ok(())
     }
 
     pub fn data_root(&self) -> &Path {

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SQLite metadata index (P3-03): `MAXIO_METADATA_INDEX` / `--metadata-index` maintains `{data_dir}/.maxio-metadata.db` for fast `ListObjects`; rebuild on startup; filesystem walk fallback.
+- Per-bucket erasure coding (P3-07): `BucketMeta.erasure_coding` override with `PUT/GET ?erasure`; mixed flat/chunked buckets when server EC is enabled.
+- Lifecycle expiration (P3-01): prefix-based rules on `BucketMeta`; `PUT/GET/DELETE ?lifecycle`; housekeeping expires objects past `expiration_days` (non-versioned buckets).
+- Replication/federation RFC (P3-02): `docs/plans/2026-06-29-replication-federation.md` — design-only; implementation deferred.
+- Unit tests for metadata index parity, per-bucket EC, lifecycle sweep; integration tests for lifecycle API and mixed EC layouts.
+
 - Workspace crate split (P3-04): `crates/maxio-storage` (filesystem-backed object storage) and `crates/maxio-server` (Axum S3/console/admin API, embedded UI); root `maxio` package is a thin facade re-exporting both crates for a stable public API.
 - Crate-boundary unit tests in `maxio-storage`, `maxio-server`, and root `maxio` facade; coverage floor paths updated for the new layout.
 - Prometheus metrics (`MAXIO_METRICS_ENABLED`, optional `MAXIO_METRICS_PORT`): `GET /metrics` with request counters, latency sum/count, SlowDown total, upload bytes, uptime, disk free/total, active multipart uploads.

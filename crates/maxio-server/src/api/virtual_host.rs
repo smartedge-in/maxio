@@ -248,6 +248,7 @@ mod tests {
             metrics_enabled: false,
             metrics_port: 0,
             audit_log: false,
+            metadata_index: false,
         }
     }
 }

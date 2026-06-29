@@ -32,6 +32,7 @@ zeroize = { version = "1", features = ["derive"] }
 rand = "0.10.1"
 reed-solomon-erasure = "6"
 tokio-util = { version = "0.7", features = ["io"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

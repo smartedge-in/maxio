@@ -2,6 +2,7 @@ pub mod chunk_reader;
 pub mod crypto;
 pub mod filesystem;
 pub mod keys;
+pub mod metadata_index;
 pub mod policy;
 pub mod quota;
 
@@ -68,6 +69,20 @@ fn is_false(v: &bool) -> bool {
     !*v
 }
 
+/// Prefix-based object expiration rule (P3-01 v1 subset).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LifecycleRule {
+    pub id: String,
+    pub prefix: String,
+    pub expiration_days: u32,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorsRule {
     pub allowed_origins: Vec<String>,
@@ -97,6 +112,11 @@ pub struct BucketMeta {
     pub public_list: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bucket_policy: Option<String>,
+    /// Per-bucket erasure coding override (`None` = inherit server default when EC enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub erasure_coding: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle_rules: Option<Vec<LifecycleRule>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,6 +371,8 @@ pub async fn provision_default_buckets(
             public_read: false,
             public_list: false,
             bucket_policy: None,
+            erasure_coding: None,
+            lifecycle_rules: None,
         };
         match storage.create_bucket(&meta).await {
             Ok(true) => tracing::info!("Created default bucket: {}", bucket_name),

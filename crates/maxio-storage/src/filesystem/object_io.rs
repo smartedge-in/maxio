@@ -33,7 +33,7 @@ impl FilesystemStorage {
             return self.put_folder_marker(bucket, key).await;
         }
 
-        if self.erasure_coding {
+        if self.effective_erasure_coding(bucket).await? {
             if let Some(req) = encryption {
                 return self
                     .put_object_chunked_encrypted(bucket, key, content_type, body, checksum, req)
@@ -225,6 +225,7 @@ impl FilesystemStorage {
             self.write_version(bucket, key, &meta, &obj_path).await?;
         }
 
+        self.index_upsert(bucket, &meta);
         Ok(PutResult {
             size,
             etag: etag_quoted,
@@ -379,6 +380,7 @@ impl FilesystemStorage {
             self.write_version_chunked(bucket, key, &meta).await?;
         }
 
+        self.index_upsert(bucket, &meta);
         Ok(PutResult {
             size: total_size,
             etag: etag_quoted,
@@ -617,6 +619,7 @@ impl FilesystemStorage {
             self.write_version_chunked(bucket, key, &meta).await?;
         }
 
+        self.index_upsert(bucket, &meta);
         Ok(PutResult {
             size: plaintext_size,
             etag: etag_quoted,
@@ -933,6 +936,7 @@ impl FilesystemStorage {
         remove_file_if_exists(&obj_path).await?;
         remove_file_if_exists(&meta_path).await?;
         remove_dir_all_if_exists(&ec_dir).await?;
+        self.index_remove(bucket, key);
 
         // Clean up empty parent directories (but not the bucket dir itself)
         let bucket_dir = self.buckets_dir.join(bucket);

@@ -349,6 +349,8 @@ pub async fn create_bucket(
         public_read: false,
         public_list: false,
         bucket_policy: None,
+        erasure_coding: None,
+        lifecycle_rules: None,
     };
 
     match state.storage.create_bucket(&meta).await {
@@ -1165,7 +1167,10 @@ mod tests {
     async fn test_storage(data_dir: &str) -> Result<FilesystemStorage, Box<dyn std::error::Error>> {
         let keyring = Arc::new(Keyring::load(data_dir, None).await?);
         let quota = QuotaLimits::from_config(0, 0);
-        Ok(FilesystemStorage::new(data_dir, false, 10 * 1024 * 1024, 0, keyring, quota).await?)
+        Ok(
+            FilesystemStorage::new(data_dir, false, 10 * 1024 * 1024, 0, keyring, quota, false)
+                .await?,
+        )
     }
 
     async fn create_test_bucket(storage: &FilesystemStorage, bucket: &str) {
@@ -1180,6 +1185,8 @@ mod tests {
                 public_read: false,
                 public_list: false,
                 bucket_policy: None,
+                erasure_coding: None,
+                lifecycle_rules: None,
             })
             .await
             .unwrap();

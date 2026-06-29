@@ -59,6 +59,7 @@ fn default_test_config(data_dir: String) -> Config {
         metrics_enabled: false,
         metrics_port: 0,
         audit_log: false,
+        metadata_index: false,
     }
 }
 
@@ -77,6 +78,7 @@ async fn new_test_storage(
         parity_shards,
         keyring,
         quota,
+        false,
     )
     .await
     .unwrap()
@@ -1034,6 +1036,8 @@ async fn test_delete_bucket_sweeps_nested_versions() {
             public_read: false,
             public_list: false,
             bucket_policy: None,
+            erasure_coding: None,
+            lifecycle_rules: None,
         })
         .await
         .unwrap();
@@ -8045,4 +8049,122 @@ async fn test_audit_log_skips_get_requests() {
         lines.is_empty(),
         "GET requests must not emit audit records, got: {lines:?}"
     );
+}
+
+#[tokio::test]
+async fn test_put_get_bucket_lifecycle() {
+    let (base_url, _tmp) = start_server().await;
+    let create = s3_request("PUT", &format!("{base_url}/lifecycle-bucket"), Vec::new()).await;
+    assert_eq!(create.status(), 200);
+
+    let lifecycle_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<LifecycleConfiguration>
+  <Rule>
+    <ID>expire-logs</ID>
+    <Prefix>old/</Prefix>
+    <Status>Enabled</Status>
+    <Expiration><Days>30</Days></Expiration>
+  </Rule>
+</LifecycleConfiguration>"#;
+
+    let put = s3_request(
+        "PUT",
+        &format!("{base_url}/lifecycle-bucket?lifecycle"),
+        lifecycle_xml.as_bytes().to_vec(),
+    )
+    .await;
+    assert_eq!(put.status(), 200);
+
+    let get = s3_request(
+        "GET",
+        &format!("{base_url}/lifecycle-bucket?lifecycle"),
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(get.status(), 200);
+    let body = get.text().await.unwrap();
+    assert!(body.contains("expire-logs"));
+    assert!(body.contains("<Days>30</Days>"));
+}
+
+#[tokio::test]
+async fn test_per_bucket_erasure_coding_mixed_layouts() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let mut config = default_test_config(data_dir.clone());
+    config.erasure_coding = true;
+    config.chunk_size = 1024;
+    let storage =
+        Arc::new(new_test_storage(&data_dir, true, config.chunk_size, 0, unlimited_quota()).await);
+
+    storage
+        .create_bucket(&maxio::storage::BucketMeta {
+            name: "flat-bucket".into(),
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            region: REGION.into(),
+            versioning: false,
+            cors_rules: None,
+            encryption_config: None,
+            public_read: false,
+            public_list: false,
+            bucket_policy: None,
+            erasure_coding: Some(false),
+            lifecycle_rules: None,
+        })
+        .await
+        .unwrap();
+    storage
+        .create_bucket(&maxio::storage::BucketMeta {
+            name: "ec-bucket".into(),
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            region: REGION.into(),
+            versioning: false,
+            cors_rules: None,
+            encryption_config: None,
+            public_read: false,
+            public_list: false,
+            bucket_policy: None,
+            erasure_coding: None,
+            lifecycle_rules: None,
+        })
+        .await
+        .unwrap();
+
+    use maxio::storage::ByteStream;
+    use std::io::Cursor;
+    let flat_body: ByteStream = Box::pin(Cursor::new(b"flat".to_vec()));
+    storage
+        .put_object(
+            "flat-bucket",
+            "a.txt",
+            "text/plain",
+            flat_body,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let ec_body: ByteStream = Box::pin(Cursor::new(vec![1u8; 2048]));
+    storage
+        .put_object(
+            "ec-bucket",
+            "b.bin",
+            "application/octet-stream",
+            ec_body,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let flat_list = storage.list_objects("flat-bucket", "").await.unwrap();
+    assert_eq!(flat_list.len(), 1);
+    assert!(flat_list[0].storage_format.is_none());
+
+    let ec_list = storage.list_objects("ec-bucket", "").await.unwrap();
+    assert_eq!(ec_list.len(), 1);
+    assert_eq!(ec_list[0].storage_format.as_deref(), Some("chunked-v1"));
 }

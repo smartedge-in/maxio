@@ -344,6 +344,7 @@ async fn head_bucket(
 struct HousekeepingResponse {
     uploads_removed: u64,
     temp_files_removed: u64,
+    objects_expired: u64,
     stale_after_days: i64,
 }
 
@@ -358,10 +359,12 @@ async fn housekeeping_run(
         "admin API: on-demand housekeeping sweep"
     );
     let stale_after = chrono::Duration::days(7);
-    let (uploads_removed, temp_files_removed) = state.storage.housekeeping_sweep(stale_after).await;
+    let (uploads_removed, temp_files_removed, objects_expired) =
+        state.storage.housekeeping_sweep(stale_after).await;
     Json(HousekeepingResponse {
         uploads_removed,
         temp_files_removed,
+        objects_expired,
         stale_after_days: 7,
     })
 }
@@ -443,6 +446,7 @@ mod tests {
             metrics_enabled: false,
             metrics_port: 0,
             audit_log: false,
+            metadata_index: false,
         }
     }
 

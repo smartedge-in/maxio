@@ -2,7 +2,10 @@ use super::*;
 
 impl FilesystemStorage {
     pub async fn count_bucket_objects(&self, bucket: &str) -> Result<u64, StorageError> {
-        Ok(self.list_objects(bucket, "").await?.len() as u64)
+        if let Some(index) = &self.metadata_index {
+            return index.count_bucket(bucket);
+        }
+        Ok(self.list_objects_walk(bucket, "").await?.len() as u64)
     }
 
     pub async fn count_all_objects(&self) -> Result<u64, StorageError> {
@@ -33,6 +36,17 @@ impl FilesystemStorage {
     // --- Object operations ---
 
     pub async fn list_objects(
+        &self,
+        bucket: &str,
+        prefix: &str,
+    ) -> Result<Vec<ObjectMeta>, StorageError> {
+        if let Some(index) = &self.metadata_index {
+            return index.list(bucket, prefix);
+        }
+        self.list_objects_walk(bucket, prefix).await
+    }
+
+    pub(super) async fn list_objects_walk(
         &self,
         bucket: &str,
         prefix: &str,

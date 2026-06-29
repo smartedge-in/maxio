@@ -96,13 +96,13 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
-| P3-01 | Lifecycle rules (expiration) | storage | L | No object expiration or transition policies. | S3 lifecycle XML subset or console UI for prefix-based expiry. |
-| P3-02 | Replication / federation | storage | XL | Single-node filesystem only. | Out of scope until clustering design exists; capture as RFC. |
-| P3-03 | SQLite metadata index | storage | L | Listing large buckets scans filesystem. | Optional index for faster `ListObjectsV2` on millions of keys; migration path documented. |
+| ~~P3-01~~ | ~~Lifecycle rules (expiration)~~ | storage | L | Done — prefix-based `LifecycleRule` on `BucketMeta`; `PUT/GET/DELETE ?lifecycle`; hourly housekeeping sweep expires non-versioned objects. | — |
+| ~~P3-02~~ | ~~Replication / federation~~ | storage | XL | Done (RFC) — `docs/plans/2026-06-29-replication-federation.md`; implementation deferred to Phase 1+ runbook. | — |
+| ~~P3-03~~ | ~~SQLite metadata index~~ | storage | L | Done — `MAXIO_METADATA_INDEX` enables `{data_dir}/.maxio-metadata.db`; upsert on write/delete; rebuild on startup; walk fallback. | — |
 | ~~P3-04~~ | ~~Workspace crate split~~ | storage | L | Done — `crates/maxio-storage` (filesystem, crypto, keys, policy, quota) and `crates/maxio-server` (HTTP/S3 API, auth, embedded UI); root `maxio` is a facade binary + re-exports; `map_storage_upload_error` lives in server `error` module. | — |
 | P3-05 | ARM64 release binaries | ci | S | Release workflow may be x86-only today. | Multi-arch Docker image and GitHub release assets. |
 | P3-06 | UI E2E tests (Playwright) | ui | M | No browser-level tests for upload/download flows. | Smoke test: login → create bucket → upload → download → delete. |
-| P3-07 | Per-bucket erasure coding toggle | storage | L | Erasure coding is server-wide (`MAXIO_ERASURE_CODING`); operators cannot mix flat and chunked layouts per bucket on one instance. | Design note + implementation: per-bucket or per-prefix EC policy, migration path for existing flat objects, documented trade-offs. |
+| ~~P3-07~~ | ~~Per-bucket erasure coding toggle~~ | storage | L | Done — `BucketMeta.erasure_coding` override; `PUT/GET ?erasure`; writes use `effective_erasure_coding()`; reads layout-based; existing flat objects unchanged. | — |
 
 ---
 

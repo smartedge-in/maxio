@@ -135,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
         config.parity_shards,
         keyring.clone(),
         quota,
+        config.metadata_index,
     )
     .await?;
 
@@ -180,16 +181,17 @@ async fn main() -> anyhow::Result<()> {
                 tokio::time::interval(Duration::from_secs(server::HOUSEKEEPING_INTERVAL_SECS));
             loop {
                 ticker.tick().await;
-                let (uploads, temps) = storage.housekeeping_sweep(stale_after).await;
+                let (uploads, temps, expired) = storage.housekeeping_sweep(stale_after).await;
                 last_run.store(
                     chrono::Utc::now().timestamp(),
                     std::sync::atomic::Ordering::Relaxed,
                 );
-                if uploads > 0 || temps > 0 {
+                if uploads > 0 || temps > 0 || expired > 0 {
                     tracing::info!(
-                        "housekeeping: removed {} stale upload(s), {} temp file(s)",
+                        "housekeeping: removed {} stale upload(s), {} temp file(s), {} expired object(s)",
                         uploads,
-                        temps
+                        temps,
+                        expired
                     );
                 }
             }

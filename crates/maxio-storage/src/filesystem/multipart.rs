@@ -172,6 +172,7 @@ impl FilesystemStorage {
         }
         fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await?;
 
+        self.index_upsert(bucket, &object_meta);
         Ok(PutResult {
             size: total_size,
             etag,
@@ -438,6 +439,7 @@ impl FilesystemStorage {
         }
         fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await?;
 
+        self.index_upsert(bucket, &object_meta);
         Ok(PutResult {
             size: total_plaintext,
             etag,
@@ -485,6 +487,7 @@ impl FilesystemStorage {
         let meta_path = folder_dir.join(".folder.meta.json");
         let json = serde_json::to_string_pretty(&meta)?;
         fs::write(&meta_path, json).await?;
+        self.index_upsert(bucket, &meta);
 
         Ok(PutResult {
             size: 0,
@@ -741,7 +744,7 @@ impl FilesystemStorage {
         self.quota.check_object_size(total_size)?;
         self.quota.check_disk_reserve(&self.data_root)?;
 
-        if self.erasure_coding {
+        if self.effective_erasure_coding(bucket).await? {
             if upload_meta.encryption_spec.is_some() {
                 // SSE-C key continuity + per-part `encrypted` flag checks
                 // belong with the encrypted multipart path even under EC.
@@ -1045,6 +1048,7 @@ impl FilesystemStorage {
         }
         fs::remove_dir_all(self.upload_dir(bucket, upload_id)).await?;
 
+        self.index_upsert(bucket, &object_meta);
         Ok(PutResult {
             size: total_size,
             etag,

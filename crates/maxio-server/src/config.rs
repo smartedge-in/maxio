@@ -144,6 +144,10 @@ pub struct Config {
     /// Emit structured JSON audit log lines (`target=maxio_audit`) for mutating S3/console/admin actions.
     #[arg(long, env = "MAXIO_AUDIT_LOG", default_value = "false")]
     pub audit_log: bool,
+
+    /// Enable optional SQLite metadata index for faster ListObjects on large buckets.
+    #[arg(long, env = "MAXIO_METADATA_INDEX", default_value = "false")]
+    pub metadata_index: bool,
 }
 
 #[cfg(test)]

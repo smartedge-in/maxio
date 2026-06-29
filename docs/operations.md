@@ -254,7 +254,7 @@ When `Content-Length` is present, the limit is enforced before streaming begins.
 
 ## Erasure coding (single-node)
 
-Erasure coding is **server-wide** — there is no per-bucket toggle on a single instance. When enabled, new objects are stored as fixed-size chunks under `{key}.ec/` with a `manifest.json` sidecar and per-chunk SHA-256 checksums.
+Erasure coding is controlled **server-wide** via `MAXIO_ERASURE_CODING`. When enabled, buckets may override layout per bucket with `PUT ?erasure` (stored in `.bucket.json` as `erasure_coding`). New writes use the effective policy; existing flat objects stay flat until rewritten.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -265,7 +265,7 @@ Erasure coding is **server-wide** — there is no per-bucket toggle on a single 
 **Operational limits**
 
 - **Single-node only** — EC protects against bitrot and missing/corrupt chunks on one host; it is not replication or multi-node federation.
-- **No per-bucket EC** — all new writes on an EC-enabled server use the chunked layout; existing flat objects remain readable until rewritten.
+- **Per-bucket EC** — with server EC on, set `ErasureConfiguration` to `Disabled` on a bucket to keep flat layout; unset/`Enabled` uses chunked writes. Chunk size and parity remain server-wide.
 - **Parity required for recovery** — without `--parity-shards`, corrupt or missing chunks fail reads with S3 `InternalError` (HTTP 500). With parity, MaxIO attempts Reed-Solomon reconstruction when a data chunk fails its checksum.
 - **GF(2⁸) shard cap** — `data_chunks + parity_shards` must not exceed **255**. If an object would exceed this, increase `--chunk-size` (fewer data chunks) or reduce parity.
 - **Read errors** — chunk verification and unrecoverable RS failures return structured S3 XML (`InternalError`) before the response body streams, rather than dropping the connection mid-read.
@@ -283,6 +283,32 @@ maxio --data-dir /data --erasure-coding --chunk-size 1048576 --parity-shards 2
 ```
 
 The main-branch `aws-cli` CI job runs `tests/aws_cli_test.sh` against a server with `--erasure-coding` so on-disk corruption checks are not skipped.
+
+## Metadata index (optional)
+
+Enable with `MAXIO_METADATA_INDEX=true` to maintain `{data_dir}/.maxio-metadata.db` (SQLite WAL). The index accelerates `ListObjects` on large buckets; the filesystem remains authoritative.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `MAXIO_METADATA_INDEX` / `--metadata-index` | `false` | Maintain SQLite object index |
+
+On startup with the index enabled, MaxIO rebuilds per-bucket rows from a full filesystem walk. Writes and deletes upsert/remove index rows; if the index is disabled, listing falls back to directory walk.
+
+## Lifecycle expiration
+
+Prefix-based expiration rules are stored on `BucketMeta.lifecycle_rules` and enforced during the hourly housekeeping sweep (non-versioned buckets only).
+
+| API | Description |
+|-----|-------------|
+| `PUT /{bucket}?lifecycle` | Install rules (XML subset: `ID`, `Prefix`, `Status`, `Expiration/Days`) |
+| `GET /{bucket}?lifecycle` | Read configuration |
+| `DELETE /{bucket}?lifecycle` | Remove configuration |
+
+Versioned buckets skip automatic expiration in v1.
+
+## Replication / federation
+
+Not implemented. See `docs/plans/2026-06-29-replication-federation.md` for the Phase 0 RFC and proposed rollout.
 
 ## Docker
 
