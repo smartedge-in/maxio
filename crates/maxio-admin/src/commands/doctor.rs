@@ -3,9 +3,9 @@ use crate::client::AdminSession;
 use crate::commands::remote::run_remote;
 use crate::error::Result;
 use crate::output::emit;
-use maxio::storage::filesystem::FilesystemStorage;
-use maxio::storage::keys::Keyring;
-use maxio::storage::quota::QuotaLimits;
+use maxio_storage::filesystem::FilesystemStorage;
+use maxio_storage::keys::Keyring;
+use maxio_storage::quota::QuotaLimits;
 use serde_json::json;
 use std::sync::Arc;
 

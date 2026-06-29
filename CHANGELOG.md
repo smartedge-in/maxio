@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **P3-17:** `maxio-admin` no longer depends on the root `maxio` facade — local doctor/keyring use `maxio-storage` directly, shrinking the link graph and fixing `rust-lld` bus errors during workspace tests on constrained hosts.
+
 ### Added
 
 - **Enterprise GA (P3-44 / P3-52 / P3-53):** airgap install scripts (`scripts/build-offline-bundle.sh`, `build-offline-images.sh`, `load-images.sh`), bare-metal systemd unit, observability compose stack, backup script, security audit checklist, DR/SLA/airgap runbook sections in `docs/operations.md`, private-registry K8s `imagePullSecrets`, Playwright console E2E (`e2e/`, CI `e2e` job).

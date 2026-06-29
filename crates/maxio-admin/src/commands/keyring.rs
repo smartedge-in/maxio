@@ -3,7 +3,7 @@ use crate::client::AdminSession;
 use crate::commands::remote::run_remote;
 use crate::error::Result;
 use crate::output::emit;
-use maxio::storage::keys;
+use maxio_storage::keys;
 use std::path::PathBuf;
 
 pub async fn run(
