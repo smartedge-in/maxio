@@ -54,6 +54,8 @@ REPORT_DIR      ?= reports
 # Build / lint flags
 # -----------------------------------------------------------------------------
 CARGO_FLAGS     ?=
+# Cap parallel test/link jobs on small VMs (override: make test CARGO_TEST_JOBS=)
+CARGO_TEST_JOBS ?= -j 4
 BUILD_FLAGS     ?= --locked
 CLIPPY_FLAGS    ?= --workspace --all-targets --all-features -- -D warnings
 # Instrument library crates only — linking instrumented binaries (maxio) OOMs/crashes lld.
@@ -124,6 +126,10 @@ ci: sync-version ## Run full CI pipeline in order (stops on first failure)
 		printf "$(COLOR_YELLOW)warning: bun not found; SKIP_FRONTEND=1 (minimal embedded UI)$(COLOR_RESET)\n"; \
 		printf "$(COLOR_DIM)Install bun: make install-tools  |  Full UI: make frontend release$(COLOR_RESET)\n"; \
 	fi
+	@avail_kb=$$(df -k . | awk 'NR==2 {print $$4}'); \
+	if [ "$$avail_kb" -lt 3145728 ]; then \
+		printf "$(COLOR_YELLOW)warning: less than 3 GiB free disk; run \`cargo clean\` and prune old target/ dirs before CI$(COLOR_RESET)\n"; \
+	fi
 	$(call log,Clearing stale build artifacts (fresh link graph for workspace tests))
 	@$(CARGO) clean
 	$(MAKE) --no-print-directory fmt
@@ -174,10 +180,12 @@ lint: ## Run Clippy with warnings denied
 	$(CARGO) clippy $(CLIPPY_FLAGS) $(CARGO_FLAGS)
 
 test: ## Run workspace unit and integration tests
-	$(call log,Running cargo test --workspace --all-features)
-	$(CARGO) test --workspace --all-features $(CARGO_FLAGS)
+	$(call log,Running cargo test --workspace --all-features $(CARGO_TEST_JOBS))
+	$(CARGO) test --workspace --all-features $(CARGO_TEST_JOBS) $(CARGO_FLAGS)
 
 coverage: ## Generate LLVM code-coverage report (lib crates) and enforce floors
+	$(call log,Clearing debug artifacts before coverage instrumentation)
+	@$(CARGO) clean
 	$(call log,Running cargo llvm-cov)
 	$(call ensure_cargo_ext,llvm-cov)
 	@mkdir -p "$(COVERAGE_DIR)"
