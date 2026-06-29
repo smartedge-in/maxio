@@ -124,6 +124,8 @@ ci: sync-version ## Run full CI pipeline in order (stops on first failure)
 		printf "$(COLOR_YELLOW)warning: bun not found; SKIP_FRONTEND=1 (minimal embedded UI)$(COLOR_RESET)\n"; \
 		printf "$(COLOR_DIM)Install bun: make install-tools  |  Full UI: make frontend release$(COLOR_RESET)\n"; \
 	fi
+	$(call log,Clearing stale build artifacts (fresh link graph for workspace tests))
+	@$(CARGO) clean
 	$(MAKE) --no-print-directory fmt
 	$(MAKE) --no-print-directory check
 	$(MAKE) --no-print-directory lint
