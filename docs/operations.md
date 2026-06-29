@@ -318,19 +318,17 @@ Versioned buckets skip automatic expiration in v1.
 
 ## Replication / federation
 
-Not implemented. Design and phased rollout:
+Not implemented. **Priority 1** path is **Raft-first multi-replica** (not operator sync):
 
-| Phase | Backlog | Scope |
-|-------|---------|-------|
-| Epic | P3-12 | Multiple replicas support (primary + standby; tracks phases below) |
-| 0 | ~~P3-02~~ | RFC — constraints and options (`docs/plans/2026-06-29-replication-federation.md`) |
-| 1 | P3-09 | Operator `rclone`/`rsync` runbook + bucket inventory export |
-| 2 | P3-10 | Storage trait + mutation event log |
-| 3 | P3-11 | `maxio-replicate` agent (active-passive apply) |
+| Backlog | Scope |
+|---------|-------|
+| **P1-14** (epic) | Live multi-node: dual Raft + distributed EC — `docs/plans/2026-06-29-multi-replica-raft-priority.md` |
+| P1-15–P1-21 | StorageBackend → Storage Raft → distributed EC → Server Raft → stateless UI |
+| ~~P3-09–P3-11~~ | Operator `rsync`/agent track — **deferred** |
 
-Erasure coding (above) is single-node bitrot recovery, not geo-replication.
+Erasure coding (above) is single-node today; **P1-18/P1-19** extend EC across storage nodes.
 
-### Asymmetric scale-out (planned, P3-13+)
+### Asymmetric scale-out (planned, P1-14)
 
 The `maxio-storage` / `maxio-server` crate split (P3-04) does not yet allow different replica counts per tier. Today every pod is a full stack with its own `data_dir`.
 
@@ -341,7 +339,7 @@ Target architecture (`docs/plans/2026-06-29-distributed-scale-raft.md`):
 | `maxio-ui` | None (stateless static SPA) | P3-16 |
 | `maxio-server` | Independent server Raft quorum | P3-15 |
 | `maxio-storage` | Independent storage Raft quorum | P3-14 |
-| Epic (asymmetric replicas) | All three tiers | P3-13 |
+| Epic (asymmetric replicas) | All three tiers | P1-14 |
 
 Storage and server each elect their own Raft leader. UI replicas are interchangeable and hold no session state. Replica counts may differ (e.g. 3 UI, 3 server, 5 storage). See `docs/plans/2026-06-29-ui-scale-out.md`.
 

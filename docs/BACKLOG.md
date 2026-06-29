@@ -6,9 +6,45 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 
 | Field | Meaning |
 |-------|---------|
-| **Priority** | P0 = production blocker · P1 = security/reliability · P2 = maintainability · P3 = nice-to-have |
+| **Priority** | P0 = production blocker · P1 = security/reliability · **P1-MR = multi-replica & EC (product #1)** · P2 = maintainability · P3 = nice-to-have / deferred |
 | **Effort** | S (< 1 day) · M (1–3 days) · L (3–7 days) · XL (> 1 week) |
 | **Area** | ci · ops · security · storage · api · auth · ui · docs |
+
+---
+
+## Priority 1 — Multi-replica architecture & erasure coding (Raft-first)
+
+**Product direction:** Live multi-node cluster via **dual independent Raft** (storage + server) and **distributed erasure coding** across storage nodes. No operator-sync detour on the critical path. Plan: `docs/plans/2026-06-29-multi-replica-raft-priority.md`.
+
+**Do not:** scale `Deployment.replicas` on one RWO PVC; round-robin LB across uncordinated MaxIO instances.
+
+| Order | ID | Title | Area | Effort | Description | Acceptance criteria |
+|-------|-----|-------|------|--------|-------------|-------------------|
+| — | **P1-14** | **Multi-replica epic (Raft-first)** | storage | XL | **Epic** — closes when P1-15–P1-21, P1-23, P1-24 done. Supersedes P3-13 as primary scale-out track. Asymmetric tiers: UI (none), server (Raft), storage (Raft + EC). | 3-node storage quorum + failover test; distributed EC rebuild test; 2+ server + 2+ UI replicas; single-node colocated mode preserved; epic doc acceptance checklist complete. |
+| 1 | P1-15 | `StorageBackend` trait | storage | L | Extract `FilesystemStorage` behind a trait; **all** metadata and object mutations go through it. Prerequisite for Raft apply path. *Replaces P3-10 on critical path.* | Trait in `maxio-storage`; server uses `Arc<dyn StorageBackend>`; existing integration tests pass unchanged; no direct `FilesystemStorage` in handlers. |
+| 2 | P1-16 | Raft library spike & license gate | storage | S | Evaluate `openraft` / `raft-rs` (or alternatives); **must** pass P3-24 permissive-only `cargo deny`. Document choice in plan. | Spike doc in `docs/plans/`; chosen crate in workspace with deny.toml entry; minimal echo cluster test in CI (optional feature flag). |
+| 3 | P1-22 | `maxio-common` crate | storage | M | Cluster RPC types, `VERSION`, routing snapshot DTOs, shared constants. No `axum`/`reqwest`/storage I/O. *Moved ahead of P3-21 epic.* | `crates/maxio-common`; server + storage + admin import shared types; forbidden-deps documented. |
+| 4 | P1-17 | Storage tier Raft | storage | XL | Metadata consensus: buckets, object index, multipart, bucket settings, keyring epoch. Object bytes local per node. *Was P3-14.* | 3-node bootstrap/join; writes via leader; follower failover integration test; metrics `raft_storage_leader`, `raft_storage_commit_lag`. |
+| 5 | P1-18 | Distributed erasure coding | storage | XL | Spread EC data/parity **shards across storage nodes** (not single-host `.ec` only). Shard map is Raft metadata. Builds on single-node EC (shipped) + per-bucket toggle (P3-07). | Placement policy (e.g. K data + M parity across distinct nodes); PUT stripes shards; shard map in Raft; integration test 3 storage nodes + EC object. |
+| 6 | P1-19 | Multi-node EC read & rebuild | storage | L | On shard loss, fetch parity from peer storage nodes and reconstruct. Extends `VerifiedChunkReader` / RS path for remote shard RPC. | Read path pulls missing shard from peer; rebuild after one node down (with sufficient parity); tests with induced shard loss. |
+| 7 | P1-20 | Server tier Raft | api | XL | Independent server quorum: membership, storage endpoint map, credential epoch. Stateless S3 workers use routing snapshot. *Was P3-15.* | 2+ server quorum; storage leader change reflected without manual config; `/readyz` reflects storage quorum; integration test with P1-17. |
+| 8 | P1-21 | Stateless UI tier (`maxio-ui`) | ui | L | Extract embedded SPA; scale UI independently. *Was P3-16.* | `crates/maxio-ui`; distributed deploy; Ingress split `/ui` vs S3; ≥2 UI replicas in test manifest. |
+| 9 | P1-23 | Helm distributed profile | ops | L | `deploy/helm/maxio` with `values-distributed.yaml`: storage StatefulSet, server Deployment, UI Deployment, probes, PDBs. *Extends P3-19.* | `helm lint` + `helm template` for distributed profile; documents replica counts per tier; single-node `values.yaml` still default. |
+| 10 | P1-24 | Multi-node CI / dev harness | ci | M | Automated 3-node (storage) cluster test in CI or documented `kind` recipe. | Script or CI job: bootstrap Raft, PUT/GET, kill leader, EC shard placement smoke; runs on main or nightly. |
+| 11 | P1-25 | EC bitrot scanner (cluster-aware) | storage | L | Proactive shard checksum scan; heal from parity/peers. *Elevated from P3-32 for EC priority.* | Background scanner; cross-node heal when local shard corrupt; Prometheus counters; ops tuning doc. |
+
+**P1-MR dependency graph**
+
+```
+P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19
+                              ↘ P1-20 → P1-21
+P1-23, P1-24 (parallel once P1-17 alpha)
+P1-25 (after P1-18)
+```
+
+**Sprint order (Priority 1):** P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19 → P1-20 → P1-21 → P1-23 + P1-24 → P1-25 → **P1-14 closes**
+
+**Supporting (parallel, not blocking Raft core):** P3-24 (license gate for Raft dep), P3-19 base chart skeleton, P3-45/46 (Cilium when on K8s).
 
 ---
 
@@ -104,20 +140,20 @@ Actionable backlog derived from codebase review (2026-06-28). Items are ordered 
 | P3-06 | UI E2E tests (Playwright) | ui | M | No browser-level tests for upload/download flows. | Smoke test: login → create bucket → upload → download → delete. |
 | ~~P3-07~~ | ~~Per-bucket erasure coding toggle~~ | storage | L | Done — `BucketMeta.erasure_coding` override; `PUT/GET ?erasure`; writes use `effective_erasure_coding()`; reads layout-based; existing flat objects unchanged. | — |
 | P3-08 | Keycloak console UI login | ui | M | Server exposes `/api/auth/keycloak-config`, `keycloak-login`, and `keycloak-refresh`; Svelte console still uses access/secret login only. | `Login.svelte` reads `keycloak-config` on load; when enabled, username/password form calls `keycloak-login` and reuses cookie session; silent refresh before expiry; access/secret form hidden when Keycloak-only; Playwright smoke test for Keycloak path (extends P3-06). |
-| P3-09 | Replication Phase 1 — operator sync runbook | ops | M | Phase 0 RFC done (P3-02). Phase 1 adds no replication daemon: operators use `rclone`/`rsync` for active-passive DR. See `docs/plans/2026-06-29-replication-federation.md` § Phase 1. | `docs/operations.md` runbook (sync, keyring/credential coordination, multipart quiesce, failover checklist); paginated bucket inventory export via admin API or `maxio-admin`; integration test for inventory endpoint. |
-| P3-10 | Replication Phase 2 — mutation event log | storage | XL | Introduce `StorageBackend` trait and append-only replication log on every mutating storage op; builds on metadata index patterns (P3-03). See RFC § Phase 2. | `MAXIO_REPLICATION_LOG` enables durable log; event schema covers ObjectPut/Delete and bucket meta changes; idempotent replay helper + unit tests; Prometheus lag/sequence metrics. |
-| P3-11 | Replication Phase 3 — replication agent | storage | XL | Sidecar `maxio-replicate` tails Phase 2 log and applies changes to standby `data_dir` (active-passive). See RFC § Phase 3. | Agent with checkpoint, bucket include/exclude, lag metrics/alerts; primary PUT → agent → standby GET integration test; failover/failback steps added to operations guide. |
-| P3-12 | Multiple replicas support | storage | XL | **Epic** — MaxIO is single-node today; scaling Kubernetes `replicas>1` without coordinated storage is not supported. This item tracks active-passive multi-node deployments (primary + standby/read replica), not erasure-coding parity shards or active/active multi-master. Implementation path: P3-09 → P3-10 → P3-11 (`docs/plans/2026-06-29-replication-federation.md`). | ≥1 standby replica stays within configurable lag of primary; failover runbook validated in docs; `maxio-replicate` agent shipped; integration test: write primary → read standby; explicit non-goals documented (no S3 CRR XML, no multi-master writes). Closes when P3-09, P3-10, and P3-11 are done. |
-| P3-13 | Asymmetric scale-out with dual Raft (epic) | storage | XL | **Epic** — P3-04 split is compile-time only. Scale architecture **must** use **two independent Raft consensus groups** (storage + server) plus a **stateless UI tier** (P3-16). See `docs/plans/2026-06-29-distributed-scale-raft.md` and `docs/plans/2026-06-29-ui-scale-out.md`. Depends on P3-10 (`StorageBackend`); distinct from interim DR track P3-09–P3-11. | Storage Raft (P3-14), Server Raft (P3-15), and stateless UI crate (P3-16) shipped; independent replica counts per tier (e.g. 3 UI, 3 server, 5 storage); colocated single-node mode remains default. Closes when P3-14, P3-15, and P3-16 are done. |
-| P3-14 | Storage tier Raft consensus | storage | XL | Raft cluster inside `maxio-storage`: replicates bucket/object metadata, multipart state, bucket settings, keyring epoch. Object bytes stay on local FS per node; metadata mutations go through Raft leader. Phase A in distributed-scale-raft plan. | 3-node storage quorum bootstrap/join; metadata write via leader; follower failover < configured SLA in integration test; `StorageBackend` routes mutations through Raft; metrics: `raft_storage_leader`, `raft_storage_commit_lag`. |
-| P3-15 | Server tier Raft consensus | api | XL | **Independent** Raft cluster inside `maxio-server`: replicates server membership, storage endpoint map, credential fingerprint epoch, admin routing generation. Any server member serves S3 data plane against storage tier; control writes go through server Raft leader. Phase B in distributed-scale-raft plan. | 2+ server quorum; routing snapshot replicated; storage leader change propagated without manual config; `/readyz` reflects storage quorum reachability; integration test with P3-14 cluster; metrics: `raft_server_leader`, `raft_server_commit_lag`. |
-| P3-16 | UI crate — stateless scale-out | ui | L | Console SPA (`ui/`) is embedded in `maxio-server` via `rust-embed`; cannot scale UI independently. Extract `crates/maxio-ui` static asset server; UI pods hold no session state (auth cookies from API tier only). No Raft on UI tier. See `docs/plans/2026-06-29-ui-scale-out.md`. | `maxio-ui` workspace crate serves `ui/build`; distributed deploy removes embed from server; configurable API base URL for split ingress; K8s manifest with UI Deployment ≥2 replicas; Playwright smoke test via UI load balancer. |
+| ~~P3-09~~ | ~~Replication Phase 1 — operator sync runbook~~ | ops | M | **Deferred** — not on Raft-first critical path (see Priority 1). May revisit for geo-DR tooling after P1-14. | — |
+| ~~P3-10~~ | ~~Replication Phase 2 — mutation event log~~ | storage | XL | **Superseded by P1-15** — `StorageBackend` trait is the Raft-first entry; optional append-only log deferred unless needed for audit. | — |
+| ~~P3-11~~ | ~~Replication Phase 3 — replication agent~~ | storage | XL | **Deferred** — `maxio-replicate` sidecar not on critical path; Raft + distributed EC is Priority 1. | — |
+| ~~P3-12~~ | ~~Multiple replicas support (operator epic)~~ | storage | XL | **Superseded by P1-14** — multi-replica epic is Raft-first, not rsync/agent. | — |
+| ~~P3-13~~ | ~~Asymmetric scale-out with dual Raft (epic)~~ | storage | XL | **Superseded by P1-14** — same architecture, now Priority 1. | — |
+| ~~P3-14~~ | ~~Storage tier Raft consensus~~ | storage | XL | **Superseded by P1-17**. | — |
+| ~~P3-15~~ | ~~Server tier Raft consensus~~ | api | XL | **Superseded by P1-20**. | — |
+| ~~P3-16~~ | ~~UI crate — stateless scale-out~~ | ui | L | **Superseded by P1-21**. | — |
 | P3-17 | Admin CLI crate boundary | ops | M | `maxio-admin` is a workspace member (P2-12) but depends on root `maxio` facade, coupling the CLI to server+storage re-exports. Must be a standalone crate: `maxio-storage` for local `--data-dir` commands only; `reqwest` for remote API — never `maxio-server`. Stateless operator client, not a cluster tier. See `docs/plans/2026-06-29-admin-cli-crate.md`. | No `maxio` or `maxio-server` path dep in `maxio-admin/Cargo.toml`; local doctor/keyring use `maxio-storage` directly; separate release binary/artifact; crate-boundary CI check; docs updated in `docs/operations.md`. |
 | P3-18 | Bare metal deployment pack | ops | M | MaxIO must support native Linux bare-metal/VM installs, not only containers. TLS/LB via **permissive** edge only (Caddy/Traefik — P3-26); **no keepalived/nginx** in official runbooks. See `docs/plans/2026-06-29-deployment-targets.md`. | `deploy/systemd/maxio.service`; bare-metal section with Caddy example; multi-host LB without GPL VIP; P3-26 aligned; smoke test via `maxio healthcheck`. |
 | P3-19 | Kubernetes Helm chart | ops | L | MaxIO must support first-class Kubernetes deployment. Today only a minimal Deployment YAML snippet exists; no Helm chart, values, or CI validation. See `docs/plans/2026-06-29-deployment-targets.md`. | Official `deploy/helm/maxio` chart; single-node profile (`replicas: 1`, PVC, probes, Ingress, Secret); `helm lint` + `helm template` in CI; README deployment section; `values-distributed.yaml` stub for P3-13 tiers; document `replicas: 1` constraint until Raft tiers ship. |
 | P3-20 | Deployment targets epic (bare metal + K8s) | ops | L | **Epic** — MaxIO supports **bare metal** and **Kubernetes** as equal production targets (P3-18 + P3-19). Docker image remains packaging; operators choose BM or K8s without forked docs. | P3-18 and P3-19 complete; README links both paths; distributed scale-out docs (P3-13) reference BM multi-host and Helm values overlay. |
 | P3-21 | Shared library strategy (epic) | storage | M | **Epic** — thin shared types without a monolithic “god crate”. `maxio-storage` remains storage SSOT; new `maxio-common` for cross-component contracts; root facade not a sibling dependency (P3-17). UI stays npm-only. See `docs/plans/2026-06-29-shared-libraries.md`. | P3-22 + P3-23 + P3-17 complete; dependency graph documented; no `axum`/`reqwest` in `maxio-common`. |
-| P3-22 | `maxio-common` crate | storage | M | Thin workspace crate: `VERSION`, admin API JSON types (server handlers + `maxio-admin` client), shared `MAXIO_*` constant names. No HTTP, storage I/O, or framework deps. | `crates/maxio-common` in workspace; server + admin use shared admin DTOs; version from single module; `deny.toml` or README lists forbidden deps for common. |
+| ~~P3-22~~ | ~~`maxio-common` crate~~ | storage | M | **Promoted to P1-22** on Priority 1 critical path. | — |
 | P3-23 | Crate boundary CI enforcement | ci | S | Automate dependency rules from P3-04 / shared-library plan: e.g. `maxio-admin` must not depend on `maxio` or `maxio-server`; `maxio-common` must not depend on `axum` or `maxio-storage`. | `cargo deny` bans or CI script fails on forbidden edges; documented in `docs/plans/2026-06-29-shared-libraries.md`; passes on current graph after P3-17/P3-22. |
 | P3-24 | Permissive-only license policy (mandatory) | ci | S | **Requirement** — no copyleft, weak copyleft, or non-standard licenses in production artifacts; prefer Apache-2.0/MIT for new deps. Partially enforced via `deny.toml` + CI `licenses` job; npm/UI path needs explicit check. See `docs/licensing.md`. | `docs/licensing.md` mandatory section + PR checklist; `deny.toml` documents forbidden categories; `make deny` in CI (existing); add `ui/` npm license audit step (allow-list Apache/MIT/BSD/ISC/0BSD/CC0); contributors reference policy in README or CONTRIBUTING. |
 | ~~P3-25~~ | ~~Optional edge LB (`maxio-edge` / Pingora)~~ | ops | L | **Dropped** — use **Caddy** (Apache-2.0), **Traefik** (MIT), or K8s **MetalLB** / Ingress (P3-26) instead; avoids GPL **keepalived** / HAProxy. Embedded Pingora in `maxio-server` also rejected. See `docs/plans/2026-06-30-pingora-edge-lb.md`. | — |
@@ -134,7 +170,7 @@ Items below close feature and ops gaps identified vs [RustFS](https://github.com
 | P3-29 | Multi-tenancy | auth | L | RustFS has first-class multi-tenant isolation. MaxIO has multiple static credentials in `.maxio-credentials.json` but no tenant boundary on buckets or admin scope. | Tenant ID on buckets and credentials; requests scoped to tenant; admin API lists only tenant buckets; cross-tenant access denied; migration path for single-tenant deployments (default tenant). |
 | P3-30 | OpenStack Swift API | api | XL | RustFS exposes Swift object API alongside S3. MaxIO is S3-only. | Swift `PUT/GET/HEAD/DELETE` object paths; container listing; `X-Auth-Token` auth path or documented bridge to Keystone (P3-31); compatibility matrix row per endpoint; integration smoke test. |
 | P3-31 | OpenStack Keystone authentication | auth | L | RustFS integrates Keystone for Swift and console. MaxIO has Keycloak for console (P3-08) but not Keystone/`X-Auth-Token`. | Keystone token validation middleware; configurable Keystone URL; Swift and/or S3 requests accept valid service tokens; docs for OpenStack deployment; optional dependency feature flag. |
-| P3-32 | Bitrot scanner & healing | storage | L | RustFS advertises bitrot protection with background scanning. MaxIO verifies chunks on read (EC) and uses sidecar HMACs but has no proactive scanner. | Background scanner job (housekeeping extension); configurable cadence and cycle budget; detect corrupt EC chunks / sidecar mismatch; auto-heal from parity when possible; Prometheus counters (`scanner_objects_checked`, `scanner_heal_total`); ops tuning doc. |
+| ~~P3-32~~ | ~~Bitrot scanner & healing~~ | storage | L | **Promoted to P1-25** (cluster-aware EC scanner on Priority 1). | — |
 | P3-33 | Lifecycle transitions & non-current expiry | storage | M | P3-01 covers prefix **expiration** only. RustFS lifecycle includes transitions and non-current version rules (under broader lifecycle). | `LifecycleRule` supports `transition_days` / storage class stub and `noncurrent_expiration_days` for versioned buckets; housekeeping applies rules; `PUT/GET ?lifecycle` schema versioned; tests for versioned non-current purge. |
 | P3-34 | S3 bucket replication API (CRR) | storage | XL | RustFS has **bucket replication** available. MaxIO defers to operator sync (P3-09) and internal log/agent (P3-10/11) without S3 CRR XML. | `PutBucketReplication` / `GetBucketReplication` / `DeleteBucketReplication`; replicate to standby MaxIO endpoint; replication status headers on objects; lag metrics; builds on P3-10 event log; integration test primary→standby; extends P3-12 epic. |
 | P3-35 | External KMS (SSE-KMS compatible) | security | L | RustFS is adding KMS. MaxIO supports SSE-S3/SSE-C only and rejects AWS SSE-KMS requests today. | Pluggable KMS backend trait; at least one backend (e.g. HashiCorp Vault transit or static key service); `aws:kms` SSE header path documented; keys never logged; deny.toml-clean deps; integration test encrypt/decrypt roundtrip. |
@@ -145,31 +181,31 @@ Items below close feature and ops gaps identified vs [RustFS](https://github.com
 | P3-40 | Storage API fuzz testing in CI | ci | M | RustFS includes `fuzz/` targets. MaxIO relies on integration tests only. | `cargo-fuzz` or libFuzzer harness for SigV4 parser, path/key validation, policy parser; CI job on main (nightly acceptable); seed corpus committed; documented in `CLAUDE.md`. |
 | P3-41 | One-click bare-metal install script | ops | S | RustFS provides `curl \| bash` installer. MaxIO documents manual build/Docker only. | `scripts/install-maxio.sh` (or documented curl pipe) for Linux amd64/arm64; installs binary + systemd unit stub; checksum verification; linked from README. |
 | P3-42 | Optional native TLS termination | ops | M | RustFS supports `RUSTFS_TLS_PATH`. MaxIO requires external Caddy/Traefik (P3-26). Optional native TLS reduces moving parts for edge/single-node. | `--tls-cert` / `--tls-key` or env equivalents; TLS on S3 and console listeners; documented as optional (proxy path remains default); integration test with self-signed cert. |
-| P3-43 | RustFS parity epic | storage | XL | **Epic** — track closing competitive gaps vs RustFS without abandoning MaxIO principles (filesystem simplicity, permissive-only deps). Distinct from but overlaps P3-12 (replication), P3-13 (distributed), P3-19 (Helm). | Tier 1 (ops/docs): P3-36, P3-37, P3-41, P3-05. Tier 2 (S3 product): P3-27, P3-28, P3-33, P3-39. Tier 3 (enterprise): P3-29, P3-35, P3-38. Tier 4 (scale/protocol): P3-30, P3-31, P3-34 + P3-12/13. Tier 5 (data integrity): P3-32. Epic closes when Tier 1–3 complete and Tier 4 has RFC or shipped path. |
+| P3-43 | RustFS parity epic | storage | XL | **Epic** — competitive gaps vs RustFS; **subordinate to P1-14** (multi-replica ships first). | Tier 1 (ops/docs): P3-36, P3-37, P3-41, P3-05. Tier 2 (S3 product): P3-27, P3-28, P3-33, P3-39. Tier 3 (enterprise): P3-29, P3-35, P3-38. Tier 4 (protocol): P3-30, P3-31, P3-34. Epic closes when Tier 1–3 complete after P1-14. |
 | P3-44 | Production GA milestone | ops | M | README warns against production use. RustFS ships beta/production releases with install/Helm paths. | Remove dev-only warning when criteria met: P3-18 + P3-19 + P3-26 done; P3-06 smoke tests green; security audit checklist; CHANGELOG GA entry; `docs/operations.md` production SLA section. |
 
 ### Kubernetes / Cilium (eBPF)
 
-MaxIO on Kubernetes with [Cilium](https://cilium.io/) as CNI: use eBPF for datapath throughput and observability. **eBPF does not replace storage replication** — pair with P3-09–12 (active-passive) or P3-13–16 (distributed tiers). See `docs/plans/2026-06-29-cilium-ebpf-deployment.md`.
+MaxIO on Kubernetes with [Cilium](https://cilium.io/) as CNI: use eBPF for datapath throughput and observability. **eBPF does not replace Raft** — pair with **P1-14** distributed tiers. See `docs/plans/2026-06-29-cilium-ebpf-deployment.md`.
 
 | ID | Title | Area | Effort | Description | Acceptance criteria |
 |----|-------|------|--------|-------------|-------------------|
-| P3-45 | Cilium eBPF deployment guide & Helm overlay | ops | M | Document MaxIO on Cilium: kube-proxy replacement, eBPF Service LB, Gateway/Ingress TLS, optional WireGuard node encryption, Hubble flow visibility. Clarify what eBPF improves (client→Service, server↔storage RPC, replication traffic) vs what MaxIO must implement (multi-node consistency). | `docs/plans/2026-06-29-cilium-ebpf-deployment.md`; `deploy/helm/maxio/values-cilium.yaml` (requires P3-19 chart): `kubeProxyReplacement`, socket LB, Ingress/Gateway, `MAXIO_TRUSTED_PROXIES` for pod/ingress CIDRs; **primary-only** Service endpoints for active-passive (P3-09); server-tier LB pattern for P3-15; streaming upload notes (no buffering); Hubble + Prometheus troubleshooting section in `docs/operations.md`. |
-| P3-46 | Multi-node Service topology for replication | ops | M | Kubernetes `replicas>1` on one RWO PVC is unsafe. Define Cilium-friendly Service/EndpointSlice patterns for primary + standby + `maxio-replicate` (P3-11) and future server/storage tiers (P3-13). | Helm templates: primary Service (write traffic), optional internal Service for replication agent; standby excluded from client Endpoints until failover; NetworkPolicy examples (Cilium CRD); failover runbook updates P3-09; integration test or documented manual failover on kind+cilium. |
+| P3-45 | Cilium eBPF deployment guide & Helm overlay | ops | M | Document MaxIO on Cilium: kube-proxy replacement, eBPF Service LB, Gateway/Ingress TLS, optional WireGuard node encryption, Hubble flow visibility. | `values-cilium.yaml` (requires P3-19); server-tier LB for P1-20; storage internal Services for P1-17; streaming upload notes; Hubble troubleshooting in `docs/operations.md`. |
+| P3-46 | Multi-node Service topology (K8s) | ops | M | Safe Service patterns for **P1-14** tiers — not single-PVC multi-replica. | Helm templates per tier; NetworkPolicy examples; documents `replicas: 1` on combined stack until P1-23 distributed profile. |
 
-**Suggested Cilium order:** P3-19 (base chart) → P3-45 → P3-46 (with P3-09); revisit when P3-13 server/storage tiers land.
+**Suggested Cilium order:** P3-19 → P1-23 → P3-45 → P3-46.
 
 **RustFS parity — already covered elsewhere (no new ID)**
 
 | RustFS capability | MaxIO backlog |
 |-------------------|---------------|
-| Distributed / multi-node mode | P3-13 → P3-14, P3-15, P3-16 |
-| Operator + agent replication | P3-09 → P3-10 → P3-11 → P3-12 |
+| Distributed / multi-node mode | **P1-14** → P1-17, P1-20, P1-21 |
+| Operator + agent replication | Deferred (P3-09–P3-11) |
 | Kubernetes Helm chart | P3-19 (epic P3-20) |
 | ARM64 images | P3-05 |
 | OIDC console login | P3-08 (+ P3-38 for IAM) |
 | Lifecycle (basic expiration) | ~~P3-01~~ (extend via P3-33) |
-| Erasure coding | Shipped; scanner/healing via P3-32 |
+| Erasure coding | Single-node shipped; **distributed EC via P1-18, P1-19, P1-25** |
 | Prometheus metrics | ~~P2-07~~ (dashboards via P3-37) |
 | Versioning, multipart, encryption | Shipped |
 
@@ -197,11 +233,11 @@ Reference only — no backlog action unless regressions appear.
 
 ## Suggested sprint order
 
-**Sprint 1 (stabilize):** ~~P0-01~~, ~~P0-02~~, ~~P2-03~~, ~~P1-07~~ ✓
-**Sprint 2 (harden):** ~~P0-03~~, ~~P1-01~~, ~~P1-02~~, ~~P0-04~~ ✓
-**Sprint 3 (scale maintainability):** ~~P2-01~~, ~~P2-04~~, ~~P0-05~~, ~~P2-06~~ ✓
-**Sprint 4 (erasure coding hardening):** ~~P1-13~~, ~~P2-11~~, ~~P2-09~~, ~~P2-10~~, ~~P1-12~~ ✓
-**Sprint 5 (ops tooling):** ~~P2-13~~ (admin API), ~~P2-12~~ (CLI: profiles → remote status/info/doctor → housekeeping; local keyring rotate) ✓
+**Completed (foundation):** P0, P1 security, P1 S3 compat, single-node EC (P1-12/13, P2-09/10/11), P2 ops tooling ✓
+
+**Active — Priority 1 (multi-replica & distributed EC):** P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19 → P1-20 → P1-21 → P1-23 + P1-24 → P1-25 → **P1-14 epic close**
+
+**After P1-14:** P3-19 (single-node Helm), P3-24, P3-08, P3-43 RustFS parity (subordinate), P3-44 GA
 
 ---
 

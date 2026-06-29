@@ -1,8 +1,8 @@
-# Distributed scale architecture — dual Raft (P3-13+)
+# Distributed scale architecture — dual Raft (P1-14 / was P3-13)
 
 ## Status
 
-Draft — architectural requirement. No Raft code ships today.
+**Priority 1** — active product direction. See `docs/plans/2026-06-29-multi-replica-raft-priority.md`. No Raft code ships today.
 
 ## Requirement
 
