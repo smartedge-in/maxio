@@ -1,6 +1,18 @@
 # Pingora load balancing (P3-25) — feasibility
 
-## Questions
+## Decision (dropped)
+
+**P3-25 / `maxio-edge` is not pursued.** Client-facing LB and TLS stay with **standard external components**:
+
+- **Kubernetes:** Ingress + Service (P3-19)
+- **Bare metal:** nginx / Caddy / HAProxy + keepalived VIP (P3-18)
+- **Single-node:** direct bind or local reverse proxy (`docs/operations.md`)
+
+MaxIO focuses on S3 storage and cluster tiers (P3-13+), not shipping a custom edge proxy. Pingora remains a fine choice for operators who build their **own** edge — it is not a MaxIO product requirement.
+
+---
+
+## Questions (historical)
 
 1. Can Pingora provide **native LB** across MaxIO storage and server components?
 2. Should **`maxio-server` be built on Pingora natively** (not a separate front proxy) to support a **VIP with LB**?
@@ -9,8 +21,8 @@
 
 | Model | Verdict |
 |-------|---------|
-| Separate `maxio-edge` proxy | **Optional** — reasonable for HTTP ingress to server/UI pools |
-| **Rebuild `maxio-server` on Pingora** for VIP + LB | **Not recommended** — wrong layer, overlaps Raft, huge Axum rewrite |
+| Separate `maxio-edge` proxy | **Dropped** — duplicates Ingress/nginx; not worth maintaining |
+| **Rebuild `maxio-server` on Pingora** for VIP + LB | **Rejected** — wrong layer, overlaps Raft, huge Axum rewrite |
 
 Pingora is **not** a substitute for **storage Raft routing**, **Server Raft** (P3-15), or **VIP failover** at the network layer.
 
@@ -61,30 +73,14 @@ If Pingora fronts `maxio-server`:
 
 These are solvable but require **S3-aware proxy config**, not stock round-robin.
 
-## Alternatives already in scope
+## Supported LB approach (instead of maxio-edge)
 
-| Approach | Backlog |
-|----------|---------|
-| nginx / Caddy / cloud LB | Documented in `docs/operations.md` |
+| Approach | Backlog / docs |
+|----------|----------------|
+| nginx / Caddy / cloud LB | `docs/operations.md` |
 | Kubernetes Ingress + Service | P3-19 Helm chart |
-| Pingora as first-party `maxio-edge` | P3-25 |
-
-External LBs remain valid; Pingora is optional **native Rust** edge for operators who want one toolchain.
-
-## Recommended scope (P3-25)
-
-**Do**
-
-- Optional `crates/maxio-edge` binary built on `pingora-proxy` + `pingora-load-balancing`
-- Upstream pools: `maxio-server` members, optional `maxio-ui` members
-- Active health checks: `GET /readyz`
-- Document TLS termination + `MAXIO_TRUSTED_PROXIES` on backends
-
-**Do not (v1)**
-
-- Pingora in front of storage Raft peers for metadata writes
-- Replace Server Raft or Storage Raft with Pingora
-- Embed Pingora inside `maxio-server` process (separate deployable)
+| keepalived VIP (bare metal) | P3-18 |
+| Server / Storage Raft routing | P3-14, P3-15 |
 
 ## Embedded Pingora inside `maxio-server` (VIP + native LB)
 
@@ -135,7 +131,7 @@ VIP floats to **one** node (active/passive) **or** an **external** LB distribute
 
 The only plausible **in-process** use: Pingora’s LB **client** pool for **server → storage HTTP** transport **if** storage exposes HTTP and leader address comes from **Storage Raft**, not blind LB. Even then, a thin `StorageBackend` client (hyper/reqwest + leader watch) is simpler and easier to test.
 
-**Recommendation:** keep **Axum** for `maxio-server`; use **Server/Storage Raft** for cluster routing; use **keepalived / K8s Service / optional `maxio-edge`** for VIP and client-facing LB.
+**Recommendation:** keep **Axum** for `maxio-server`; use **Server/Storage Raft** for cluster routing; use **keepalived / K8s Ingress / nginx** for VIP and client-facing LB.
 
 ## Non-goals
 
@@ -143,17 +139,4 @@ The only plausible **in-process** use: Pingora’s LB **client** pool for **serv
 - Rebuilding `maxio-server` on Pingora as the HTTP framework
 - Pingora replacing Server Raft or VIP failover
 - Mandatory Pingora for single-node installs
-- Replacing K8s Ingress entirely (Helm can still use Ingress; Pingora is for bare metal or dedicated edge tier)
-
-## Open questions
-
-- Separate `maxio-edge` crate vs thin wrapper binary only?
-- Sticky sessions for console cookies vs stateless UI (P3-16)?
-- MSRV impact: Pingora rolling MSRV (currently 1.84) vs MaxIO edition 2024
-
-## Acceptance (P3-25)
-
-- [ ] `maxio-edge` proxies to ≥2 `maxio-server` backends with failover
-- [ ] Integration test: edge → server pool → PUT/GET object
-- [ ] Documented alongside nginx/Ingress in operations guide
-- [ ] `make deny` passes (Pingora is Apache-2.0)
+- Shipping a first-party Pingora-based `maxio-edge` binary
