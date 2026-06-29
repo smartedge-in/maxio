@@ -142,7 +142,7 @@ ci: sync-version ## Run full CI pipeline in order (stops on first failure)
 # Rust quality
 # =============================================================================
 
-.PHONY: sync-version version fmt check lint test coverage audit deny doc frontend release
+.PHONY: sync-version version fmt check lint test coverage audit deny npm-licenses doc frontend release
 
 sync-version: ## Sync VERSION file into Cargo.toml and ui/package.json
 	$(call log,Syncing semantic version from $(VERSION_FILE))
@@ -188,6 +188,14 @@ deny-all: ## Run full cargo-deny (licenses, advisories, bans, sources)
 	$(call log,Running full cargo deny check)
 	$(call ensure_cargo_ext,deny)
 	$(CARGO) deny check
+
+npm-licenses: ## Audit ui/ runtime dependency licenses (P3-24)
+	$(call log,Running npm license audit)
+	@command -v bun >/dev/null 2>&1 || { \
+		printf "$(COLOR_RED)error: bun required for npm license audit. Run 'make install-tools'.$(COLOR_RESET)\n" >&2; \
+		exit 1; \
+	}
+	bash scripts/check-npm-licenses.sh
 
 doc: ## Build Rust API documentation (no dependencies)
 	$(call log,Building documentation)

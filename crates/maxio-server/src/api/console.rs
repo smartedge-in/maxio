@@ -17,7 +17,7 @@ use crate::audit::audit_middleware;
 use crate::auth::keycloak::{KeycloakError, KeycloakTokenResponse};
 use crate::auth::signature_v4;
 use crate::server::AppState;
-use crate::storage::filesystem::FilesystemStorage;
+use crate::storage::backend::StorageBackend;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -763,7 +763,7 @@ pub async fn delete_object_api(
     match state.storage.delete_object(&bucket, &key).await {
         Ok(_) => {
             if let Err(e) =
-                preserve_empty_parent_folder_after_object_delete(&state.storage, &bucket, &key)
+                preserve_empty_parent_folder_after_object_delete(state.storage.as_ref(), &bucket, &key)
                     .await
             {
                 return (
@@ -792,7 +792,7 @@ fn parent_folder_prefix_for_deleted_object(key: &str) -> Option<String> {
 }
 
 async fn preserve_empty_parent_folder_after_object_delete(
-    storage: &FilesystemStorage,
+    storage: &dyn StorageBackend,
     bucket: &str,
     key: &str,
 ) -> Result<(), String> {
@@ -1344,6 +1344,7 @@ pub fn console_router(state: AppState) -> Router<AppState> {
 mod tests {
     use std::sync::Arc;
 
+    use crate::storage::filesystem::FilesystemStorage;
     use crate::storage::keys::Keyring;
     use crate::storage::quota::QuotaLimits;
     use crate::storage::{BucketMeta, ByteStream};

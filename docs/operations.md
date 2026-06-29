@@ -316,6 +316,18 @@ Prefix-based expiration rules are stored on `BucketMeta.lifecycle_rules` and enf
 
 Versioned buckets skip automatic expiration in v1.
 
+## Storage backend abstraction (P1-15)
+
+Single-node deployments use `FilesystemStorage` behind the `StorageBackend` trait (`crates/maxio-storage/src/backend.rs`). The server tier holds a `DynStorage` handle (`Arc<dyn StorageBackend>`) so metadata and object mutations can later route through a Raft-backed implementation without changing HTTP handlers.
+
+| Component | Location |
+|-----------|----------|
+| Trait + `dyn_storage()` | `crates/maxio-storage/src/backend.rs` |
+| Server wiring | `AppState.storage: DynStorage` in `maxio-server` |
+| Raft apply path (planned) | P1-17 — mutations ordered on storage Raft leader, applied locally |
+
+Today all I/O is local filesystem. Integration tests exercise the trait boundary unchanged.
+
 ## Replication / federation
 
 Not implemented. **Priority 1** path is **Raft-first multi-replica** (not operator sync):
@@ -323,7 +335,11 @@ Not implemented. **Priority 1** path is **Raft-first multi-replica** (not operat
 | Backlog | Scope |
 |---------|-------|
 | **P1-14** (epic) | Live multi-node: dual Raft + distributed EC — `docs/plans/2026-06-29-multi-replica-raft-priority.md` |
-| P1-15–P1-21 | StorageBackend → Storage Raft → distributed EC → Server Raft → stateless UI |
+| ~~P1-15~~ ✓ | `StorageBackend` trait — prerequisite for Raft apply |
+| ~~P1-16~~ ✓ | OpenRaft `0.9` spike + license gate — `docs/plans/2026-06-29-raft-library-spike.md` |
+| ~~P1-22~~ ✓ | `maxio-common` — shared `VERSION`, admin DTOs, routing snapshots |
+| **P1-17** (active) | Storage tier Raft — `docs/plans/2026-06-29-storage-raft-implementation.md` |
+| P1-18–P1-21 | Distributed EC → Server Raft → stateless UI |
 | ~~P3-09–P3-11~~ | Operator `rsync`/agent track — **deferred** |
 
 Erasure coding (above) is single-node today; **P1-18/P1-19** extend EC across storage nodes.

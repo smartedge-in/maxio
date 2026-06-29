@@ -2,7 +2,9 @@
 
 ## Status
 
-**Priority 1** — active product direction. See `docs/plans/2026-06-29-multi-replica-raft-priority.md`. No Raft code ships today.
+**Priority 1** — active product direction. See `docs/plans/2026-06-29-multi-replica-raft-priority.md`.
+
+**Completed prerequisites:** P1-15 (`StorageBackend`), P1-16 (OpenRaft spike), P1-22 (`maxio-common`). **Active:** P1-17 storage Raft scaffolding in `crates/maxio-storage/src/raft/`.
 
 ## Requirement
 

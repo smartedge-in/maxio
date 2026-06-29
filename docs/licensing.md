@@ -11,7 +11,7 @@ licensing policy for Rust dependencies and embedded UI assets.
 - **Also allowed:** MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, 0BSD — when no Apache-2.0/MIT alternative exists.
 - **Forbidden:** copyleft (GPL, AGPL, LGPL), weak copyleft (MPL-2.0), proprietary, and non-standard licenses (CDLA, OFL, custom EULAs) in any dependency path that reaches users.
 
-This applies to **every workspace crate** (`maxio`, `maxio-storage`, `maxio-server`, `maxio-admin`, future `maxio-common` / `maxio-ui`) and to **embedded UI assets** (fonts, bundled static files).
+This applies to **every workspace crate** (`maxio`, `maxio-common`, `maxio-storage`, `maxio-server`, `maxio-admin`, future `maxio-ui`) and to **embedded UI assets** (fonts, bundled static files).
 
 New dependencies require license review before merge. CI **`make deny`** / `cargo deny check licenses` must pass. If a crate is Apache-2.0 **AND** another permissive license (e.g. ISC), both identifiers must be in [`deny.toml`](../deny.toml) `allow`.
 
@@ -25,6 +25,19 @@ Official MaxIO runbooks (P3-18, plain K8s manifests, P3-26) recommend **permissi
 2. Prefer Apache-2.0 or MIT crates over alternatives with stricter or compound licenses.
 3. Avoid `rustls-tls` + `webpki-roots` (CDLA) — use `native-tls-vendored` for HTTP clients.
 4. Run `make deny` locally before opening a PR.
+
+### UI / npm (`ui/`)
+
+Runtime dependencies (`package.json` → `dependencies`, not devDependencies) are audited via
+[`scripts/check-npm-licenses.sh`](../scripts/check-npm-licenses.sh) in CI and locally via `make npm-licenses`.
+
+| Allowed | Notes |
+|---------|-------|
+| Apache-2.0, MIT, BSD-*, ISC, 0BSD, CC0-1.0, Unlicense | Same spirit as Rust allow-list |
+| **OFL-1.1** | **Only** `@fontsource/*` embedded fonts (not a general OFL pass) |
+
+Build-time tools (Vite, Tailwind, TypeScript, etc.) live in `devDependencies` and are not
+shipped in the embedded UI bundle; they are excluded from this audit.
 
 ## Rust dependencies
 

@@ -1,4 +1,3 @@
-//! Release version — sourced from the repository root `VERSION` file at build time.
+//! Release version — sourced from `maxio-common` (repository root `VERSION` file).
 
-/// Semantic version string (e.g. `0.4.2`).
-pub const VERSION: &str = env!("MAXIO_VERSION");
+pub use maxio_common::version::VERSION;

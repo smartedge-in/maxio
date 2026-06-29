@@ -9,7 +9,16 @@ description = "Filesystem-backed object storage layer for MaxIO"
 keywords = ["maxio", "s3", "object-storage", "filesystem"]
 categories = ["filesystem"]
 
+[features]
+default = []
+# P1-16: optional Raft library spike — `cargo test -p maxio-storage --features raft-spike`
+raft-spike = ["openraft"]
+# P1-17: storage tier Raft (in progress) — `cargo test -p maxio-storage --features raft`
+raft = ["openraft"]
+
 [dependencies]
+maxio-common = { path = "../maxio-common" }
+async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt"] }
@@ -33,6 +42,7 @@ rand = "0.10.1"
 reed-solomon-erasure = "6"
 tokio-util = { version = "0.7", features = ["io"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+openraft = { version = "0.9", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

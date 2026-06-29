@@ -1,0 +1,16 @@
+[package]
+name = "maxio-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Shared types and constants for MaxIO cluster components"
+keywords = ["maxio", "s3", "object-storage"]
+categories = ["data-structures"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

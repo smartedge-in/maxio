@@ -1,3 +1,10 @@
+pub mod backend;
+#[cfg(feature = "raft")]
+pub mod raft;
+#[cfg(feature = "raft-spike")]
+mod raft_spike;
+
+pub use maxio_common::cluster;
 pub mod chunk_reader;
 pub mod crypto;
 pub mod filesystem;
@@ -343,7 +350,7 @@ pub fn is_valid_bucket_name(name: &str) -> bool {
 /// Create each bucket in `default_buckets` (comma-separated) if it does not
 /// already exist. Invalid S3 names are logged and skipped; errors are non-fatal.
 pub async fn provision_default_buckets(
-    storage: &filesystem::FilesystemStorage,
+    storage: &dyn backend::StorageBackend,
     default_buckets: &str,
     region: &str,
 ) {

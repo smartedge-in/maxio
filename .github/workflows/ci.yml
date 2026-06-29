@@ -58,8 +58,24 @@ jobs:
       - name: Install cargo-deny
         uses: taiki-e/install-action@cargo-deny
 
-      - name: Check dependency licenses
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+        working-directory: ui
+
+      - name: Check Rust dependency licenses
         run: cargo deny check licenses
+
+      - name: Check npm dependency licenses (ui/)
+        run: bash scripts/check-npm-licenses.sh
+
+      - name: Raft library spike smoke (P1-16)
+        run: cargo test -p maxio-storage --features raft-spike raft_spike
+
+      - name: Storage Raft module tests (P1-17)
+        run: cargo test -p maxio-storage --features raft raft::
 
   coverage:
     name: Coverage

@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft — architectural policy. P3-04 split `maxio-storage` / `maxio-server`; root `maxio` facade re-exports both. No `maxio-common` crate yet.
+**In progress (P1-22).** `crates/maxio-common` ships `VERSION`, admin API DTOs, and cluster routing types. `maxio-server`, `maxio-storage`, and `maxio-admin` import shared types. Crate-boundary CI (P3-23) and full `maxio-admin` decoupling (P3-17) remain open.
 
 ## Principle
 
@@ -77,8 +77,8 @@ CI policy (cargo-deny `bans` or custom script):
 
 ## Acceptance (epic P3-21)
 
-- [ ] `maxio-common` published in workspace with documented allow/deny deps
-- [ ] Admin API types shared between server and `maxio-admin` (no JSON shape drift)
+- [x] `maxio-common` published in workspace with documented allow/deny deps
+- [x] Admin API types shared between server and `maxio-admin` (no JSON shape drift)
 - [ ] `maxio-admin` depends on `common` + `storage` only
 - [ ] CI fails on forbidden crate edges
 - [ ] No requirement for UI, server, and storage to share one Rust library beyond this split

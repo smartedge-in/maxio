@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/maxio-storage", "crates/maxio-server", "crates/maxio-admin"]
+members = [".", "crates/maxio-common", "crates/maxio-storage", "crates/maxio-server", "crates/maxio-admin"]
 resolver = "2"
 
 [workspace.package]

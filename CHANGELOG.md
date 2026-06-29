@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `StorageBackend` trait (P1-15): all S3 metadata and object mutations go through `DynStorage` (`Arc<dyn StorageBackend>`) in `maxio-server`; `FilesystemStorage` is the default implementation; prerequisite for Raft apply path (`crates/maxio-storage/src/backend.rs`).
+- Raft library spike (P1-16): OpenRaft `0.9` selected; optional `raft-spike` feature and CI smoke test; documented in `docs/plans/2026-06-29-raft-library-spike.md`.
+- `maxio-common` crate (P1-22): shared `VERSION`, admin API JSON types (`StatusResponse`, `InfoResponse`, `DoctorResponse`), and cluster routing DTOs (`Tier`, `StorageEndpoint`, `RoutingSnapshot`); imported by `maxio-server`, `maxio-storage`, and `maxio-admin`.
+- Storage Raft scaffolding (P1-17, in progress): `raft` feature, `crates/maxio-storage/src/raft/` with `RaftNodeConfig` and `StorageMutation`; implementation plan in `docs/plans/2026-06-29-storage-raft-implementation.md`.
+- npm runtime license audit (P3-24): `scripts/check-npm-licenses.sh` in CI; local `make npm-licenses`; documented in `docs/licensing.md`.
+
 - SQLite metadata index (P3-03): `MAXIO_METADATA_INDEX` / `--metadata-index` maintains `{data_dir}/.maxio-metadata.db` for fast `ListObjects`; rebuild on startup; filesystem walk fallback.
 - Per-bucket erasure coding (P3-07): `BucketMeta.erasure_coding` override with `PUT/GET ?erasure`; mixed flat/chunked buckets when server EC is enabled.
 - Lifecycle expiration (P3-01): prefix-based rules on `BucketMeta`; `PUT/GET/DELETE ?lifecycle`; housekeeping expires objects past `expiration_days` (non-versioned buckets).

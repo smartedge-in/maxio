@@ -23,7 +23,7 @@ use crate::embedded::ui_handler;
 use crate::metrics::{metrics_handler, metrics_middleware};
 use crate::proxy::TrustedProxies;
 use crate::rate_limit::{AdminRateLimiter, LoginRateLimiter, S3RateLimiter};
-use crate::storage::filesystem::FilesystemStorage;
+use crate::storage::backend::DynStorage;
 use crate::storage::quota::disk_space_bytes;
 
 pub const HOUSEKEEPING_INTERVAL_SECS: u64 = 3600;
@@ -36,7 +36,7 @@ pub const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'self'; 
 
 #[derive(Clone)]
 pub struct AppState {
-    pub storage: Arc<FilesystemStorage>,
+    pub storage: DynStorage,
     pub config: Arc<Config>,
     pub login_rate_limiter: Arc<LoginRateLimiter>,
     pub s3_rate_limiter: Arc<S3RateLimiter>,
@@ -245,7 +245,7 @@ async fn security_headers_middleware(
 }
 
 pub fn new_app_state(
-    storage: Arc<FilesystemStorage>,
+    storage: DynStorage,
     config: Arc<Config>,
     login_rate_limiter: Arc<LoginRateLimiter>,
     credentials: Arc<CredentialStore>,

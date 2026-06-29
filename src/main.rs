@@ -129,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
         config.max_object_bytes,
         config.min_free_disk_bytes,
     );
-    let storage = storage::filesystem::FilesystemStorage::new(
+    let fs_storage = storage::filesystem::FilesystemStorage::new(
         &config.data_dir,
         config.erasure_coding,
         config.chunk_size,
@@ -140,7 +140,9 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    storage::provision_default_buckets(&storage, &config.default_buckets, &config.region).await;
+    let storage = storage::backend::dyn_storage(fs_storage);
+    storage::provision_default_buckets(storage.as_ref(), &config.default_buckets, &config.region)
+        .await;
 
     let login_rate_limiter = Arc::new(
         rate_limit::LoginRateLimiter::from_config(config.login_rate_limit_redis_url.as_deref())
@@ -176,7 +178,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     let listen_port = listener.local_addr()?.port();
     let state = server::new_app_state(
-        Arc::new(storage),
+        storage,
         Arc::new(config.clone()),
         login_rate_limiter,
         credentials,

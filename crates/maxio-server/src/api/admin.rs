@@ -7,6 +7,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
+use maxio_common::admin::{
+    ConfigInfo, DiskInfo, DoctorCheck, DoctorResponse, InfoResponse, StatusResponse,
+};
 use serde::Serialize;
 use serde_json::json;
 
@@ -111,51 +114,17 @@ fn admin_principal(
     None
 }
 
-#[derive(Serialize)]
-struct StatusResponse {
-    healthz: &'static str,
-    readyz: &'static str,
-    version: &'static str,
-    uptime_secs: u64,
-}
-
 async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
     let readyz = match state.storage.check_readiness().await {
         Ok(()) => "ok",
         Err(_) => "unavailable",
     };
     Json(StatusResponse {
-        healthz: "ok",
-        readyz,
-        version: crate::version::VERSION,
+        healthz: "ok".into(),
+        readyz: readyz.into(),
+        version: crate::version::VERSION.into(),
         uptime_secs: state.started_at.elapsed().as_secs(),
     })
-}
-
-#[derive(Serialize)]
-struct DiskInfo {
-    total_bytes: Option<u64>,
-    free_bytes: Option<u64>,
-    used_bytes: Option<u64>,
-}
-
-#[derive(Serialize)]
-struct ConfigInfo {
-    region: String,
-    erasure_coding: bool,
-    chunk_size: u64,
-    parity_shards: u32,
-    max_object_bytes: u64,
-    min_free_disk_bytes: u64,
-}
-
-#[derive(Serialize)]
-struct InfoResponse {
-    data_dir: String,
-    disk: DiskInfo,
-    bucket_count: u64,
-    object_count: u64,
-    config: ConfigInfo,
 }
 
 async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, AdminApiError> {
@@ -190,19 +159,6 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, Admin
     }))
 }
 
-#[derive(Serialize)]
-struct DoctorCheck {
-    name: &'static str,
-    ok: bool,
-    detail: String,
-}
-
-#[derive(Serialize)]
-struct DoctorResponse {
-    ok: bool,
-    checks: Vec<DoctorCheck>,
-}
-
 async fn doctor(State(state): State<AppState>) -> Json<DoctorResponse> {
     let mut checks = Vec::new();
 
@@ -212,14 +168,14 @@ async fn doctor(State(state): State<AppState>) -> Json<DoctorResponse> {
         Err(msg) => msg.clone(),
     };
     checks.push(DoctorCheck {
-        name: "readiness",
+        name: "readiness".into(),
         ok: readiness.is_ok(),
         detail: readiness_detail,
     });
 
     let disk_result = state.storage.check_upload_start(None);
     checks.push(DoctorCheck {
-        name: "disk_reserve",
+        name: "disk_reserve".into(),
         ok: disk_result.is_ok(),
         detail: disk_result
             .map(|()| "disk reserve satisfied".into())
@@ -228,7 +184,7 @@ async fn doctor(State(state): State<AppState>) -> Json<DoctorResponse> {
 
     let keyring_ok = state.storage.keyring().is_usable();
     checks.push(DoctorCheck {
-        name: "keyring",
+        name: "keyring".into(),
         ok: keyring_ok,
         detail: if keyring_ok {
             format!(
@@ -517,5 +473,18 @@ mod tests {
     fn rejects_missing_auth() {
         let config = test_config();
         assert!(admin_principal(&config, &test_credentials(&config), &HeaderMap::new()).is_none());
+    }
+
+    #[test]
+    fn status_response_uses_shared_admin_types() {
+        let body = StatusResponse {
+            healthz: "ok".into(),
+            readyz: "ok".into(),
+            version: crate::version::VERSION.into(),
+            uptime_secs: 42,
+        };
+        let json = serde_json::to_string(&body).unwrap();
+        let back: StatusResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.uptime_secs, 42);
     }
 }

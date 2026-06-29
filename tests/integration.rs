@@ -7,6 +7,8 @@
 
 use maxio::config::Config;
 use maxio::server;
+use maxio::storage::backend::DynStorage;
+use maxio::storage::backend::dyn_storage;
 use maxio::storage::filesystem::FilesystemStorage;
 use maxio::storage::keys::Keyring;
 use maxio::storage::quota::QuotaLimits;
@@ -92,7 +94,7 @@ async fn new_test_storage(
     .unwrap()
 }
 
-async fn spawn_test_server(storage: Arc<FilesystemStorage>, config: Config) -> String {
+async fn spawn_test_server(storage: DynStorage, config: Config) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let credentials = Arc::new(
@@ -129,7 +131,7 @@ async fn start_server() -> (String, TempDir) {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
     (base_url, tmp)
 }
@@ -138,7 +140,7 @@ async fn start_server_with_quota(max_object_bytes: u64) -> (String, TempDir) {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let quota = QuotaLimits::from_config(max_object_bytes, 0);
-    let storage = Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, quota).await);
+    let storage = dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, quota).await);
     let mut config = default_test_config(data_dir);
     config.max_object_bytes = max_object_bytes;
     let base_url = spawn_test_server(storage, config).await;
@@ -257,7 +259,7 @@ async fn start_server_with_default_buckets(default_buckets: &str) -> (String, Te
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     maxio::storage::provision_default_buckets(storage.as_ref(), default_buckets, REGION).await;
 
     let mut config = default_test_config(data_dir);
@@ -294,7 +296,7 @@ async fn test_default_buckets_skip_existing() {
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
 
     // First provision: creates the bucket
     maxio::storage::provision_default_buckets(storage.as_ref(), "existing", REGION).await;
@@ -690,7 +692,7 @@ async fn test_readyz_returns_503_when_data_dir_unwritable() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let base_url = spawn_test_server(storage, default_test_config(data_dir.clone())).await;
 
     let resp = client()
@@ -761,7 +763,7 @@ async fn test_s3_auth_failure_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.s3_rate_auth_max = 3;
     config.s3_rate_auth_window_secs = 300;
@@ -792,7 +794,7 @@ async fn test_s3_put_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.s3_rate_put_max = 2;
     config.s3_rate_put_window_secs = 60;
@@ -3335,7 +3337,7 @@ async fn start_server_ec() -> (String, TempDir) {
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     // Use 1KB chunk size for easy multi-chunk testing
-    let storage = Arc::new(new_test_storage(&data_dir, true, 1024, 0, unlimited_quota()).await);
+    let storage = dyn_storage(new_test_storage(&data_dir, true, 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.erasure_coding = true;
     config.chunk_size = 1024;
@@ -3954,7 +3956,7 @@ async fn start_server_parity(parity_shards: u32) -> (String, TempDir) {
 
     // 100-byte chunks for easy multi-chunk testing
     let storage =
-        Arc::new(new_test_storage(&data_dir, true, 100, parity_shards, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, true, 100, parity_shards, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.erasure_coding = true;
     config.chunk_size = 100;
@@ -6584,7 +6586,7 @@ async fn start_server_ec_parity(chunk_size: u64, parity_shards: u32) -> (String,
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
-    let storage = Arc::new(
+    let storage = dyn_storage(
         new_test_storage(
             &data_dir,
             true,
@@ -7516,7 +7518,7 @@ async fn test_trusted_proxy_uses_x_forwarded_for_for_login_rate_limit() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.trusted_proxies = "127.0.0.0/8".to_string();
     let base_url = spawn_test_server(storage, config).await;
@@ -7650,7 +7652,7 @@ async fn s3_request_virtual_host(
 }
 
 async fn start_server_with_server_host(
-    storage: Arc<FilesystemStorage>,
+    storage: DynStorage,
     mut config: Config,
 ) -> (String, std::net::SocketAddr, String) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -7688,7 +7690,7 @@ async fn test_virtual_host_style_put_and_get() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let config = default_test_config(data_dir);
     let (base_url, listen, server_host) = start_server_with_server_host(storage, config).await;
 
@@ -7730,7 +7732,7 @@ async fn test_secondary_credential_can_authenticate() {
     .unwrap();
 
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
 
     let url = format!("{base_url}/alt-bucket");
@@ -7842,7 +7844,7 @@ async fn test_virtual_host_anonymous_public_read() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let config = default_test_config(data_dir);
     let (base_url, listen, server_host) = start_server_with_server_host(storage, config).await;
 
@@ -7879,7 +7881,7 @@ async fn test_metrics_endpoint_when_enabled() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.metrics_enabled = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -7920,7 +7922,7 @@ async fn test_metrics_records_upload_bytes() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.metrics_enabled = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -7961,7 +7963,7 @@ async fn test_metrics_dedicated_port() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.metrics_enabled = true;
 
@@ -8023,7 +8025,7 @@ async fn test_audit_log_captures_s3_principal_and_object() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.audit_log = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -8058,7 +8060,7 @@ async fn test_audit_log_skips_get_requests() {
     let tmp = TempDir::new().unwrap();
     let data_dir = tmp.path().to_str().unwrap().to_string();
     let storage =
-        Arc::new(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await);
     let mut config = default_test_config(data_dir);
     config.audit_log = true;
     let base_url = spawn_test_server(storage, config).await;
@@ -8133,7 +8135,7 @@ async fn test_per_bucket_erasure_coding_mixed_layouts() {
     config.erasure_coding = true;
     config.chunk_size = 1024;
     let storage =
-        Arc::new(new_test_storage(&data_dir, true, config.chunk_size, 0, unlimited_quota()).await);
+        dyn_storage(new_test_storage(&data_dir, true, config.chunk_size, 0, unlimited_quota()).await);
 
     storage
         .create_bucket(&maxio::storage::BucketMeta {

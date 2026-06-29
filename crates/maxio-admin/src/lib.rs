@@ -13,3 +13,13 @@ pub mod output;
 
 pub use cli::Cli;
 pub use error::{AdminError, Result};
+
+#[cfg(test)]
+mod tests {
+    use maxio_common::version;
+
+    #[test]
+    fn cli_version_matches_common_crate() {
+        assert!(!version::VERSION.is_empty());
+    }
+}
