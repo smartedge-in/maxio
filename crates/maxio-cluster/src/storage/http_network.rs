@@ -65,8 +65,7 @@ impl HttpRaftNetwork {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            let io_err =
-                std::io::Error::other(format!("HTTP {status}: {body}"));
+            let io_err = std::io::Error::other(format!("HTTP {status}: {body}"));
             return Err(RPCError::Network(NetworkError::new(&io_err)));
         }
         resp.json()
@@ -125,8 +124,7 @@ impl RaftNetwork<StorageRaftConfig> for HttpRaftNetwork {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            let io_err =
-                std::io::Error::other(format!("HTTP {status}: {body}"));
+            let io_err = std::io::Error::other(format!("HTTP {status}: {body}"));
             return Err(RPCError::Network(NetworkError::new(&io_err)));
         }
         resp.json()

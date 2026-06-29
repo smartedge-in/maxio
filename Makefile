@@ -35,6 +35,12 @@ IMAGE_TAG       ?= v$(VERSION)
 IMAGE_REF       := $(IMAGE_NAME):$(IMAGE_TAG)
 
 # -----------------------------------------------------------------------------
+# Release binaries (workspace [[bin]] targets)
+# -----------------------------------------------------------------------------
+RELEASE_BINS    := maxio maxio-admin maxio-ui
+RELEASE_PKGS    := maxio maxio-admin maxio-ui
+
+# -----------------------------------------------------------------------------
 # Artifact paths
 # -----------------------------------------------------------------------------
 SBOM_FILE       ?= sbom.json
@@ -50,7 +56,9 @@ REPORT_DIR      ?= reports
 CARGO_FLAGS     ?=
 BUILD_FLAGS     ?= --locked
 CLIPPY_FLAGS    ?= --workspace --all-targets --all-features -- -D warnings
-COVERAGE_FLAGS  ?= --workspace --all-features --html --output-dir $(COVERAGE_DIR)
+# Instrument library crates only — linking instrumented binaries (maxio) OOMs/crashes lld.
+COVERAGE_FLAGS  ?= --workspace --lib --all-features
+COVERAGE_SUMMARY ?= $(COVERAGE_DIR)/summary.txt
 DENY_FLAGS      ?= licenses
 TRIVY_FS_FLAGS  ?= --cache-dir $(TRIVY_CACHE_DIR)
 TRIVY_IMG_FLAGS ?= --cache-dir $(TRIVY_CACHE_DIR)
@@ -167,11 +175,14 @@ test: ## Run workspace unit and integration tests
 	$(call log,Running cargo test --workspace --all-features)
 	$(CARGO) test --workspace --all-features $(CARGO_FLAGS)
 
-coverage: ## Generate LLVM code-coverage report
+coverage: ## Generate LLVM code-coverage report (lib crates) and enforce floors
 	$(call log,Running cargo llvm-cov)
 	$(call ensure_cargo_ext,llvm-cov)
 	@mkdir -p "$(COVERAGE_DIR)"
-	$(CARGO) llvm-cov $(COVERAGE_FLAGS)
+	@rm -rf target/llvm-cov-target
+	$(CARGO) llvm-cov $(COVERAGE_FLAGS) --summary-only | tee "$(COVERAGE_SUMMARY)"
+	bash scripts/check-coverage-floors.sh "$(COVERAGE_SUMMARY)"
+	$(CARGO) llvm-cov $(COVERAGE_FLAGS) --html --output-dir "$(COVERAGE_DIR)"
 	@printf "$(COLOR_GREEN)Coverage report written to $(COVERAGE_DIR)/$(COLOR_RESET)\n"
 
 audit: ## Audit dependencies for known security vulnerabilities
@@ -212,15 +223,25 @@ frontend: ## Build embedded web console (requires bun)
 	cd ui && bun run build
 	@printf "$(COLOR_GREEN)Frontend built in ui/build/$(COLOR_RESET)\n"
 
-release: sync-version ## Build optimized release binaries
-	$(call log,Building release binaries v$(VERSION))
+release: sync-version ## Build all release binaries (maxio, maxio-admin, maxio-ui)
+	$(call log,Building release binaries v$(VERSION): $(RELEASE_BINS))
 	@if [ -n "$(HAS_BUN)" ] && [ "$(SKIP_FRONTEND)" != "1" ]; then \
 		$(MAKE) --no-print-directory frontend; \
-		env -u SKIP_FRONTEND $(CARGO) build --release $(BUILD_FLAGS) $(CARGO_FLAGS); \
+		env -u SKIP_FRONTEND $(CARGO) build --release $(BUILD_FLAGS) \
+			$(foreach pkg,$(RELEASE_PKGS),-p $(pkg)) \
+			$(CARGO_FLAGS); \
 	else \
-		$(CARGO) build --release $(BUILD_FLAGS) $(CARGO_FLAGS); \
+		$(CARGO) build --release $(BUILD_FLAGS) \
+			$(foreach pkg,$(RELEASE_PKGS),-p $(pkg)) \
+			$(CARGO_FLAGS); \
 	fi
-	@printf "$(COLOR_GREEN)Release binaries in target/release/$(COLOR_RESET)\n"
+	@for bin in $(RELEASE_BINS); do \
+		if [ ! -x "target/release/$$bin" ]; then \
+			printf "$(COLOR_RED)error: missing release binary target/release/$$bin$(COLOR_RESET)\n" >&2; \
+			exit 1; \
+		fi; \
+		printf "  $(COLOR_GREEN)target/release/$$bin$(COLOR_RESET)\n"; \
+	done
 
 # =============================================================================
 # Trivy — filesystem scanning
@@ -384,7 +405,7 @@ deps: ## Display workspace dependency metadata summary
 		| python3 -c "\
 import json,sys; \
 data=json.load(sys.stdin); \
-roots=[p for p in data.get('packages',[]) if p['name'] in ('maxio','maxio-admin')]; \
+roots=[p for p in data.get('packages',[]) if p['name'] in ('maxio','maxio-admin','maxio-ui')]; \
 print('$(COLOR_BOLD)Workspace crates:$(COLOR_RESET)'); \
 [print(f\"  - {p['name']} {p['version']} ({p.get('license','unknown')})\") for p in sorted(roots,key=lambda x:x['name'])]; \
 print(); \

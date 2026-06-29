@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_raft_peer_urls() {
+    fn parse_raft_peer_urls_maps_node_ids() {
         let m = parse_raft_peer_urls("1=http://h1:9100,2=http://h2:9100").unwrap();
         assert_eq!(m.get(&1).unwrap(), "http://h1:9100");
     }

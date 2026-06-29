@@ -112,7 +112,7 @@ mod tests {
     async fn readyz_unavailable_without_storage_quorum() {
         let tmp = TempDir::new().unwrap();
         let state = cluster_app_state(&tmp, false).await;
-        let mut app = build_router(state);
+        let app = build_router(state);
         let resp = app
             .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
             .await
@@ -124,7 +124,7 @@ mod tests {
     async fn readyz_ok_when_storage_quorum_healthy() {
         let tmp = TempDir::new().unwrap();
         let state = cluster_app_state(&tmp, true).await;
-        let mut app = build_router(state);
+        let app = build_router(state);
         let resp = app
             .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
             .await
