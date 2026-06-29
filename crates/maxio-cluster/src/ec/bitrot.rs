@@ -332,7 +332,7 @@ mod tests {
     fn checksum_hex_stable() {
         assert_eq!(
             shard_checksum_hex(b"hello"),
-            "2cf24dba5fb0a30e26e83b2b264e9b8c1b8e78d82c7b6916e8491adac3a856f"
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
     }
 
