@@ -8,6 +8,8 @@ Draft — architectural policy. P3-04 split `maxio-storage` / `maxio-server`; ro
 
 **Share types and constants, not runtimes.** Each deployable component keeps its own dependency graph. A thin shared crate prevents drift; a fat shared crate recreates the monolith and blocks asymmetric scale-out (P3-13).
 
+**Licensing:** every workspace crate, including `maxio-common`, must comply with the mandatory permissive-only policy ([`docs/licensing.md`](../licensing.md), P3-24). Prefer Apache-2.0 or MIT dependencies; no copyleft or MPL in shared libraries.
+
 ## Target dependency graph
 
 ```

@@ -3,15 +3,24 @@
 MaxIO is released under [Apache-2.0](../LICENSE). This document describes third-party
 licensing policy for Rust dependencies and embedded UI assets.
 
-## Policy
+## Mandatory requirement
 
-Production artifacts (`maxio` server binary, embedded web console) should depend only on
-**permissive** licenses:
+**All code that ships in MaxIO production artifacts must use permissive licenses only.**
 
-- Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, 0BSD
+- **Preferred:** [Apache-2.0](../LICENSE) (same as MaxIO itself) for new Rust crates and libraries.
+- **Also allowed:** MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, 0BSD — when no Apache-2.0/MIT alternative exists.
+- **Forbidden:** copyleft (GPL, AGPL, LGPL), weak copyleft (MPL-2.0), proprietary, and non-standard licenses (CDLA, OFL, custom EULAs) in any dependency path that reaches users.
 
-We avoid copyleft (GPL/AGPL/LGPL), weak copyleft (MPL-2.0), and non-standard licenses
-(CDLA, OFL) in paths that ship to users.
+This applies to **every workspace crate** (`maxio`, `maxio-storage`, `maxio-server`, `maxio-admin`, future `maxio-common` / `maxio-ui`) and to **embedded UI assets** (fonts, bundled static files).
+
+New dependencies require license review before merge. CI **`make deny`** / `cargo deny check licenses` must pass. If a crate is Apache-2.0 **AND** another permissive license (e.g. ISC), both identifiers must be in [`deny.toml`](../deny.toml) `allow`.
+
+### Adding a dependency (checklist)
+
+1. Confirm SPDX identifier is on the `deny.toml` allow-list (or add it only if permissive).
+2. Prefer Apache-2.0 or MIT crates over alternatives with stricter or compound licenses.
+3. Avoid `rustls-tls` + `webpki-roots` (CDLA) — use `native-tls-vendored` for HTTP clients.
+4. Run `make deny` locally before opening a PR.
 
 ## Rust dependencies
 

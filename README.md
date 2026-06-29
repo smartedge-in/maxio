@@ -266,5 +266,7 @@ See [CLAUDE.md](CLAUDE.md) for the full development workflow, architecture detai
 [Apache-2.0](LICENSE)
 
 Third-party dependency and embedded-asset licensing policy is documented in
-[docs/licensing.md](docs/licensing.md). CI runs `cargo deny check licenses` (local:
-`make deny`); full policy including advisories: `make deny-all`.
+[docs/licensing.md](docs/licensing.md). **Permissive licenses only** (prefer Apache-2.0/MIT);
+copyleft and non-standard licenses are not allowed in production artifacts. CI runs
+`cargo deny check licenses` (local: `make deny`); full policy including advisories:
+`make deny-all`.
