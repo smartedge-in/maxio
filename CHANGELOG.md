@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Production cluster wiring: `maxio storage-raft` subcommand for multi-process storage peers over HTTP Raft (`/internal/raft/*`); server `MAXIO_STORAGE_ENDPOINTS` background routing sync; updated `deploy/k8s/distributed/` StatefulSet + server Deployment; `scripts/kind-cluster-smoke.sh`.
+
 - `StorageBackend` trait (P1-15): all S3 metadata and object mutations go through `DynStorage` (`Arc<dyn StorageBackend>`) in `maxio-server`; `FilesystemStorage` is the default implementation; prerequisite for Raft apply path (`crates/maxio-storage/src/backend.rs`).
 - Raft library spike (P1-16): OpenRaft `0.9` selected; optional `raft-spike` feature and CI smoke test; documented in `docs/plans/2026-06-29-raft-library-spike.md`.
 - `maxio-common` crate (P1-22): shared `VERSION`, admin API JSON types (`StatusResponse`, `InfoResponse`, `DoctorResponse`), and cluster routing DTOs (`Tier`, `StorageEndpoint`, `RoutingSnapshot`); imported by `maxio-server`, `maxio-storage`, and `maxio-admin`.

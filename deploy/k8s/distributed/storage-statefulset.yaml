@@ -23,12 +23,19 @@ spec:
         - name: maxio
           image: REGISTRY/maxio:VERSION
           imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
           args:
-            - serve
-            - --data-dir=/data
-            - --port=9100
-            - --address=0.0.0.0
-            - --metrics-enabled
+            - |
+              ORD="${HOSTNAME##*-}"
+              NODE_ID="$((ORD + 1))"
+              exec maxio storage-raft \
+                --data-dir=/data \
+                --node-id="${NODE_ID}" \
+                --bind=0.0.0.0:9100 \
+                --advertise="${HOSTNAME}.maxio-storage:9100" \
+                --peers="1=http://maxio-storage-0.maxio-storage:9100,2=http://maxio-storage-1.maxio-storage:9100,3=http://maxio-storage-2.maxio-storage:9100" \
+                --voters=1,2,3 \
+                $( [ "${NODE_ID}" = "1" ] && echo "--bootstrap" )
           ports:
             - name: http
               containerPort: 9100

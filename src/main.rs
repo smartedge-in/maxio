@@ -29,6 +29,12 @@ enum Commands {
     /// Start the HTTP/S3 server (default when no subcommand is provided)
     Serve,
 
+    /// Run a storage-tier Raft peer (metadata quorum, production cluster)
+    StorageRaft {
+        #[command(flatten)]
+        config: StorageRaftCli,
+    },
+
     /// Check server health by sending an HTTP GET request
     Healthcheck {
         /// Healthcheck endpoint URL
@@ -64,6 +70,49 @@ enum KeyringCmd {
     },
 }
 
+#[derive(clap::Parser, Debug, Clone)]
+struct StorageRaftCli {
+    /// Root data directory for this storage node
+    #[arg(long, env = "MAXIO_DATA_DIR", default_value = "./data")]
+    data_dir: String,
+
+    /// Numeric Raft node id (unique per storage peer)
+    #[arg(long, env = "MAXIO_STORAGE_RAFT_NODE_ID")]
+    node_id: u64,
+
+    /// HTTP bind address for Raft RPC + status (`host:port`)
+    #[arg(long, env = "MAXIO_STORAGE_RAFT_BIND", default_value = "0.0.0.0:9100")]
+    bind: String,
+
+    /// Address advertised to server tier (`host:port`). Defaults to bind address.
+    #[arg(long, env = "MAXIO_STORAGE_RAFT_ADVERTISE")]
+    advertise: Option<String>,
+
+    /// Peer base URLs: `1=http://storage-1:9100,2=http://storage-2:9100`
+    #[arg(long, env = "MAXIO_STORAGE_RAFT_PEERS", default_value = "")]
+    peers: String,
+
+    /// Voter ids for bootstrap (comma-separated). Required when bootstrap is true.
+    #[arg(long, env = "MAXIO_STORAGE_RAFT_VOTERS", default_value = "1,2,3")]
+    voters: String,
+
+    /// Initialize the Raft cluster (run once on the first storage node only)
+    #[arg(long, env = "MAXIO_STORAGE_RAFT_BOOTSTRAP", default_value = "false")]
+    bootstrap: bool,
+
+    #[arg(long, env = "MAXIO_ERASURE_CODING", default_value = "false")]
+    erasure_coding: bool,
+
+    #[arg(long, env = "MAXIO_CHUNK_SIZE", default_value = "10485760")]
+    chunk_size: u64,
+
+    #[arg(long, env = "MAXIO_PARITY_SHARDS", default_value = "0")]
+    parity_shards: u32,
+
+    #[arg(long, env = "MAXIO_METADATA_INDEX", default_value = "false")]
+    metadata_index: bool,
+}
+
 fn default_healthcheck_url() -> String {
     let port = std::env::var("MAXIO_PORT")
         .ok()
@@ -85,6 +134,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Keyring(KeyringCmd::List { ref data_dir })) => {
             return run_keyring_list(data_dir).await;
+        }
+        Some(Commands::StorageRaft { config }) => {
+            return run_storage_raft(config).await;
         }
     }
 
@@ -185,6 +237,13 @@ async fn main() -> anyhow::Result<()> {
         keycloak,
         Some(listen_port),
     );
+
+    if config.cluster_mode {
+        let sync_state = state.clone();
+        tokio::spawn(async move {
+            maxio::cluster_sync::run_cluster_sync(sync_state).await;
+        });
+    }
 
     // Background housekeeping: abort stale multipart uploads (>7 days) and
     // remove leftover temp files from crashed writes. Runs once at startup,
@@ -352,6 +411,45 @@ async fn run_keyring_rotate(data_dir: &str) -> anyhow::Result<()> {
     println!();
     println!("Restart the server to begin encrypting new objects with the new key.");
     Ok(())
+}
+
+async fn run_storage_raft(cfg: StorageRaftCli) -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
+    tokio::fs::create_dir_all(&cfg.data_dir).await?;
+
+    let peer_urls = maxio_cluster::parse_raft_peer_urls(&cfg.peers)?;
+    let voter_ids: std::collections::BTreeSet<u64> = cfg
+        .voters
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    if cfg.bootstrap && voter_ids.is_empty() {
+        anyhow::bail!("MAXIO_STORAGE_RAFT_BOOTSTRAP requires non-empty MAXIO_STORAGE_RAFT_VOTERS");
+    }
+
+    let advertise = cfg.advertise.clone().unwrap_or_else(|| cfg.bind.clone());
+
+    let node = maxio_cluster::StorageRaftNode::open(maxio_cluster::StorageRaftNodeConfig {
+        node_id: cfg.node_id,
+        data_dir: cfg.data_dir.clone(),
+        bind_addr: cfg.bind.clone(),
+        advertise_addr: advertise,
+        peer_urls,
+        voter_ids,
+        bootstrap: cfg.bootstrap,
+        erasure_coding: cfg.erasure_coding,
+        chunk_size: cfg.chunk_size,
+        parity_shards: cfg.parity_shards,
+        metadata_index: cfg.metadata_index,
+    })
+    .await?;
+
+    node.serve(&cfg.bind).await
 }
 
 async fn run_keyring_list(data_dir: &str) -> anyhow::Result<()> {

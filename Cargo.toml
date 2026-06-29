@@ -28,6 +28,7 @@ name = "maxio"
 path = "src/main.rs"
 
 [dependencies]
+maxio-cluster = { path = "crates/maxio-cluster" }
 maxio-server = { path = "crates/maxio-server" }
 maxio-storage = { path = "crates/maxio-storage" }
 

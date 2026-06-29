@@ -11,6 +11,7 @@ categories = ["web-programming::http-server"]
 
 [dependencies]
 maxio-common = { path = "../maxio-common" }
+maxio-cluster = { path = "../maxio-cluster" }
 maxio-storage = { path = "../maxio-storage" }
 
 axum = "0.8"

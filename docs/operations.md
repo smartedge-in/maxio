@@ -381,16 +381,49 @@ Target layout: release binary, dedicated `maxio` user, `MAXIO_DATA_DIR` on local
 
 Official manifests live under `deploy/k8s/` — single-node (`single-node/`) and distributed tiers (`distributed/`). Helm chart is optional later (P3-19).
 
-**Distributed cluster (P1-14):**
+**Distributed cluster (production wiring):**
+
+Three tiers run as separate processes. Storage peers use HTTP Raft transport; server pods poll storage status into a shared routing snapshot.
+
+```bash
+# 1) Storage tier (one process per node; node 1 bootstraps)
+maxio storage-raft --data-dir=/data/storage-1 --node-id=1 --bind=0.0.0.0:9100 \
+  --advertise=storage-1:9100 \
+  --peers=1=http://storage-1:9100,2=http://storage-2:9100,3=http://storage-3:9100 \
+  --voters=1,2,3 --bootstrap
+
+maxio storage-raft --data-dir=/data/storage-2 --node-id=2 --bind=0.0.0.0:9100 \
+  --advertise=storage-2:9100 \
+  --peers=1=http://storage-1:9100,2=http://storage-2:9100,3=http://storage-3:9100 \
+  --voters=1,2,3
+
+# 2) Server tier (stateless S3/API; syncs routing from storage)
+maxio serve --data-dir=/data/server --port=9000 --serve-ui=false --cluster-mode \
+  --storage-endpoints=1@storage-1:9100,2@storage-2:9100,3@storage-3:9100
+
+# 3) UI tier
+maxio-ui --port=9080
+```
+
+**Kubernetes:**
 
 ```bash
 kubectl apply -f deploy/k8s/distributed/
 # Replace REGISTRY/maxio:VERSION and REGISTRY/maxio-ui:VERSION in manifests before apply.
 ```
 
-**Server tier flags:** `MAXIO_SERVE_UI=false` when using standalone `maxio-ui`; `MAXIO_CLUSTER_MODE=true` so `/readyz` requires storage quorum in the routing snapshot.
+| Variable | Tier | Purpose |
+|----------|------|---------|
+| `MAXIO_STORAGE_RAFT_NODE_ID` | storage | Numeric Raft peer id |
+| `MAXIO_STORAGE_RAFT_PEERS` | storage | `id=http://host:port` map for Raft RPC |
+| `MAXIO_STORAGE_RAFT_BOOTSTRAP` | storage | `true` on first voter only |
+| `MAXIO_STORAGE_ENDPOINTS` | server | `id@host:port` list for routing sync |
+| `MAXIO_CLUSTER_MODE` | server | Gates `/readyz` on storage quorum |
+| `MAXIO_SERVE_UI` | server | `false` when using standalone `maxio-ui` |
 
-**Local harness:** `bash scripts/cluster-test.sh` runs in-process 3-node Raft acceptance tests.
+**Storage HTTP API (internal):** `GET /internal/raft/status`, `POST /internal/raft/propose` (metadata mutations on leader).
+
+**Local harness:** `bash scripts/cluster-test.sh` — in-process + multi-process HTTP Raft tests.
 
 Single-node minimal pattern (`replicas: 1`):
 

@@ -13,6 +13,8 @@ categories = ["data-structures"]
 default = []
 # P1-24: 3-node cluster acceptance tests
 cluster-tests = []
+# Multi-process HTTP Raft integration tests
+http-raft-tests = []
 
 [dependencies]
 maxio-common = { path = "../maxio-common" }
@@ -29,3 +31,5 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 tempfile = "3"
 reed-solomon-erasure = "6"
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

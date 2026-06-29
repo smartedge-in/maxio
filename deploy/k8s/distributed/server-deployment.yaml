@@ -29,6 +29,8 @@ spec:
             - --address=0.0.0.0
             - --serve-ui=false
             - --cluster-mode
+            - --storage-endpoints=1@maxio-storage-0.maxio-storage:9100,2@maxio-storage-1.maxio-storage:9100,3@maxio-storage-2.maxio-storage:9100
+            - --cluster-sync-interval-secs=5
             - --metrics-enabled
           ports:
             - name: http

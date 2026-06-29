@@ -1,7 +1,8 @@
 //! MaxIO facade crate — re-exports `maxio-server` and `maxio-storage` for a stable public API.
 
 pub use maxio_server::{
-    api, audit, auth, config, embedded, error, metrics, proxy, rate_limit, server, version, xml,
+    api, audit, auth, cluster_sync, config, embedded, error, metrics, proxy, rate_limit, server,
+    version, xml,
 };
 pub use maxio_storage as storage;
 

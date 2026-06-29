@@ -7,10 +7,15 @@
 
 pub mod ec;
 pub mod harness;
+pub mod routing;
 pub mod server;
 pub mod storage;
 
 pub use ec::EcShardMap;
 pub use harness::ClusterHarness;
+pub use routing::{
+    StoragePeerRef, StorageRaftStatus, fetch_routing_snapshot, parse_raft_peer_urls,
+    parse_storage_peers,
+};
 pub use server::ServerCluster;
-pub use storage::StorageCluster;
+pub use storage::{StorageCluster, StorageRaftNode, StorageRaftNodeConfig};

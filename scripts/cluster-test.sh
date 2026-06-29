@@ -22,4 +22,12 @@ else
   echo "kubectl not installed; skipping manifest dry-run"
 fi
 
+echo "==> HTTP storage Raft multi-process smoke (production wiring)"
+cargo test -p maxio-cluster --features http-raft-tests --test storage_raft_http
+
+if command -v kubectl >/dev/null 2>&1; then
+  echo "==> Kubernetes manifest dry-run (distributed profile)"
+  kubectl apply --dry-run=client -f deploy/k8s/distributed/
+fi
+
 echo "P1-24 cluster harness: OK"

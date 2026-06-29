@@ -1,12 +1,16 @@
 //! Storage tier Raft (P1-17).
 
+pub mod api;
+pub mod http_network;
 pub mod metrics;
 pub mod network;
+pub mod node;
 pub mod raft_store;
 pub mod types;
 
 pub use metrics::StorageRaftMetrics;
 pub use network::ClusterRouter;
+pub use node::{StorageRaftNode, StorageRaftNodeConfig, StorageRaftNodeHandle};
 pub use raft_store::StorageRaftStore;
 pub use types::{MutationResponse, StorageRaft, StorageRaftConfig};
 

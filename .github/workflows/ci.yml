@@ -86,7 +86,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: P1-14 cluster acceptance tests
+      - name: P1-14 cluster + production wiring tests
         run: bash scripts/cluster-test.sh
 
   coverage:

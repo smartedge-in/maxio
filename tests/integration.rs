@@ -60,6 +60,8 @@ fn default_test_config(data_dir: String) -> Config {
         server_host: String::new(),
         serve_ui: true,
         cluster_mode: false,
+        storage_endpoints: String::new(),
+        cluster_sync_interval_secs: 5,
         metrics_enabled: false,
         metrics_port: 0,
         audit_log: false,

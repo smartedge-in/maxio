@@ -141,6 +141,14 @@ pub struct Config {
     #[arg(long, env = "MAXIO_CLUSTER_MODE", default_value = "false")]
     pub cluster_mode: bool,
 
+    /// Comma-separated storage Raft status endpoints: `1@host:9100,2@host2:9100`.
+    #[arg(long, env = "MAXIO_STORAGE_ENDPOINTS", default_value = "")]
+    pub storage_endpoints: String,
+
+    /// Interval for polling storage Raft status into the routing snapshot (seconds).
+    #[arg(long, env = "MAXIO_CLUSTER_SYNC_INTERVAL_SECS", default_value = "5")]
+    pub cluster_sync_interval_secs: u64,
+
     /// Expose Prometheus metrics at `GET /metrics` on the main HTTP listener.
     #[arg(long, env = "MAXIO_METRICS_ENABLED", default_value = "false")]
     pub metrics_enabled: bool,
@@ -243,6 +251,15 @@ mod tests {
         }
         let cli = TestCli::parse_from(["maxio"]);
         assert!(!cli.config.cluster_mode);
+    }
+
+    #[test]
+    fn cluster_sync_interval_defaults_to_five_seconds() {
+        unsafe {
+            std::env::remove_var("MAXIO_CLUSTER_SYNC_INTERVAL_SECS");
+        }
+        let cli = TestCli::parse_from(["maxio"]);
+        assert_eq!(cli.config.cluster_sync_interval_secs, 5);
     }
 
     #[test]

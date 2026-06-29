@@ -2,7 +2,7 @@
 
 ## Status
 
-**Done** (2026-06-29) for P1-14 acceptance scope. Full production wiring (HTTP join, all metadata domains) remains future work.
+**Done** (2026-06-29) including production HTTP transport (`maxio storage-raft`, multi-process tests). Remaining: dynamic membership join, full metadata domain coverage.
 
 ## Goal
 
