@@ -103,7 +103,7 @@ See [bucket policy evaluation](plans/2026-06-28-bucket-policy-evaluation.md).
 | Single-node EC layout (`--erasure-coding`) | Supported | aws-cli (when EC enabled) |
 | Corruption detection on read | Supported | aws-cli |
 | Reed-Solomon recovery (`--parity-shards > 0`) | Supported | integration |
-| Distributed EC (multi-node) | Supported (P1-18+) | cluster-test |
+| Distributed EC (multi-node) | Supported via storage Raft + `maxio-cluster` harness (P1-18+) — not yet exercised by `aws-cli` on distributed K8s deploy | `cluster-test` / `cluster_p14` |
 
 ## Not implemented / deferred
 

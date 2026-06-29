@@ -120,6 +120,99 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
+    #[test]
+    fn colocated_single_node_defaults() {
+        use clap::Parser;
+
+        #[derive(Parser, Debug)]
+        struct TestCli {
+            #[command(flatten)]
+            config: Config,
+        }
+
+        unsafe {
+            std::env::remove_var("MAXIO_CLUSTER_MODE");
+            std::env::remove_var("MAXIO_SERVE_UI");
+        }
+        let cli = TestCli::parse_from(["maxio", "serve", "--data-dir", "/data"]);
+        assert!(!cli.config.cluster_mode);
+        assert!(cli.config.serve_ui);
+    }
+
+    #[tokio::test]
+    async fn create_bucket_proposes_to_storage_raft_leader() {
+        use maxio_cluster::routing::parse_storage_peers;
+        use maxio_cluster::{StorageRaftClient, wrap_cluster_storage};
+        use maxio_storage::BucketMeta;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        let addr = mock.address();
+        let status = maxio_cluster::StorageRaftStatus {
+            node_id: 1,
+            advertise_addr: addr.to_string(),
+            current_leader: Some(1),
+            is_leader: true,
+            quorum_ok: true,
+            commit_lag: 0,
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/internal/raft/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&status))
+            .mount(&mock)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/internal/raft/propose"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(maxio_cluster::storage::MutationResponse { ok: true }),
+            )
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let tmp = TempDir::new().unwrap();
+        let data_dir = tmp.path().to_str().unwrap().to_string();
+        let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
+        let fs = FilesystemStorage::new(
+            &data_dir,
+            false,
+            1024 * 1024,
+            0,
+            keyring,
+            QuotaLimits::from_config(0, 0),
+            false,
+        )
+        .await
+        .unwrap();
+        let inner = dyn_storage(fs);
+        let peers =
+            parse_storage_peers(&format!("1@{}", addr)).expect("parse mock storage peer");
+        let cluster_storage = wrap_cluster_storage(inner, StorageRaftClient::new(peers));
+
+        let created = cluster_storage
+            .create_bucket(&BucketMeta {
+                name: "raft-bucket".into(),
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                region: "us-east-1".into(),
+                versioning: false,
+                cors_rules: None,
+                encryption_config: None,
+                public_read: false,
+                public_list: false,
+                bucket_policy: None,
+                lifecycle_rules: None,
+                erasure_coding: None,
+            })
+            .await
+            .expect("create_bucket");
+        assert!(created);
+        assert!(cluster_storage.head_bucket("raft-bucket").await.unwrap());
+    }
+
     #[tokio::test]
     async fn readyz_ok_when_storage_quorum_healthy() {
         let tmp = TempDir::new().unwrap();

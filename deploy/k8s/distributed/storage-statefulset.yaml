@@ -37,7 +37,15 @@ spec:
                 --advertise="${HOSTNAME}.maxio-storage:9100" \
                 --peers="1=http://maxio-storage-0.maxio-storage:9100,2=http://maxio-storage-1.maxio-storage:9100,3=http://maxio-storage-2.maxio-storage:9100" \
                 --voters=1,2,3 \
+                --erasure-coding \
+                --parity-shards=1 \
+                --chunk-size=4194304 \
                 $( [ "${NODE_ID}" = "1" ] && echo "--bootstrap" )
+          env:
+            - name: MAXIO_BITROT_SCAN_ENABLED
+              value: "true"
+            - name: MAXIO_BITROT_SCAN_INTERVAL_SECS
+              value: "3600"
           ports:
             - name: http
               containerPort: 9100

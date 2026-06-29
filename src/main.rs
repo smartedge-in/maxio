@@ -200,7 +200,15 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    let storage = storage::backend::dyn_storage(fs_storage);
+    let mut storage = storage::backend::dyn_storage(fs_storage);
+    if config.cluster_mode && !config.storage_endpoints.is_empty() {
+        let peers = maxio_cluster::routing::parse_storage_peers(&config.storage_endpoints)?;
+        let raft = maxio_cluster::StorageRaftClient::new(peers);
+        storage = maxio_cluster::wrap_cluster_storage(storage, raft);
+        tracing::info!(
+            "cluster mode: bucket metadata mutations route to storage Raft leader"
+        );
+    }
     storage::provision_default_buckets(storage.as_ref(), &config.default_buckets, &config.region)
         .await;
 

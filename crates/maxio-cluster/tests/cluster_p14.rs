@@ -177,6 +177,67 @@ async fn distributed_ec_induced_shard_loss_peer_fetch() {
 }
 
 #[tokio::test]
+async fn reconstruct_shard_after_storage_node_down() {
+    use maxio_cluster::ec::{cluster_shard_path, place_shards, reconstruct_shard, write_shard};
+    use maxio_storage::raft::StorageMutation;
+
+    let mut h = ClusterHarness::boot().await.unwrap();
+    h.create_bucket("down-bucket", "us-east-1").await.unwrap();
+
+    let node_ids: Vec<String> = h.storage.nodes().iter().map(|n| n.id.to_string()).collect();
+    let map = place_shards("down-bucket", "obj.ec", 2, 1, &node_ids);
+    h.storage
+        .propose(StorageMutation::PutShardMap {
+            bucket: "down-bucket".into(),
+            key: "obj.ec".into(),
+            map: map.clone(),
+        })
+        .await
+        .unwrap();
+
+    let s0 = b"shard0-data".to_vec();
+    let s1 = b"shard1-data".to_vec();
+    let shard_size = s0.len();
+    let mut parity = vec![0u8; shard_size];
+    {
+        use reed_solomon_erasure::galois_8::ReedSolomon;
+        let rs = ReedSolomon::new(2, 1).unwrap();
+        let mut all = vec![s0.clone(), s1.clone(), parity.clone()];
+        rs.encode(&mut all).unwrap();
+        parity = all[2].clone();
+    }
+
+    let fs_map = h.fs_map();
+    write_shard(&fs_map, &map, 0, &s0).await.unwrap();
+    write_shard(&fs_map, &map, 1, &s1).await.unwrap();
+    write_shard(&fs_map, &map, 2, &parity).await.unwrap();
+
+    let down_node = map
+        .placements
+        .iter()
+        .find(|(i, _)| *i == 0)
+        .map(|(_, n)| n.clone())
+        .unwrap();
+    let mut reduced_map = fs_map;
+    reduced_map.remove(&down_node);
+
+    let mut present = Vec::new();
+    for idx in [1u32, 2] {
+        for fs in reduced_map.values() {
+            let path = cluster_shard_path(fs.data_root(), "down-bucket", "obj.ec", idx);
+            if let Ok(bytes) = tokio::fs::read(&path).await {
+                present.push((idx, bytes));
+                break;
+            }
+        }
+    }
+    assert_eq!(present.len(), 2, "need surviving data shard + parity");
+
+    let rebuilt = reconstruct_shard(2, 1, shard_size, &present, 0).unwrap();
+    assert_eq!(rebuilt, s0);
+}
+
+#[tokio::test]
 async fn bitrot_scanner_heals_corrupt_local_shard() {
     use maxio_cluster::ec::bitrot::{BitrotMetrics, scan_placements, verify_shard_checksum};
     use maxio_cluster::ec::{cluster_shard_path, place_shards, write_shard};

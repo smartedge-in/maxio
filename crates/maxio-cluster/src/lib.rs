@@ -5,16 +5,20 @@
 //! - **Server routing** (P1-20): replicated `RoutingSnapshot`
 //! - **Harness** (P1-24): in-process 3-node tests
 
+pub mod client;
 pub mod ec;
 pub use ec::cluster_shard_path;
 pub mod harness;
+pub mod metadata;
 pub mod routing;
 pub mod server;
 pub mod storage;
 
 pub use ec::EcShardMap;
 pub use ec::bitrot::{BitrotMetrics, BitrotScannerConfig};
+pub use client::StorageRaftClient;
 pub use harness::ClusterHarness;
+pub use metadata::{ClusterMetadataStorage, wrap_cluster_storage};
 pub use routing::{
     StoragePeerRef, StorageRaftStatus, fetch_routing_snapshot, parse_raft_peer_urls,
     parse_storage_peers,

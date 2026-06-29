@@ -484,9 +484,11 @@ kubectl apply -f deploy/k8s/distributed/
 | `MAXIO_STORAGE_RAFT_NODE_ID` | storage | Numeric Raft peer id |
 | `MAXIO_STORAGE_RAFT_PEERS` | storage | `id=http://host:port` map for Raft RPC |
 | `MAXIO_STORAGE_RAFT_BOOTSTRAP` | storage | `true` on first voter only |
-| `MAXIO_STORAGE_ENDPOINTS` | server | `id@host:port` list for routing sync |
-| `MAXIO_CLUSTER_MODE` | server | Gates `/readyz` on storage quorum |
+| `MAXIO_STORAGE_ENDPOINTS` | server | `id@host:port` list for routing sync **and** bucket metadata Raft propose |
+| `MAXIO_CLUSTER_MODE` | server | Gates `/readyz` on storage quorum; enables bucket create/delete via storage Raft |
 | `MAXIO_SERVE_UI` | server | `false` when using standalone `maxio-ui` |
+
+**Server ↔ storage wiring (P1-17/P1-20):** When `MAXIO_CLUSTER_MODE=true` and `MAXIO_STORAGE_ENDPOINTS` is set, the server wraps its local backend with `ClusterMetadataStorage`: `create_bucket` / `delete_bucket` are proposed to the storage Raft leader (`POST /internal/raft/propose`) and mirrored on the server's local data dir for list/head. **Object I/O (PUT/GET/multipart) still uses the server's local `FilesystemStorage`** until a future phase routes bytes to storage peers.
 
 **Storage HTTP API (internal):** `GET /internal/raft/status`, `POST /internal/raft/propose` (metadata mutations on leader).
 
