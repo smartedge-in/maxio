@@ -197,9 +197,7 @@ impl Config {
             anyhow::bail!("MAXIO_KEYCLOAK_REALM must not be empty when Keycloak is enabled");
         }
         if self.keycloak_client_id.trim().is_empty() {
-            anyhow::bail!(
-                "MAXIO_KEYCLOAK_CLIENT_ID must not be empty when Keycloak is enabled"
-            );
+            anyhow::bail!("MAXIO_KEYCLOAK_CLIENT_ID must not be empty when Keycloak is enabled");
         }
         if !self.allow_insecure_dev && self.keycloak_skip_tls_verify {
             anyhow::bail!(

@@ -110,9 +110,7 @@ fn make_cookie(value: &str, max_age: i64, secure: bool) -> String {
 fn make_named_cookie(name: &str, value: &str, max_age: i64, secure: bool) -> String {
     let secure_flag = if secure { "; Secure" } else { "" };
 
-    format!(
-        "{name}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure_flag}"
-    )
+    format!("{name}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure_flag}")
 }
 
 fn cookie_secure(state: &AppState) -> bool {
@@ -121,7 +119,7 @@ fn cookie_secure(state: &AppState) -> bool {
 
 async fn verify_console_session(state: &AppState, token: &str) -> bool {
     if crate::auth::keycloak::is_legacy_console_session(token) {
-        return verify_token(&token, &state.config.access_key, &state.config.secret_key);
+        return verify_token(token, &state.config.access_key, &state.config.secret_key);
     }
     if let Some(keycloak) = &state.keycloak {
         return keycloak.validate_access_token(token).await.is_ok();
@@ -243,10 +241,7 @@ pub async fn logout(State(state): State<AppState>) -> impl IntoResponse {
 
 pub async fn keycloak_config(State(state): State<AppState>) -> impl IntoResponse {
     if let Some(keycloak) = &state.keycloak {
-        (
-            StatusCode::OK,
-            Json(keycloak.settings().config_response()),
-        )
+        (StatusCode::OK, Json(keycloak.settings().config_response()))
     } else {
         (
             StatusCode::OK,
@@ -340,7 +335,10 @@ pub async fn keycloak_login(
             .into_response();
     }
 
-    match keycloak.password_login(&body.username, &body.password).await {
+    match keycloak
+        .password_login(&body.username, &body.password)
+        .await
+    {
         Ok(tokens) => {
             let mut resp_headers = HeaderMap::new();
             set_keycloak_session_cookies(&mut resp_headers, &state, &tokens);

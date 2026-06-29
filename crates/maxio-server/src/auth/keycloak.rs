@@ -60,18 +60,15 @@ impl KeycloakSettings {
     }
 
     pub fn issuer_url(&self) -> String {
-        self.issuer.clone().unwrap_or_else(|| {
-            format!("{}/realms/{}", self.base_url, self.realm)
-        })
+        self.issuer
+            .clone()
+            .unwrap_or_else(|| format!("{}/realms/{}", self.base_url, self.realm))
     }
 
     pub fn jwks_uri(&self) -> String {
-        self.jwks_url.clone().unwrap_or_else(|| {
-            format!(
-                "{}/protocol/openid-connect/certs",
-                self.issuer_url()
-            )
-        })
+        self.jwks_url
+            .clone()
+            .unwrap_or_else(|| format!("{}/protocol/openid-connect/certs", self.issuer_url()))
     }
 
     pub fn token_url(&self) -> String {
@@ -173,7 +170,10 @@ impl KeycloakAuth {
         self.post_token(form).await
     }
 
-    pub async fn refresh(&self, refresh_token: &str) -> Result<KeycloakTokenResponse, KeycloakError> {
+    pub async fn refresh(
+        &self,
+        refresh_token: &str,
+    ) -> Result<KeycloakTokenResponse, KeycloakError> {
         let mut form = vec![
             ("grant_type", "refresh_token"),
             ("client_id", self.settings.client_id.as_str()),
@@ -217,7 +217,10 @@ impl KeycloakAuth {
             .map_err(|e| KeycloakError::TokenEndpoint(format!("decode response: {e}")))
     }
 
-    pub async fn validate_access_token(&self, token: &str) -> Result<KeycloakClaims, KeycloakError> {
+    pub async fn validate_access_token(
+        &self,
+        token: &str,
+    ) -> Result<KeycloakClaims, KeycloakError> {
         if token.is_empty() {
             return Err(KeycloakError::InvalidToken("empty token".into()));
         }
