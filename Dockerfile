@@ -10,7 +10,8 @@ WORKDIR /app
 COPY ui/package.json ui/bun.lock ./ui/
 RUN cd ui && bun install --frozen-lockfile
 
-COPY VERSION scripts/sync-version.sh Cargo.toml Cargo.lock build.rs ./
+COPY VERSION Cargo.toml Cargo.lock build.rs ./
+COPY scripts/sync-version.sh ./scripts/sync-version.sh
 COPY crates ./crates
 COPY src ./src
 COPY tests ./tests
