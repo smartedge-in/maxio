@@ -14,7 +14,7 @@ use crate::proxy::client_ip_from_request;
 static AUDIT_CAPTURE: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static AUDIT_TEST_SERIAL: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
-/// Serializes integration tests that share [`AUDIT_CAPTURE`] across parallel workers.
+/// Serializes integration tests that share the global audit capture buffer across parallel workers.
 pub async fn lock_audit_tests() -> tokio::sync::MutexGuard<'static, ()> {
     AUDIT_TEST_SERIAL
         .get_or_init(|| tokio::sync::Mutex::new(()))
