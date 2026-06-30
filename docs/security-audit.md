@@ -36,6 +36,9 @@ Outbound connections are opt-in only — see P3-59 in `docs/operations.md`.
 - [ ] `MAXIO_ADMIN_TOKEN` set for production admin API use
 - [ ] `.maxio-credentials.json` permissions `600` if secondary keys are used
 - [ ] Multi-tenant deployments: verify console login as tenant-scoped user cannot list or access other tenants' buckets (S3 + `/api/buckets`)
+- [ ] Cross-tenant `CopyObject` denied (`test_tenant_copy_source_denied` or manual `x-amz-copy-source` probe)
+- [ ] Console presign URLs authenticate as the logged-in user, not bootstrap admin
+- [ ] Keycloak SSO uses `MAXIO_KEYCLOAK_CONSOLE_ACCESS_KEY` for non-admin tenants when applicable
 - [ ] Bucket policies v2: `Effect: Deny` rules tested; policy read failures deny access (fail-closed)
 - [ ] `MAXIO_MASTER_KEY` stored in org secrets manager when used (keyring still backed up)
 

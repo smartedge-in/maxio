@@ -197,6 +197,11 @@ pub struct Config {
     #[arg(long, env = "MAXIO_KEYCLOAK_ISSUER")]
     pub keycloak_issuer: Option<String>,
 
+    /// S3 access key used for Keycloak SSO console sessions (tenant-scoped credential).
+    /// When empty, bootstrap `MAXIO_ACCESS_KEY` is used (global admin scope).
+    #[arg(long, env = "MAXIO_KEYCLOAK_CONSOLE_ACCESS_KEY", default_value = "")]
+    pub keycloak_console_access_key: String,
+
     /// Default tenant for credentials and buckets without an explicit `tenant_id`.
     #[arg(long, env = "MAXIO_DEFAULT_TENANT", default_value = "default")]
     pub default_tenant: String,

@@ -282,10 +282,54 @@ pub async fn put_object(
     }
 
     if params.contains_key("uploadId") && headers.contains_key("x-amz-copy-source") {
+        let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+        super::request_context::enforce_s3_bucket_gates(
+            &state,
+            &ctx,
+            "PUT",
+            &bucket,
+            Some(&key),
+            &params,
+            &headers,
+            &client_ip,
+        )
+        .await?;
+        let (src_bucket, src_key) = parse_copy_source(&headers)?;
+        super::request_context::enforce_copy_source_gates(
+            &state,
+            &ctx,
+            &src_bucket,
+            &src_key,
+            &headers,
+            &client_ip,
+        )
+        .await?;
         return upload_part_copy(State(state), Path((bucket, key)), Query(params), headers).await;
     }
 
     if headers.contains_key("x-amz-copy-source") {
+        let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+        super::request_context::enforce_s3_bucket_gates(
+            &state,
+            &ctx,
+            "PUT",
+            &bucket,
+            Some(&key),
+            &params,
+            &headers,
+            &client_ip,
+        )
+        .await?;
+        let (src_bucket, src_key) = parse_copy_source(&headers)?;
+        super::request_context::enforce_copy_source_gates(
+            &state,
+            &ctx,
+            &src_bucket,
+            &src_key,
+            &headers,
+            &client_ip,
+        )
+        .await?;
         return copy_object(State(state), Path((bucket, key)), headers).await;
     }
 
@@ -1262,6 +1306,26 @@ pub async fn delete_objects(
             Err(_) => return Err(S3Error::malformed_xml()),
             _ => {}
         }
+    }
+
+    if keys.len() > 1000 {
+        return Err(S3Error::invalid_argument(
+            "Cannot delete more than 1000 objects in a single request",
+        ));
+    }
+
+    for key in &keys {
+        super::request_context::enforce_s3_bucket_gates(
+            &state,
+            &ctx,
+            "DELETE",
+            &bucket,
+            Some(key),
+            &HashMap::new(),
+            &headers,
+            &client_ip,
+        )
+        .await?;
     }
 
     let mut set = tokio::task::JoinSet::new();

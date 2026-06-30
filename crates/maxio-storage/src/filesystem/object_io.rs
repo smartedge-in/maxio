@@ -929,6 +929,11 @@ impl FilesystemStorage {
 
         let versioned = self.is_versioned(bucket).await.unwrap_or(false);
         if versioned {
+            let meta_path = self.meta_path(bucket, key);
+            if fs::try_exists(&meta_path).await.unwrap_or(false) {
+                let meta = self.read_object_meta(bucket, key).await?;
+                self.ensure_can_delete_meta(&meta).await?;
+            }
             return self.write_delete_marker(bucket, key).await;
         }
 

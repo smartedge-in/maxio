@@ -260,6 +260,7 @@ mod tests {
             keycloak_skip_tls_verify: false,
             keycloak_jwks_url: None,
             keycloak_issuer: None,
+            keycloak_console_access_key: String::new(),
             default_tenant: "default".into(),
             allow_external_webhooks: false,
         }

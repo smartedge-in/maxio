@@ -103,7 +103,9 @@ On startup, credentials without `tenant_id` in `.maxio-credentials.json` (includ
 
 New buckets created by a credential inherit its tenant. `ListBuckets` and object/bucket operations return **only buckets in the same tenant**. Cross-tenant bucket access returns S3 **AccessDenied** (HTTP 403).
 
-**Web console:** cookie sessions are bound to the credential used at login (not the bootstrap admin key). Console `GET /api/buckets` and all `/api/buckets/{name}/*` routes enforce the same tenant boundary. Keycloak SSO sessions use the bootstrap access key (global admin scope).
+**Web console:** cookie sessions are bound to the credential used at login (not the bootstrap admin key). Console `GET /api/buckets` and all `/api/buckets/{name}/*` routes enforce the same tenant boundary. Presigned URLs from the console are signed with the same credential. Keycloak SSO uses `MAXIO_KEYCLOAK_CONSOLE_ACCESS_KEY` when set (recommended for tenant-scoped SSO); otherwise bootstrap `MAXIO_ACCESS_KEY` (global admin).
+
+**CopyObject:** `x-amz-copy-source` is subject to the same tenant and bucket-policy checks as a direct `GetObject` on the source object.
 
 ### OIDC claims in bucket policies (P3-38)
 

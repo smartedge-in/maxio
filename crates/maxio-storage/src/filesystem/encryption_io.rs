@@ -596,6 +596,11 @@ impl FilesystemStorage {
         validate_key(key)?;
         if version_id == "null" {
             let meta = self.read_object_meta(bucket, key).await?;
+            if crate::is_object_protected(&meta) {
+                return Err(StorageError::ObjectLocked(
+                    "object is protected by retention or legal hold".into(),
+                ));
+            }
             remove_file_if_exists(&self.object_path(bucket, key)).await?;
             remove_file_if_exists(&self.meta_path(bucket, key)).await?;
             remove_dir_all_if_exists(&self.ec_dir(bucket, key)).await?;

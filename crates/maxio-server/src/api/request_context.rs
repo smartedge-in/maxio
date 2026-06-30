@@ -78,3 +78,28 @@ pub async fn enforce_s3_bucket_gates(
     )
     .await
 }
+
+/// Tenant + `s3:GetObject` policy gate for copy sources (P3-29 / P3-28).
+pub async fn enforce_copy_source_gates(
+    state: &AppState,
+    ctx: &S3RequestContext,
+    src_bucket: &str,
+    src_key: &str,
+    headers: &HeaderMap,
+    client_ip: &str,
+) -> Result<(), S3Error> {
+    enforce_tenant_bucket(state, ctx, src_bucket).await?;
+    let path = format!("/{src_bucket}/{src_key}");
+    let access_key = ctx.principal.as_ref().map(|p| p.access_key.as_str());
+    enforce_bucket_policy_for_parts(
+        state,
+        "GET",
+        &path,
+        "",
+        headers,
+        ctx.vhost.as_ref(),
+        access_key,
+        client_ip,
+    )
+    .await
+}

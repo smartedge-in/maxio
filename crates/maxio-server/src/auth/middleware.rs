@@ -325,6 +325,8 @@ const PUBLIC_BYPASS_FORBIDDEN_QUERY_KEYS: &[&str] = &[
     "versions",
     "retention",
     "legal-hold",
+    "uploadId",
+    "partNumber",
 ];
 
 fn has_query_key(query: &str, key: &str) -> bool {

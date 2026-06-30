@@ -285,7 +285,11 @@ pub fn policy_context_for_principal(
 fn is_create_bucket_request(method: &str, query: &str, path: &str) -> bool {
     method.eq_ignore_ascii_case("PUT")
         && (query.is_empty() || !query.contains('='))
-        && path.trim_start_matches('/').split('/').next().is_some_and(|b| !b.is_empty())
+        && path
+            .trim_start_matches('/')
+            .split('/')
+            .next()
+            .is_some_and(|b| !b.is_empty())
         && !path.trim_start_matches('/').contains('/')
 }
 

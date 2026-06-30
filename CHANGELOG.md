@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **CopyObject / UploadPartCopy:** enforce tenant and `s3:GetObject` policy on `x-amz-copy-source` (fixes cross-tenant read via copy).
+- **Console presign:** presigned URLs use the logged-in credential, not bootstrap admin keys.
+- **Keycloak console:** optional `MAXIO_KEYCLOAK_CONSOLE_ACCESS_KEY` for tenant-scoped SSO (defaults to bootstrap when unset).
+- **Object lock:** multipart complete, versioned delete, and `versionId=null` purge respect retention/legal hold.
+- **DeleteObjects:** per-key policy evaluation; max 1000 keys per request.
+- **Public bypass:** block anonymous `?uploadId` / `?partNumber` on public buckets.
+- **Admin `/info`:** bucket/object counts scoped to caller tenant.
 - **Console sessions:** cookie tokens are now bound to the logged-in credential (fixes privilege escalation where any valid S3 key received bootstrap-admin session scope).
 - **Console tenant isolation:** `/api/buckets` list filtering and `/api/buckets/{name}/*` middleware enforce tenant boundaries.
 - **Bucket policy:** storage read failures during v2 evaluation fail closed (deny) instead of bypassing policy.

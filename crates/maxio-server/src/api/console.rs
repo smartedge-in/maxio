@@ -878,6 +878,7 @@ pub struct PresignParams {
 
 pub async fn presign_object(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<ConsolePrincipal>,
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<PresignParams>,
     headers: HeaderMap,
@@ -906,9 +907,16 @@ pub async fn presign_object(
     let date_stamp = now.format("%Y%m%d").to_string();
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let region = &state.config.region;
-    let access_key = &state.config.access_key;
+    let Some(cred) = state.credentials.lookup(&principal.access_key) else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Access denied"})),
+        )
+            .into_response();
+    };
+    let access_key = &cred.access_key;
 
-    let credential = format!("{}/{}/{}/s3/aws4_request", access_key, date_stamp, region);
+    let credential = format!("{access_key}/{date_stamp}/{region}/s3/aws4_request");
 
     const S3_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
         .remove(b'-')
@@ -952,8 +960,7 @@ pub async fn presign_object(
         amz_date, scope, canonical_hash
     );
 
-    let signing_key =
-        signature_v4::derive_signing_key(&state.config.secret_key, &date_stamp, region);
+    let signing_key = signature_v4::derive_signing_key(&cred.secret_key, &date_stamp, region);
 
     let mut mac = HmacSha256::new_from_slice(&signing_key).unwrap();
     mac.update(string_to_sign.as_bytes());

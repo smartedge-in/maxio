@@ -118,6 +118,10 @@ impl FilesystemStorage {
             if age.num_days() < expiry_days as i64 {
                 continue;
             }
+            if crate::is_object_protected(&meta) {
+                tracing::debug!("housekeeping: skip locked object {bucket}/{}", meta.key);
+                continue;
+            }
             match self.delete_object(bucket, &meta.key).await {
                 Ok(_) => {
                     removed += 1;

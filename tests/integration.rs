@@ -75,6 +75,7 @@ fn default_test_config(data_dir: String) -> Config {
         keycloak_skip_tls_verify: false,
         keycloak_jwks_url: None,
         keycloak_issuer: None,
+        keycloak_console_access_key: String::new(),
         default_tenant: "default".into(),
         allow_external_webhooks: false,
     }
@@ -8015,6 +8016,95 @@ async fn test_tenant_isolation() {
     let resp = s3_request("GET", &format!("{base_url}/"), vec![]).await;
     let admin_list = resp.text().await.unwrap();
     assert!(admin_list.contains("<Name>tenant-a-bucket</Name>"));
+}
+
+/// Cross-tenant CopyObject is denied via source-bucket tenant gate.
+#[tokio::test]
+async fn test_tenant_copy_source_denied() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    std::fs::write(
+        format!("{data_dir}/.maxio-credentials.json"),
+        r#"{"credentials":[
+            {"access_key":"tenant-a-user","secret_key":"secret-a","enabled":true,"tenant_id":"tenant-a"},
+            {"access_key":"tenant-b-user","secret_key":"secret-b","enabled":true,"tenant_id":"tenant-b"}
+        ]}"#,
+    )
+    .unwrap();
+
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
+
+    let mut headers: Vec<(String, String)> = Vec::new();
+    sign_request_with_creds(
+        "PUT",
+        &format!("{base_url}/tenant-a-bucket"),
+        &mut headers,
+        &[],
+        None,
+        "tenant-a-user",
+        "secret-a",
+    );
+    let mut req = client().put(format!("{base_url}/tenant-a-bucket"));
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 200);
+
+    let mut headers = Vec::new();
+    sign_request_with_creds(
+        "PUT",
+        &format!("{base_url}/tenant-a-bucket/secret.txt"),
+        &mut headers,
+        b"hidden",
+        None,
+        "tenant-a-user",
+        "secret-a",
+    );
+    let mut req = client()
+        .put(format!("{base_url}/tenant-a-bucket/secret.txt"))
+        .body("hidden");
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 200);
+
+    let mut headers = Vec::new();
+    sign_request_with_creds(
+        "PUT",
+        &format!("{base_url}/tenant-b-bucket"),
+        &mut headers,
+        &[],
+        None,
+        "tenant-b-user",
+        "secret-b",
+    );
+    let mut req = client().put(format!("{base_url}/tenant-b-bucket"));
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 200);
+
+    let mut headers = vec![(
+        "x-amz-copy-source".to_string(),
+        "/tenant-a-bucket/secret.txt".to_string(),
+    )];
+    sign_request_with_creds(
+        "PUT",
+        &format!("{base_url}/tenant-b-bucket/copy.txt"),
+        &mut headers,
+        &[],
+        None,
+        "tenant-b-user",
+        "secret-b",
+    );
+    let mut req = client().put(format!("{base_url}/tenant-b-bucket/copy.txt"));
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 403);
 }
 
 #[tokio::test]

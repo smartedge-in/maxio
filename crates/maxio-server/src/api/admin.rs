@@ -128,7 +128,10 @@ async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
     })
 }
 
-async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, AdminApiError> {
+async fn info(
+    State(state): State<AppState>,
+    Extension(principal): Extension<AuthPrincipal>,
+) -> Result<Json<InfoResponse>, AdminApiError> {
     let data_root = state.storage.data_root();
     let (total_bytes, free_bytes) = disk_space_bytes(data_root)
         .map(|(t, f)| (Some(t), Some(f)))
@@ -137,8 +140,18 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, Admin
         (Some(t), Some(f)) => Some(t.saturating_sub(f)),
         _ => None,
     };
-    let bucket_count = state.storage.list_buckets().await?.len() as u64;
-    let object_count = state.storage.count_all_objects().await?;
+    let buckets = filter_buckets_for_access(
+        state.storage.list_buckets().await?,
+        &principal.access_key,
+        &state.credentials,
+        &state.config,
+    );
+    let bucket_count = buckets.len() as u64;
+    let mut object_count = 0u64;
+    for b in &buckets {
+        let objects = state.storage.list_objects(&b.name, "").await?;
+        object_count += objects.len() as u64;
+    }
 
     Ok(Json(InfoResponse {
         data_dir: state.config.data_dir.clone(),
@@ -431,6 +444,7 @@ mod tests {
             keycloak_skip_tls_verify: false,
             keycloak_jwks_url: None,
             keycloak_issuer: None,
+            keycloak_console_access_key: String::new(),
             default_tenant: "default".into(),
             allow_external_webhooks: false,
         }

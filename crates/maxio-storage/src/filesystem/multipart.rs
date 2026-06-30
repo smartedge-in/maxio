@@ -745,6 +745,7 @@ impl FilesystemStorage {
         }
 
         let upload_meta = self.read_upload_meta(bucket, upload_id).await?;
+        self.ensure_can_overwrite(bucket, &upload_meta.key).await?;
         let mut selected = Vec::with_capacity(parts.len());
         for (idx, (part_number, requested_etag)) in parts.iter().enumerate() {
             let meta = self.read_part_meta(bucket, upload_id, *part_number).await?;
