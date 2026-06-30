@@ -15,6 +15,13 @@ spec:
       labels:
         app.kubernetes.io/name: maxio
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       # P3-60: required when images are hosted on a private registry (airgap).
       # Create the secret first — see deploy/k8s/registry-secret.example.yaml
       imagePullSecrets:
@@ -23,6 +30,17 @@ spec:
         - name: maxio
           image: REGISTRY/maxio:VERSION
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           args:
             - serve
             - --data-dir=/data
@@ -33,6 +51,13 @@ spec:
           ports:
             - name: http
               containerPort: 9000
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
           envFrom:
             - secretRef:
                 name: maxio-credentials
@@ -40,6 +65,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /healthz
@@ -56,3 +83,5 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: maxio-data
+        - name: tmp
+          emptyDir: {}

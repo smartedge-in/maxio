@@ -26,7 +26,8 @@ LABEL org.opencontainers.image.version="${MAXIO_VERSION}"
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/* \
-  && useradd --system --create-home --home-dir /nonexistent --shell /usr/sbin/nologin maxio
+  && groupadd --system --gid 10001 maxio \
+  && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin maxio
 
 COPY --from=builder /app/target/release/maxio-ui /usr/local/bin/maxio-ui
 

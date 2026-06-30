@@ -18,12 +18,30 @@ spec:
         app.kubernetes.io/name: maxio
         app.kubernetes.io/component: server
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       imagePullSecrets:
         - name: maxio-registry
       containers:
         - name: maxio
           image: REGISTRY/maxio:VERSION
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           args:
             - serve
             - --data-dir=/data
@@ -37,9 +55,18 @@ spec:
           ports:
             - name: http
               containerPort: 9000
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /healthz
@@ -54,4 +81,6 @@ spec:
             periodSeconds: 5
       volumes:
         - name: data
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}

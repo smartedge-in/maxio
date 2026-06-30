@@ -1,0 +1,2 @@
+# Deploy manifests use REGISTRY/VERSION placeholders substituted at install time (P3-60).
+AVD-KSV-0125

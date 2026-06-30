@@ -72,7 +72,7 @@ runtime behavior. These are documented and ignored in `deny.toml`:
 |--------|-----------|
 | Replaced `dirs` in `maxio-admin` with `XDG_CONFIG_HOME` / `HOME` resolution | Removes MPL-2.0 `option-ext` from the workspace |
 | `reqwest` uses `native-tls-vendored` (maxio-server, maxio-admin, integration tests) | Avoids `webpki-roots` (CDLA-Permissive-2.0) and rustls-only deps; bundles OpenSSL (Apache-2.0) for portable builds |
-| `jsonwebtoken` (Keycloak JWT validation) | Adds `ring` (Apache-2.0 AND ISC) and `simple_asn1` (ISC); ISC added to `deny.toml` allow-list |
+| `jsonwebtoken` ≥10.3 (Keycloak JWT validation) | Uses `signature` (Apache-2.0 OR MIT); ISC retained in `deny.toml` for other deps |
 | Embedded UI fonts: Inter + JetBrains Mono | Replaces OFL-1.1 Geist fonts with MIT-licensed `@fontsource` packages |
 
 `maxio-server` (Keycloak client), `maxio-admin`, and integration tests use OpenSSL via
