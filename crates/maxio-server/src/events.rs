@@ -78,6 +78,15 @@ impl EventSpool {
                     continue;
                 }
             };
+            if validate_webhook_url(&record.webhook_url, false).is_err() {
+                tracing::warn!(
+                    webhook = %record.webhook_url,
+                    event_id = %record.id,
+                    "dropping spooled event with disallowed webhook URL"
+                );
+                let _ = fs::remove_file(&path).await;
+                continue;
+            }
             match self
                 .client
                 .post(&record.webhook_url)

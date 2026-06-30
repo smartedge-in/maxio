@@ -35,6 +35,8 @@ Outbound connections are opt-in only — see P3-59 in `docs/operations.md`.
 - [ ] `MAXIO_ALLOW_INSECURE_DEV` is **unset** or `false`
 - [ ] `MAXIO_ADMIN_TOKEN` set for production admin API use
 - [ ] `.maxio-credentials.json` permissions `600` if secondary keys are used
+- [ ] Multi-tenant deployments: verify console login as tenant-scoped user cannot list or access other tenants' buckets (S3 + `/api/buckets`)
+- [ ] Bucket policies v2: `Effect: Deny` rules tested; policy read failures deny access (fail-closed)
 - [ ] `MAXIO_MASTER_KEY` stored in org secrets manager when used (keyring still backed up)
 
 ### TLS and PKI (airgap)

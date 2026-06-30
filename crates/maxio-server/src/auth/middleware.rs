@@ -317,6 +317,14 @@ const PUBLIC_BYPASS_FORBIDDEN_QUERY_KEYS: &[&str] = &[
     "encryption",
     "policy",
     "acl",
+    "lifecycle",
+    "logging",
+    "notification",
+    "object-lock",
+    "erasure",
+    "versions",
+    "retention",
+    "legal-hold",
 ];
 
 fn has_query_key(query: &str, key: &str) -> bool {
@@ -452,6 +460,9 @@ mod tests {
     fn forbidden_subresource_queries_block_public_bypass() {
         assert!(query_has_forbidden_public_subresource("policy"));
         assert!(query_has_forbidden_public_subresource("uploads&prefix=a"));
+        assert!(query_has_forbidden_public_subresource("lifecycle"));
+        assert!(query_has_forbidden_public_subresource("logging"));
+        assert!(query_has_forbidden_public_subresource("notification"));
         assert!(!query_has_forbidden_public_subresource(
             "prefix=a&delimiter=/"
         ));

@@ -1,4 +1,5 @@
 pub mod bucket_policy;
+pub mod console_session;
 pub mod credentials;
 pub mod hmac;
 pub mod keycloak;

@@ -611,6 +611,11 @@ impl FilesystemStorage {
             }
         })?;
         let meta: ObjectMeta = serde_json::from_str(&data)?;
+        if crate::is_object_protected(&meta) {
+            return Err(StorageError::ObjectLocked(
+                "object version is protected by retention or legal hold".into(),
+            ));
+        }
 
         // Remove version files
         let _ = fs::remove_file(&ver_meta_path).await;

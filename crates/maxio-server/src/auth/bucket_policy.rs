@@ -103,7 +103,15 @@ async fn enforce_policy_target(
     let policy = match state.storage.get_bucket_policy(&target.bucket).await {
         Ok(Some(p)) => p,
         Ok(None) => return Ok(()),
-        Err(_) => return Ok(()),
+        Err(crate::storage::StorageError::NotFound(_)) => return Ok(()),
+        Err(e) => {
+            tracing::warn!(
+                bucket = %target.bucket,
+                error = %e,
+                "bucket policy read failed; denying request"
+            );
+            return Err(S3Error::internal(e));
+        }
     };
 
     if !maxio_storage::policy::policy_requires_v2_enforcement(&target.bucket, &policy) {
@@ -156,6 +164,10 @@ fn resolve_policy_target_from_parts(
     signature_path: Option<&str>,
     state: &AppState,
 ) -> Option<BucketPolicyTarget> {
+    if is_create_bucket_request(method, query, path) {
+        return None;
+    }
+
     let host = host_header_value(headers);
 
     let (bucket, object_key) =
@@ -268,6 +280,13 @@ pub fn policy_context_for_principal(
         jwt_roles,
         oidc_claims: None,
     }
+}
+
+fn is_create_bucket_request(method: &str, query: &str, path: &str) -> bool {
+    method.eq_ignore_ascii_case("PUT")
+        && (query.is_empty() || !query.contains('='))
+        && path.trim_start_matches('/').split('/').next().is_some_and(|b| !b.is_empty())
+        && !path.trim_start_matches('/').contains('/')
 }
 
 fn query_has_key(query: &str, key: &str) -> bool {

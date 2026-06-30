@@ -13,81 +13,53 @@ use futures::TryStreamExt;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
-use crate::app_state::AppState;
-use crate::audit::audit_middleware;
-use crate::auth::keycloak::{KeycloakError, KeycloakTokenResponse};
-use crate::auth::signature_v4;
-use crate::storage::backend::StorageBackend;
-
 type HmacSha256 = Hmac<Sha256>;
 
+use crate::app_state::AppState;
+use crate::audit::audit_middleware;
+use crate::auth::console_session::{
+    ConsolePrincipal, TOKEN_MAX_AGE_SECS, bucket_from_console_path, generate_session_token,
+    resolve_console_principal,
+};
+use crate::auth::keycloak::{KeycloakError, KeycloakTokenResponse};
+use crate::auth::signature_v4;
+use crate::auth::tenant::{ensure_bucket_access, filter_buckets_for_access, tenant_for_new_bucket};
+use crate::error::S3ErrorCode;
+use crate::storage::backend::StorageBackend;
+
 const COOKIE_NAME: &str = "maxio_session";
-const TOKEN_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60; // 7 days
 
-fn credential_fingerprint(access_key: &str, secret_key: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(access_key.as_bytes());
-    hasher.update(b":");
-    hasher.update(secret_key.as_bytes());
-    hex::encode(&hasher.finalize()[..4])
+fn console_access_denied() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({"error": "Access denied"})),
+    )
+        .into_response()
 }
 
-fn generate_token(access_key: &str, secret_key: &str, issued_at: i64) -> String {
-    let issued_hex = format!("{:x}", issued_at);
-    let fp = credential_fingerprint(access_key, secret_key);
-    let mut mac =
-        HmacSha256::new_from_slice(secret_key.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(format!("{}:{}:{}", access_key, issued_hex, fp).as_bytes());
-    let sig = hex::encode(mac.finalize().into_bytes());
-    format!("{}.{}.{}", issued_hex, sig, fp)
-}
-
-fn verify_token(token: &str, access_key: &str, secret_key: &str) -> bool {
-    let mut parts = token.split('.');
-    let Some(issued_hex) = parts.next() else {
-        return false;
-    };
-    let Some(signature) = parts.next() else {
-        return false;
-    };
-    let Some(fp) = parts.next() else {
-        return false;
-    };
-    if parts.next().is_some() {
-        return false;
+async fn console_bucket_gate(
+    state: &AppState,
+    principal: &ConsolePrincipal,
+    bucket: &str,
+) -> Option<Response> {
+    match ensure_bucket_access(state, &principal.access_key, bucket).await {
+        Ok(_) => None,
+        Err(err) if matches!(err.code, S3ErrorCode::AccessDenied) => Some(console_access_denied()),
+        Err(err) if matches!(err.code, S3ErrorCode::NoSuchBucket) => Some(
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Bucket not found"})),
+            )
+                .into_response(),
+        ),
+        Err(_) => Some(
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Internal error"})),
+            )
+                .into_response(),
+        ),
     }
-
-    let current_fp = credential_fingerprint(access_key, secret_key);
-    if !constant_time_eq(fp.as_bytes(), current_fp.as_bytes()) {
-        return false;
-    }
-
-    let Ok(issued_at) = i64::from_str_radix(issued_hex, 16) else {
-        return false;
-    };
-
-    let now = chrono::Utc::now().timestamp();
-    if now - issued_at > TOKEN_MAX_AGE_SECS || issued_at > now + 60 {
-        return false;
-    }
-
-    let mut mac =
-        HmacSha256::new_from_slice(secret_key.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(format!("{}:{}:{}", access_key, issued_hex, fp).as_bytes());
-    let expected = hex::encode(mac.finalize().into_bytes());
-
-    constant_time_eq(signature.as_bytes(), expected.as_bytes())
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }
 
 fn extract_cookie(headers: &HeaderMap) -> Option<String> {
@@ -117,32 +89,42 @@ fn cookie_secure(state: &AppState) -> bool {
     state.config.secure_cookies && !state.config.allow_insecure_dev
 }
 
-async fn verify_console_session(state: &AppState, token: &str) -> bool {
-    if crate::auth::keycloak::is_legacy_console_session(token) {
-        return verify_token(token, &state.config.access_key, &state.config.secret_key);
-    }
-    if let Some(keycloak) = &state.keycloak {
-        return keycloak.validate_access_token(token).await.is_ok();
-    }
-    false
-}
-
 async fn console_auth_middleware(
     State(state): State<AppState>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
-    let authenticated = match extract_cookie(request.headers()) {
-        Some(token) => verify_console_session(&state, &token).await,
-        None => false,
-    };
-
-    if !authenticated {
+    let Some(token) = extract_cookie(request.headers()) else {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "Not authenticated"})),
         )
             .into_response();
+    };
+    let Some(principal) = resolve_console_principal(&state, &token).await else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Not authenticated"})),
+        )
+            .into_response();
+    };
+    request.extensions_mut().insert(principal);
+    next.run(request).await
+}
+
+async fn console_tenant_middleware(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let principal = request.extensions().get::<ConsolePrincipal>().cloned();
+    if let (Some(principal), Some(bucket)) = (
+        principal.as_ref(),
+        bucket_from_console_path(request.uri().path()),
+    ) {
+        if let Some(resp) = console_bucket_gate(&state, principal, &bucket).await {
+            return resp;
+        }
     }
     next.run(request).await
 }
@@ -171,13 +153,14 @@ pub async fn login(
             .into_response();
     }
 
-    let authenticated = state
-        .credentials
-        .lookup(&body.access_key)
-        .is_some_and(|cred| {
-            constant_time_eq(body.secret_key.as_bytes(), cred.secret_key.as_bytes())
-        });
-    if !authenticated {
+    let Some(cred) = state.credentials.lookup(&body.access_key) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid credentials"})),
+        )
+            .into_response();
+    };
+    if !signature_v4::constant_time_eq(body.secret_key.as_bytes(), cred.secret_key.as_bytes()) {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "Invalid credentials"})),
@@ -186,7 +169,7 @@ pub async fn login(
     }
 
     let now = chrono::Utc::now().timestamp();
-    let token = generate_token(&state.config.access_key, &state.config.secret_key, now);
+    let token = generate_session_token(&cred.access_key, &cred.secret_key, now);
     let cookie = make_cookie(
         &token,
         TOKEN_MAX_AGE_SECS,
@@ -206,7 +189,7 @@ pub async fn login(
 
 pub async fn check(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
     let authenticated = match extract_cookie(&headers) {
-        Some(token) => verify_console_session(&state, &token).await,
+        Some(token) => resolve_console_principal(&state, &token).await.is_some(),
         None => false,
     };
 
@@ -479,9 +462,18 @@ fn apply_security_headers(headers: &mut HeaderMap) {
     headers.insert("x-frame-options", "DENY".parse().unwrap());
 }
 
-pub async fn list_buckets(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn list_buckets(
+    State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<ConsolePrincipal>,
+) -> impl IntoResponse {
     match state.storage.list_buckets().await {
         Ok(buckets) => {
+            let buckets = filter_buckets_for_access(
+                buckets,
+                &principal.access_key,
+                &state.credentials,
+                &state.config,
+            );
             let list: Vec<serde_json::Value> = buckets
                 .into_iter()
                 .map(|b| {
@@ -510,6 +502,7 @@ pub struct CreateBucketRequest {
 
 pub async fn create_bucket(
     State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<ConsolePrincipal>,
     Json(body): Json<CreateBucketRequest>,
 ) -> impl IntoResponse {
     if crate::storage::validate_bucket_name(&body.name).is_err() {
@@ -522,6 +515,7 @@ pub async fn create_bucket(
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
+    let tenant_id = tenant_for_new_bucket(&principal.access_key, &state.credentials, &state.config);
     let meta = crate::storage::BucketMeta {
         name: body.name.clone(),
         created_at: now,
@@ -534,7 +528,7 @@ pub async fn create_bucket(
         bucket_policy: None,
         erasure_coding: None,
         lifecycle_rules: None,
-        tenant_id: None,
+        tenant_id: Some(tenant_id),
         logging_target_bucket: None,
         logging_target_prefix: None,
         notification_config: None,
@@ -1343,6 +1337,10 @@ pub fn console_router(state: AppState) -> Router<AppState> {
             console_csrf_middleware,
         ))
         .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            console_tenant_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
             state,
             console_auth_middleware,
         ));
@@ -1483,18 +1481,22 @@ mod tests {
 
     #[test]
     fn session_token_invalidates_when_credentials_change() {
+        use crate::auth::console_session::verify_session_token;
+
         let now = chrono::Utc::now().timestamp();
-        let token = generate_token("old-key", "old-secret", now);
-        assert!(verify_token(&token, "old-key", "old-secret"));
-        assert!(!verify_token(&token, "new-key", "old-secret"));
-        assert!(!verify_token(&token, "old-key", "new-secret"));
+        let token = generate_session_token("old-key", "old-secret", now);
+        assert!(verify_session_token(&token, "old-key", "old-secret"));
+        assert!(!verify_session_token(&token, "new-key", "old-secret"));
+        assert!(!verify_session_token(&token, "old-key", "new-secret"));
     }
 
     #[test]
     fn legacy_two_part_tokens_are_rejected() {
+        use crate::auth::console_session::verify_session_token;
+
         let now = chrono::Utc::now().timestamp();
         let issued_hex = format!("{:x}", now);
         let legacy = format!("{issued_hex}.deadbeef");
-        assert!(!verify_token(&legacy, "maxioadmin", "maxioadmin"));
+        assert!(!verify_session_token(&legacy, "maxioadmin", "maxioadmin"));
     }
 }

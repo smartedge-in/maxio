@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Console sessions:** cookie tokens are now bound to the logged-in credential (fixes privilege escalation where any valid S3 key received bootstrap-admin session scope).
+- **Console tenant isolation:** `/api/buckets` list filtering and `/api/buckets/{name}/*` middleware enforce tenant boundaries.
+- **Bucket policy:** storage read failures during v2 evaluation fail closed (deny) instead of bypassing policy.
+- **Public bucket bypass:** additional forbidden query keys (`lifecycle`, `logging`, `notification`, `object-lock`, etc.) block anonymous config reads.
+- **Object lock:** versioned delete checks retention/legal hold before removing non-current versions.
+- **Event spool:** re-validates webhook URLs at delivery time; drops disallowed external targets.
+
 ### Added
 
 - **Enterprise GA+ (Phase 3):** IAM bucket policies v2 (`Effect: Deny`, conditions); SSE-KMS via `MAXIO_KMS_MASTER_KEY`; multi-tenancy (`tenant_id` on credentials/buckets, `MAXIO_DEFAULT_TENANT`); S3 server access logging (`?logging`); event notifications (`?notification`, durable spool, `MAXIO_ALLOW_EXTERNAL_WEBHOOKS`); object lock (bucket create header, `?object-lock`, `?retention`, `?legal-hold`); lifecycle v2 (`transition_days`, `noncurrent_expiration_days`); integration tests for each feature; `make crate-boundaries` in CI.

@@ -1173,8 +1173,22 @@ pub async fn post_object(
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
+    ctx: S3RequestContext,
     body: Body,
 ) -> Result<Response<Body>, S3Error> {
+    let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+    super::request_context::enforce_s3_bucket_gates(
+        &state,
+        &ctx,
+        "POST",
+        &bucket,
+        Some(&key),
+        &params,
+        &headers,
+        &client_ip,
+    )
+    .await?;
+
     if params.contains_key("uploads") {
         return multipart::create_multipart_upload(State(state), Path((bucket, key)), headers)
             .await;
@@ -1200,6 +1214,8 @@ const DELETE_BODY_MAX: usize = 1024 * 1024;
 pub async fn delete_objects(
     State(state): State<AppState>,
     Path(bucket): Path<String>,
+    headers: HeaderMap,
+    ctx: S3RequestContext,
     body: Body,
 ) -> Result<Response<Body>, S3Error> {
     match state.storage.head_bucket(&bucket).await {
@@ -1207,6 +1223,19 @@ pub async fn delete_objects(
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
         Err(e) => return Err(S3Error::internal(e)),
     }
+
+    let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+    super::request_context::enforce_s3_bucket_gates(
+        &state,
+        &ctx,
+        "POST",
+        &bucket,
+        None,
+        &HashMap::from([("delete".to_string(), String::new())]),
+        &headers,
+        &client_ip,
+    )
+    .await?;
 
     let bytes = axum::body::to_bytes(body, DELETE_BODY_MAX)
         .await

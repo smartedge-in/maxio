@@ -40,6 +40,8 @@ pub async fn handle_bucket_get(
 
     tracing::debug!("GET /{} params={:?}", bucket, params);
 
+    super::request_context::enforce_tenant_bucket(&state, &ctx, &bucket).await?;
+
     match state.storage.head_bucket(&bucket).await {
         Ok(true) => {}
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
