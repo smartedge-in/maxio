@@ -88,10 +88,9 @@ impl FilesystemStorage {
 
         let versioned = self.is_versioned(bucket).await.unwrap_or(false);
         if versioned {
-            tracing::debug!(
-                "housekeeping: skipping lifecycle expiration for versioned bucket {bucket}"
-            );
-            return 0;
+            return self
+                .sweep_noncurrent_version_expiration(bucket, &active_rules, now)
+                .await;
         }
 
         let objects = match self.list_objects(bucket, "").await {
@@ -141,7 +140,80 @@ impl FilesystemStorage {
             .iter()
             .filter(|r| key.starts_with(&r.prefix))
             .max_by_key(|r| r.prefix.len())
-            .map(|r| r.expiration_days)
+            .and_then(|r| r.expiration_days)
+    }
+
+    fn lifecycle_noncurrent_expiry_days_for_key(rules: &[LifecycleRule], key: &str) -> Option<u32> {
+        rules
+            .iter()
+            .filter(|r| key.starts_with(&r.prefix))
+            .max_by_key(|r| r.prefix.len())
+            .and_then(|r| r.noncurrent_expiration_days)
+    }
+
+    async fn sweep_noncurrent_version_expiration(
+        &self,
+        bucket: &str,
+        rules: &[LifecycleRule],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> u64 {
+        if !rules.iter().any(|r| r.noncurrent_expiration_days.is_some()) {
+            return 0;
+        }
+
+        let versions = match self.list_object_versions(bucket, "").await {
+            Ok(v) => v,
+            Err(err) => {
+                tracing::warn!("housekeeping: cannot list versions for {bucket} lifecycle: {err}");
+                return 0;
+            }
+        };
+
+        let mut removed = 0u64;
+        let mut last_key: Option<String> = None;
+        for meta in versions {
+            if meta.is_delete_marker {
+                continue;
+            }
+            let is_first_for_key = last_key.as_deref() != Some(meta.key.as_str());
+            last_key = Some(meta.key.clone());
+            if is_first_for_key {
+                continue;
+            }
+            let Some(expiry_days) =
+                Self::lifecycle_noncurrent_expiry_days_for_key(rules, &meta.key)
+            else {
+                continue;
+            };
+            let Some(version_id) = meta.version_id.as_deref() else {
+                continue;
+            };
+            let Some(modified) = chrono::DateTime::parse_from_rfc3339(&meta.last_modified).ok()
+            else {
+                continue;
+            };
+            let age = now.signed_duration_since(modified.with_timezone(&chrono::Utc));
+            if age.num_days() < expiry_days as i64 {
+                continue;
+            }
+            match self
+                .delete_object_version(bucket, &meta.key, version_id)
+                .await
+            {
+                Ok(_) => {
+                    removed += 1;
+                    tracing::info!(
+                        "housekeeping: expired noncurrent version {bucket}/{} ({version_id})",
+                        meta.key
+                    );
+                }
+                Err(err) => tracing::warn!(
+                    "housekeeping: failed to expire noncurrent {bucket}/{} ({version_id}): {err}",
+                    meta.key
+                ),
+            }
+        }
+        removed
     }
 
     /// Count in-progress multipart uploads across all buckets.
@@ -227,6 +299,7 @@ mod lifecycle_tests {
             1024,
             0,
             keyring,
+            None,
             QuotaLimits::from_config(0, 0),
             false,
         )
@@ -247,6 +320,12 @@ mod lifecycle_tests {
                 bucket_policy: None,
                 erasure_coding: None,
                 lifecycle_rules: None,
+                tenant_id: None,
+                logging_target_bucket: None,
+                logging_target_prefix: None,
+                notification_config: None,
+                object_lock_enabled: false,
+                object_lock_config: None,
             })
             .await
             .unwrap();
@@ -257,7 +336,9 @@ mod lifecycle_tests {
                 vec![LifecycleRule {
                     id: "expire-logs".into(),
                     prefix: "old/".into(),
-                    expiration_days: 1,
+                    expiration_days: Some(1),
+                    transition_days: None,
+                    noncurrent_expiration_days: None,
                     enabled: true,
                 }],
             )
@@ -282,6 +363,9 @@ mod lifecycle_tests {
             tags: None,
             part_sizes: None,
             encryption: None,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
         fs::write(&meta_path, serde_json::to_string_pretty(&stale).unwrap())
             .await
@@ -297,19 +381,120 @@ mod lifecycle_tests {
         assert!(!fs::try_exists(&meta_path).await.unwrap());
     }
 
+    #[tokio::test]
+    async fn lifecycle_expires_noncurrent_versions() {
+        use crate::{ByteStream, ObjectMeta};
+        use std::io::Cursor;
+
+        let tmp = TempDir::new().unwrap();
+        let keyring = Arc::new(
+            Keyring::load(tmp.path().to_str().unwrap(), None)
+                .await
+                .unwrap(),
+        );
+        let storage = FilesystemStorage::new(
+            tmp.path().to_str().unwrap(),
+            false,
+            1024,
+            0,
+            keyring,
+            None,
+            QuotaLimits::from_config(0, 0),
+            false,
+        )
+        .await
+        .unwrap();
+
+        let bucket = "versioned";
+        storage
+            .create_bucket(&BucketMeta {
+                name: bucket.into(),
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                region: "us-east-1".into(),
+                versioning: true,
+                cors_rules: None,
+                encryption_config: None,
+                public_read: false,
+                public_list: false,
+                bucket_policy: None,
+                erasure_coding: None,
+                lifecycle_rules: None,
+                tenant_id: None,
+                logging_target_bucket: None,
+                logging_target_prefix: None,
+                notification_config: None,
+                object_lock_enabled: false,
+                object_lock_config: None,
+            })
+            .await
+            .unwrap();
+
+        storage
+            .put_bucket_lifecycle(
+                bucket,
+                vec![LifecycleRule {
+                    id: "purge-old".into(),
+                    prefix: "".into(),
+                    expiration_days: None,
+                    transition_days: None,
+                    noncurrent_expiration_days: Some(1),
+                    enabled: true,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let key = "doc.txt";
+        for content in [b"v1".as_slice(), b"v2".as_slice()] {
+            let body: ByteStream = Box::pin(Cursor::new(content.to_vec()));
+            storage
+                .put_object(bucket, key, "text/plain", body, None, None, None)
+                .await
+                .unwrap();
+        }
+
+        let versions = storage.list_object_versions(bucket, "").await.unwrap();
+        let noncurrent = versions
+            .iter()
+            .filter(|m| m.key == key)
+            .nth(1)
+            .expect("noncurrent version");
+        let version_id = noncurrent.version_id.as_deref().expect("version id");
+        let meta_path = storage.version_meta_path(bucket, key, version_id);
+        let mut stale: ObjectMeta =
+            serde_json::from_str(&fs::read_to_string(&meta_path).await.unwrap()).unwrap();
+        stale.last_modified = "2020-01-01T00:00:00.000Z".into();
+        fs::write(&meta_path, serde_json::to_string_pretty(&stale).unwrap())
+            .await
+            .unwrap();
+
+        let removed = storage
+            .sweep_lifecycle_expiration(bucket, chrono::Utc::now())
+            .await;
+        assert_eq!(removed, 1);
+        assert!(!fs::try_exists(&meta_path).await.unwrap());
+
+        let current = storage.head_object(bucket, key).await.unwrap();
+        assert_eq!(current.size, 2);
+    }
+
     #[test]
     fn longest_prefix_rule_wins() {
         let rules = vec![
             LifecycleRule {
                 id: "a".into(),
                 prefix: "logs/".into(),
-                expiration_days: 30,
+                expiration_days: Some(30),
+                transition_days: None,
+                noncurrent_expiration_days: None,
                 enabled: true,
             },
             LifecycleRule {
                 id: "b".into(),
                 prefix: "logs/2024/".into(),
-                expiration_days: 7,
+                expiration_days: Some(7),
+                transition_days: None,
+                noncurrent_expiration_days: None,
                 enabled: true,
             },
         ];

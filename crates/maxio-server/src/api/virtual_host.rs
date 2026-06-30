@@ -6,14 +6,13 @@
 //! handlers call [`resolve_bucket`] and optionally delegate object operations.
 
 use axum::{
-    Extension,
     extract::{Request, State},
     middleware::Next,
     response::Response,
 };
 
+use crate::app_state::AppState;
 use crate::config::Config;
-use crate::server::AppState;
 use crate::storage::validate_bucket_name;
 
 /// Virtual-hosted request metadata attached by [`virtual_host_middleware`].
@@ -39,12 +38,12 @@ pub fn resolve_bucket(vhost: Option<&VirtualHostContext>, path_bucket: &str) -> 
 /// When `params` is empty and the request is a virtual-hosted object path, returns the key.
 pub fn virtual_host_object_key(
     params: &std::collections::HashMap<String, String>,
-    vhost: Option<&Extension<VirtualHostContext>>,
+    vhost: Option<&VirtualHostContext>,
 ) -> Option<String> {
     if !params.is_empty() {
         return None;
     }
-    let Extension(ctx) = vhost?;
+    let ctx = vhost?;
     object_key_from_signature_path(&ctx.signature_path).map(str::to_string)
 }
 
@@ -190,10 +189,10 @@ mod tests {
 
     #[test]
     fn virtual_host_object_key_requires_empty_params() {
-        let ctx = Extension(VirtualHostContext {
+        let ctx = VirtualHostContext {
             bucket: "b".into(),
             signature_path: "/obj".into(),
-        });
+        };
         let mut params = std::collections::HashMap::new();
         params.insert("versioning".into(), "1".into());
         assert!(virtual_host_object_key(&params, Some(&ctx)).is_none());
@@ -261,6 +260,8 @@ mod tests {
             keycloak_skip_tls_verify: false,
             keycloak_jwks_url: None,
             keycloak_issuer: None,
+            default_tenant: "default".into(),
+            allow_external_webhooks: false,
         }
     }
 }

@@ -33,6 +33,7 @@ async fn run_local(data_dir: &str, json: bool) -> Result<()> {
         10 * 1024 * 1024,
         0,
         keyring.clone(),
+        None,
         QuotaLimits::from_config(0, 0),
         false,
     )

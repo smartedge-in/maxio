@@ -7,8 +7,8 @@ use axum::{
     response::Response,
 };
 
+use crate::app_state::AppState;
 use crate::error::S3Error;
-use crate::server::AppState;
 use crate::storage::{ChecksumAlgorithm, StorageError};
 use crate::xml::{response::to_xml, types::*};
 
@@ -73,6 +73,9 @@ pub async fn create_multipart_upload(
         }
         Some(crate::storage::EncryptionMode::SseC) => {
             builder = builder.header("x-amz-server-side-encryption-customer-algorithm", "AES256");
+        }
+        Some(crate::storage::EncryptionMode::SseKms) => {
+            builder = builder.header("x-amz-server-side-encryption", "aws:kms");
         }
         None => {}
     }

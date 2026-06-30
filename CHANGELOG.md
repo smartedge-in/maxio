@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Enterprise GA+ (Phase 3):** IAM bucket policies v2 (`Effect: Deny`, conditions); SSE-KMS via `MAXIO_KMS_MASTER_KEY`; multi-tenancy (`tenant_id` on credentials/buckets, `MAXIO_DEFAULT_TENANT`); S3 server access logging (`?logging`); event notifications (`?notification`, durable spool, `MAXIO_ALLOW_EXTERNAL_WEBHOOKS`); object lock (bucket create header, `?object-lock`, `?retention`, `?legal-hold`); lifecycle v2 (`transition_days`, `noncurrent_expiration_days`); integration tests for each feature; `make crate-boundaries` in CI.
+
 ### Changed
 
 - **P3-17:** `maxio-admin` no longer depends on the root `maxio` facade — local doctor/keyring use `maxio-storage` directly, shrinking the link graph and fixing `rust-lld` bus errors during workspace tests on constrained hosts.

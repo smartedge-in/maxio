@@ -135,6 +135,7 @@ ci: sync-version ## Run full CI pipeline in order (stops on first failure)
 	$(MAKE) --no-print-directory fmt
 	$(MAKE) --no-print-directory check
 	$(MAKE) --no-print-directory lint
+	$(MAKE) --no-print-directory crate-boundaries
 	$(MAKE) --no-print-directory test
 	$(MAKE) --no-print-directory coverage
 	$(MAKE) --no-print-directory audit
@@ -158,7 +159,11 @@ ci: sync-version ## Run full CI pipeline in order (stops on first failure)
 # Rust quality
 # =============================================================================
 
-.PHONY: sync-version version fmt check lint test coverage audit deny npm-licenses doc frontend release
+.PHONY: sync-version version fmt check lint crate-boundaries test coverage audit deny npm-licenses doc frontend release
+
+crate-boundaries: ## Verify forbidden Cargo.toml dependency edges (P3-23)
+	$(call log,Checking crate dependency boundaries)
+	bash scripts/check-crate-boundaries.sh
 
 sync-version: ## Sync VERSION file into Cargo.toml and ui/package.json
 	$(call log,Syncing semantic version from $(VERSION_FILE))

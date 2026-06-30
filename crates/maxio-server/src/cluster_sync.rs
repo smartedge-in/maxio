@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use maxio_cluster::routing::{fetch_routing_snapshot, parse_storage_peers};
 
-use crate::server::AppState;
+use crate::app_state::AppState;
 
 /// Poll storage peers and publish routing snapshots while `MAXIO_CLUSTER_MODE` is enabled.
 pub async fn run_cluster_sync(state: AppState) {

@@ -11,6 +11,7 @@ use maxio::storage::backend::DynStorage;
 use maxio::storage::backend::dyn_storage;
 use maxio::storage::filesystem::FilesystemStorage;
 use maxio::storage::keys::Keyring;
+
 use maxio::storage::quota::QuotaLimits;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -74,6 +75,8 @@ fn default_test_config(data_dir: String) -> Config {
         keycloak_skip_tls_verify: false,
         keycloak_jwks_url: None,
         keycloak_issuer: None,
+        default_tenant: "default".into(),
+        allow_external_webhooks: false,
     }
 }
 
@@ -91,6 +94,7 @@ async fn new_test_storage(
         chunk_size,
         parity_shards,
         keyring,
+        None,
         quota,
         false,
     )
@@ -130,6 +134,29 @@ async fn spawn_test_server(storage: DynStorage, config: Config) -> String {
     base_url
 }
 
+fn test_kms_master_b64() -> String {
+    base64::engine::general_purpose::STANDARD.encode([0xCDu8; 32])
+}
+
+async fn new_test_storage_with_kms(data_dir: &str) -> FilesystemStorage {
+    let keyring = Arc::new(Keyring::load(data_dir, None).await.unwrap());
+    let kms = maxio::storage::kms::LocalKmsBackend::from_master_key_b64(&test_kms_master_b64())
+        .ok()
+        .map(|b| Arc::new(b) as Arc<dyn maxio::storage::kms::KmsBackend>);
+    FilesystemStorage::new(
+        data_dir,
+        false,
+        10 * 1024 * 1024,
+        0,
+        keyring,
+        kms,
+        unlimited_quota(),
+        false,
+    )
+    .await
+    .unwrap()
+}
+
 /// Spin up a test server on a random port, return the base URL.
 async fn start_server() -> (String, TempDir) {
     let tmp = TempDir::new().unwrap();
@@ -137,6 +164,14 @@ async fn start_server() -> (String, TempDir) {
     let storage = dyn_storage(
         new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
     );
+    let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
+    (base_url, tmp)
+}
+
+async fn start_server_with_kms() -> (String, TempDir) {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    let storage = dyn_storage(new_test_storage_with_kms(&data_dir).await);
     let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
     (base_url, tmp)
 }
@@ -1059,6 +1094,12 @@ async fn test_delete_bucket_sweeps_nested_versions() {
             bucket_policy: None,
             erasure_coding: None,
             lifecycle_rules: None,
+            tenant_id: None,
+            object_lock_enabled: false,
+            object_lock_config: None,
+            logging_target_bucket: None,
+            logging_target_prefix: None,
+            notification_config: None,
         })
         .await
         .unwrap();
@@ -5097,33 +5138,46 @@ async fn test_bucket_default_encryption_inherits() {
     assert_eq!(get2.status(), 404);
 }
 
-/// SSE-KMS: header is rejected with InvalidEncryptionAlgorithm (feature removed).
+/// SSE-KMS roundtrip when KMS master key is configured.
 #[tokio::test]
-async fn test_sse_kms_rejected() {
-    let (base_url, _tmp) = start_server().await;
+async fn test_sse_kms_put_get_roundtrip() {
+    let (base_url, _tmp) = start_server_with_kms().await;
     s3_request("PUT", &format!("{}/kms-bucket", base_url), vec![]).await;
 
     let put = s3_request_with_headers(
         "PUT",
-        &format!("{}/kms-bucket/obj", base_url),
-        b"payload".to_vec(),
+        &format!("{}/kms-bucket/secret.bin", base_url),
+        b"kms-payload".to_vec(),
         vec![("x-amz-server-side-encryption", "aws:kms")],
     )
     .await;
-    assert_eq!(put.status(), 400);
-    let body = put.text().await.unwrap();
-    assert!(
-        body.contains("InvalidEncryptionAlgorithmError"),
-        "body: {}",
-        body
+    assert_eq!(
+        put.status(),
+        200,
+        "{}",
+        put.text().await.unwrap_or_default()
     );
-    assert!(body.contains("AES256"), "body: {}", body);
+    assert_eq!(
+        put.headers()
+            .get("x-amz-server-side-encryption")
+            .and_then(|v| v.to_str().ok()),
+        Some("aws:kms")
+    );
+
+    let get = s3_request(
+        "GET",
+        &format!("{}/kms-bucket/secret.bin", base_url),
+        vec![],
+    )
+    .await;
+    assert_eq!(get.status(), 200);
+    assert_eq!(get.bytes().await.unwrap(), b"kms-payload".to_vec());
 }
 
-/// PutBucketEncryption with aws:kms is rejected (AES256 only).
+/// PutBucketEncryption with aws:kms succeeds when KMS is configured.
 #[tokio::test]
-async fn test_put_bucket_encryption_kms_rejected() {
-    let (base_url, _tmp) = start_server().await;
+async fn test_put_bucket_encryption_kms() {
+    let (base_url, _tmp) = start_server_with_kms().await;
     s3_request("PUT", &format!("{}/kms-def", base_url), vec![]).await;
 
     let xml_body = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
@@ -5134,13 +5188,127 @@ async fn test_put_bucket_encryption_kms_rejected() {
         </ServerSideEncryptionConfiguration>"
         .to_vec();
     let resp = s3_request("PUT", &format!("{}/kms-def?encryption", base_url), xml_body).await;
-    assert_eq!(resp.status(), 400);
-    let body = resp.text().await.unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+/// S3 server access logging delivers lines to the target bucket.
+#[tokio::test]
+async fn test_bucket_access_logging_delivers_to_target() {
+    let (base_url, tmp) = start_server().await;
+
+    s3_request("PUT", &format!("{}/log-target", base_url), vec![]).await;
+    s3_request("PUT", &format!("{}/log-source", base_url), vec![]).await;
+
+    let logging_xml = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+        <BucketLoggingStatus>\
+        <LoggingEnabled>\
+        <TargetBucket>log-target</TargetBucket>\
+        <TargetPrefix>access/</TargetPrefix>\
+        </LoggingEnabled>\
+        </BucketLoggingStatus>"
+        .to_vec();
+    let put_log = s3_request(
+        "PUT",
+        &format!("{}/log-source?logging", base_url),
+        logging_xml.to_vec(),
+    )
+    .await;
+    assert_eq!(put_log.status(), 200);
+
+    let _ = s3_request(
+        "PUT",
+        &format!("{}/log-source/trigger.log", base_url),
+        b"hello".to_vec(),
+    )
+    .await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let list = s3_request("GET", &format!("{}/log-target", base_url), vec![]).await;
+    let list_body = list.text().await.unwrap();
     assert!(
-        body.contains("InvalidEncryptionAlgorithmError"),
-        "body: {}",
-        body
+        list_body.contains("access/log-source/"),
+        "expected log object under prefix, list: {list_body}"
     );
+
+    let log_key = format!(
+        "access/log-source/{}.log",
+        chrono::Utc::now().format("%Y-%m-%d")
+    );
+    let get_log = s3_request(
+        "GET",
+        &format!("{}/log-target/{}", base_url, log_key),
+        vec![],
+    )
+    .await;
+    assert_eq!(
+        get_log.status(),
+        200,
+        "{}",
+        get_log.text().await.unwrap_or_default()
+    );
+    let log_content = get_log.text().await.unwrap();
+    assert!(log_content.contains("log-source"));
+    assert!(log_content.contains("REST.PUT.OBJECT"));
+    let _ = tmp;
+}
+
+/// Event notifications POST to an internal webhook (wiremock).
+#[tokio::test]
+async fn test_event_notification_webhook() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/events"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    let (base_url, tmp) = start_server().await;
+    s3_request("PUT", &format!("{}/evt-bucket", base_url), vec![]).await;
+
+    let webhook_url = format!("{}/events", mock_server.uri());
+    let notif_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+         <NotificationConfiguration>\
+         <TopicConfiguration>\
+         <Endpoint>{webhook_url}</Endpoint>\
+         <Event>s3:ObjectCreated:Put</Event>\
+         </TopicConfiguration>\
+         </NotificationConfiguration>"
+    );
+    let put_notif = s3_request(
+        "PUT",
+        &format!("{}/evt-bucket?notification", base_url),
+        notif_xml.into_bytes(),
+    )
+    .await;
+    assert_eq!(
+        put_notif.status(),
+        200,
+        "{}",
+        put_notif.text().await.unwrap_or_default()
+    );
+
+    let _ = s3_request(
+        "PUT",
+        &format!("{}/evt-bucket/notify-me.txt", base_url),
+        b"evt".to_vec(),
+    )
+    .await;
+
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    let delivered = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        !delivered.is_empty(),
+        "webhook should receive ObjectCreated notification"
+    );
+    let body = String::from_utf8_lossy(&delivered[0].body);
+    assert!(body.contains("notify-me.txt"));
+    let _ = tmp;
 }
 
 /// Keyring rotate: old objects stay decryptable, new objects use the new key.
@@ -7759,6 +7927,97 @@ async fn test_secondary_credential_can_authenticate() {
 }
 
 #[tokio::test]
+async fn test_tenant_isolation() {
+    let tmp = TempDir::new().unwrap();
+    let data_dir = tmp.path().to_str().unwrap().to_string();
+    std::fs::write(
+        format!("{data_dir}/.maxio-credentials.json"),
+        r#"{"credentials":[
+            {"access_key":"tenant-a-user","secret_key":"secret-a","enabled":true,"tenant_id":"tenant-a"},
+            {"access_key":"tenant-b-user","secret_key":"secret-b","enabled":true,"tenant_id":"tenant-b"}
+        ]}"#,
+    )
+    .unwrap();
+
+    let storage = dyn_storage(
+        new_test_storage(&data_dir, false, 10 * 1024 * 1024, 0, unlimited_quota()).await,
+    );
+    let base_url = spawn_test_server(storage, default_test_config(data_dir)).await;
+
+    let mut headers: Vec<(String, String)> = Vec::new();
+    sign_request_with_creds(
+        "PUT",
+        &format!("{base_url}/tenant-a-bucket"),
+        &mut headers,
+        &[],
+        None,
+        "tenant-a-user",
+        "secret-a",
+    );
+    let mut req = client().put(format!("{base_url}/tenant-a-bucket"));
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 200);
+
+    let mut headers = Vec::new();
+    sign_request_with_creds(
+        "GET",
+        &format!("{base_url}/"),
+        &mut headers,
+        &[],
+        None,
+        "tenant-a-user",
+        "secret-a",
+    );
+    let mut req = client().get(format!("{base_url}/"));
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let list_body = req.send().await.unwrap().text().await.unwrap();
+    assert!(list_body.contains("<Name>tenant-a-bucket</Name>"));
+    assert!(!list_body.contains("tenant-b"));
+
+    let mut headers = Vec::new();
+    sign_request_with_creds(
+        "HEAD",
+        &format!("{base_url}/tenant-a-bucket"),
+        &mut headers,
+        &[],
+        None,
+        "tenant-b-user",
+        "secret-b",
+    );
+    let mut req = client().head(format!("{base_url}/tenant-a-bucket"));
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 403);
+
+    let mut headers = Vec::new();
+    sign_request_with_creds(
+        "PUT",
+        &format!("{base_url}/tenant-a-bucket/secret.txt"),
+        &mut headers,
+        b"no",
+        None,
+        "tenant-b-user",
+        "secret-b",
+    );
+    let mut req = client()
+        .put(format!("{base_url}/tenant-a-bucket/secret.txt"))
+        .body("no");
+    for (k, v) in &headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    assert_eq!(req.send().await.unwrap().status(), 403);
+
+    let resp = s3_request("GET", &format!("{base_url}/"), vec![]).await;
+    let admin_list = resp.text().await.unwrap();
+    assert!(admin_list.contains("<Name>tenant-a-bucket</Name>"));
+}
+
+#[tokio::test]
 async fn test_bucket_policy_public_read_via_get_object() {
     let (base_url, _tmp) = start_server().await;
     s3_request("PUT", &format!("{base_url}/policy-bucket"), vec![]).await;
@@ -8146,6 +8405,155 @@ async fn test_put_get_bucket_lifecycle() {
     assert!(body.contains("<Days>30</Days>"));
 }
 
+/// SSE-KMS is rejected when MAXIO_KMS_MASTER_KEY is not configured.
+#[tokio::test]
+async fn test_sse_kms_rejected() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/no-kms"), vec![]).await;
+
+    let put = s3_request_with_headers(
+        "PUT",
+        &format!("{base_url}/no-kms/secret.bin",),
+        b"payload".to_vec(),
+        vec![("x-amz-server-side-encryption", "aws:kms")],
+    )
+    .await;
+    assert_eq!(
+        put.status(),
+        400,
+        "{}",
+        put.text().await.unwrap_or_default()
+    );
+}
+
+/// Lifecycle v2: transition_days and noncurrent_expiration_days round-trip in XML.
+#[tokio::test]
+async fn test_lifecycle_v2_transition_and_noncurrent() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/lc-v2"), vec![]).await;
+
+    let lifecycle_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<LifecycleConfiguration>
+  <Rule>
+    <ID>cold-archive</ID>
+    <Prefix>cold/</Prefix>
+    <Status>Enabled</Status>
+    <Transition><Days>30</Days><StorageClass>GLACIER</StorageClass></Transition>
+    <NoncurrentVersionExpiration><Days>7</Days></NoncurrentVersionExpiration>
+  </Rule>
+</LifecycleConfiguration>"#;
+
+    let put = s3_request(
+        "PUT",
+        &format!("{base_url}/lc-v2?lifecycle"),
+        lifecycle_xml.as_bytes().to_vec(),
+    )
+    .await;
+    assert_eq!(put.status(), 200);
+
+    let get = s3_request("GET", &format!("{base_url}/lc-v2?lifecycle"), vec![]).await;
+    assert_eq!(get.status(), 200);
+    let body = get.text().await.unwrap();
+    assert!(body.contains("cold-archive"));
+    assert!(body.contains("<Transition>"));
+    assert!(body.contains("<Days>30</Days>"));
+    assert!(body.contains("NoncurrentVersionExpiration"));
+    assert!(body.contains("<Days>7</Days>"));
+}
+
+/// Bucket policy v2 Deny blocks GetObject for matching keys.
+#[tokio::test]
+async fn test_bucket_policy_v2_deny_get_object() {
+    let (base_url, _tmp) = start_server().await;
+    s3_request("PUT", &format!("{base_url}/deny-bucket"), vec![]).await;
+
+    let policy = r#"{
+        "Statement": [{
+            "Effect": "Deny",
+            "Principal": {"AWS": "arn:aws:iam::maxio:user/maxioadmin"},
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::deny-bucket/secret/*"
+        }]
+    }"#;
+    assert_eq!(
+        put_bucket_policy_signed(&base_url, "deny-bucket", policy).await,
+        204
+    );
+
+    s3_request(
+        "PUT",
+        &format!("{base_url}/deny-bucket/secret/file.txt"),
+        b"hidden".to_vec(),
+    )
+    .await;
+
+    let get = s3_request(
+        "GET",
+        &format!("{base_url}/deny-bucket/secret/file.txt"),
+        vec![],
+    )
+    .await;
+    assert_eq!(
+        get.status(),
+        403,
+        "{}",
+        get.text().await.unwrap_or_default()
+    );
+}
+
+/// Object lock retention prevents delete until retention expires.
+#[tokio::test]
+async fn test_object_lock_retention_blocks_delete() {
+    let (base_url, _tmp) = start_server().await;
+
+    let create = s3_request_with_headers(
+        "PUT",
+        &format!("{base_url}/lock-bucket"),
+        vec![],
+        vec![("x-amz-bucket-object-lock-enabled", "true")],
+    )
+    .await;
+    assert_eq!(create.status(), 200);
+
+    s3_request(
+        "PUT",
+        &format!("{base_url}/lock-bucket/worm.txt"),
+        b"immutable".to_vec(),
+    )
+    .await;
+
+    let retention_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Retention>
+  <Mode>GOVERNANCE</Mode>
+  <Days>30</Days>
+</Retention>"#;
+    let put_ret = s3_request(
+        "PUT",
+        &format!("{base_url}/lock-bucket/worm.txt?retention"),
+        retention_xml.as_bytes().to_vec(),
+    )
+    .await;
+    assert_eq!(
+        put_ret.status(),
+        200,
+        "{}",
+        put_ret.text().await.unwrap_or_default()
+    );
+
+    let del = s3_request(
+        "DELETE",
+        &format!("{base_url}/lock-bucket/worm.txt"),
+        vec![],
+    )
+    .await;
+    assert_eq!(
+        del.status(),
+        403,
+        "{}",
+        del.text().await.unwrap_or_default()
+    );
+}
+
 #[tokio::test]
 async fn test_per_bucket_erasure_coding_mixed_layouts() {
     let tmp = TempDir::new().unwrap();
@@ -8170,6 +8578,12 @@ async fn test_per_bucket_erasure_coding_mixed_layouts() {
             bucket_policy: None,
             erasure_coding: Some(false),
             lifecycle_rules: None,
+            tenant_id: None,
+            object_lock_enabled: false,
+            object_lock_config: None,
+            logging_target_bucket: None,
+            logging_target_prefix: None,
+            notification_config: None,
         })
         .await
         .unwrap();
@@ -8186,6 +8600,12 @@ async fn test_per_bucket_erasure_coding_mixed_layouts() {
             bucket_policy: None,
             erasure_coding: None,
             lifecycle_rules: None,
+            tenant_id: None,
+            object_lock_enabled: false,
+            object_lock_config: None,
+            logging_target_bucket: None,
+            logging_target_prefix: None,
+            notification_config: None,
         })
         .await
         .unwrap();

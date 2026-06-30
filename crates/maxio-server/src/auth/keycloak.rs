@@ -486,6 +486,8 @@ mod tests {
             keycloak_skip_tls_verify: false,
             keycloak_jwks_url: None,
             keycloak_issuer: None,
+            default_tenant: "default".into(),
+            allow_external_webhooks: false,
         };
         assert!(config.validate_keycloak().is_err());
     }

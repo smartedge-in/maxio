@@ -5,16 +5,21 @@ use axum::{
 };
 use chrono::{NaiveDateTime, Utc};
 
+use crate::access_log::{begin_access_log, finish_access_log};
 use crate::api::virtual_host::{
     VirtualHostContext, extract_virtual_bucket, host_header_value, object_key_from_signature_path,
     signature_path_from_request,
 };
+use crate::app_state::AppState;
+use crate::audit::{apply_virtual_host, finish_s3_request_audit};
 use crate::error::S3Error;
 use crate::proxy::client_ip_from_request;
-use crate::server::AppState;
 
+use super::bucket_policy::{bucket_policy_target_for_request, enforce_bucket_policy_for_target};
 use super::principal::AuthPrincipal;
 use super::signature_v4;
+use super::tenant::ensure_bucket_access_optional;
+use super::tenant_middleware::plan_tenant_scope;
 
 pub async fn auth_middleware(
     State(state): State<AppState>,
@@ -26,6 +31,8 @@ pub async fn auth_middleware(
     let client_ip = client_ip_from_request(&request, &state.trusted_proxies);
 
     tracing::debug!("{} {}", method, uri);
+
+    let request = apply_virtual_host(&state, request);
 
     if method == "PUT"
         && state.s3_rate_limiter.put_requests.is_enabled()
@@ -68,7 +75,7 @@ pub async fn auth_middleware(
             method,
             request.uri().path()
         );
-        return Ok(next.run(request).await);
+        return finalize_s3_request(&state, request, next, None, &client_ip).await;
     }
 
     let auth_header = match request.headers().get("authorization") {
@@ -173,11 +180,38 @@ pub async fn auth_middleware(
 
     tracing::debug!("Signature verification OK");
     let mut request = request;
+    let principal_key = parsed.access_key.clone();
     request.extensions_mut().insert(AuthPrincipal {
-        access_key: parsed.access_key.clone(),
+        access_key: principal_key.clone(),
     });
-    let response = next.run(request).await;
+    let response =
+        finalize_s3_request(&state, request, next, Some(principal_key), &client_ip).await?;
     tracing::debug!("{} {} -> {}", method, uri, response.status());
+    Ok(response)
+}
+
+async fn finalize_s3_request(
+    state: &AppState,
+    request: Request,
+    next: Next,
+    principal_key: Option<String>,
+    client_ip: &str,
+) -> Result<Response, S3Error> {
+    let tenant_plan = plan_tenant_scope(state, &request);
+    let policy_target = bucket_policy_target_for_request(&request, state);
+    let access_capture = begin_access_log(state, &request);
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+
+    if let Some(plan) = tenant_plan {
+        ensure_bucket_access_optional(state, plan.access_key.as_deref(), &plan.bucket).await?;
+    }
+    enforce_bucket_policy_for_target(state, policy_target, principal_key.as_deref(), client_ip)
+        .await?;
+
+    let response = next.run(request).await;
+    finish_access_log(state, access_capture, &response);
+    finish_s3_request_audit(state, &method, &uri, principal_key, client_ip, &response);
     Ok(response)
 }
 
@@ -396,11 +430,11 @@ async fn handle_presigned(
 
     tracing::debug!("Presigned signature verification OK");
     let mut request = request;
+    let principal_key = parsed.access_key.clone();
     request.extensions_mut().insert(AuthPrincipal {
-        access_key: parsed.access_key.clone(),
+        access_key: principal_key.clone(),
     });
-    let response = next.run(request).await;
-    Ok(response)
+    finalize_s3_request(state, request, next, Some(principal_key), client_ip).await
 }
 
 #[cfg(test)]

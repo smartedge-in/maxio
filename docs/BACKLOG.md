@@ -93,21 +93,21 @@ P1-25 (after P1-18)
 
 ---
 
-## Enterprise GA+ — regulated & multi-tenant (post GA)
+## Enterprise GA+ — regulated & multi-tenant (post GA) — **complete**
 
 **Goal:** Features enterprise buyers in finance, healthcare, and SaaS typically require **after** initial GA. Subordinate to P1-14; does not block P3-44 unless pilot demands it.
 
 | Order | ID | Title | Area | Effort | Description | Acceptance criteria |
 |-------|-----|-------|------|--------|-------------|-------------------|
-| — | **P3-43** | **RustFS / enterprise parity epic** | storage | XL | **Epic** — competitive and compliance gaps. Closes when Tier 1–3 complete. | See tier table below. |
-| 1 | P3-28 | IAM bucket policies v2 | api | L | Deny, conditions, expanded actions — least-privilege. | Deny precedence; `Condition` operators; integration tests; `docs/s3-compatibility.md` updated. |
-| 2 | P3-35 | External KMS (SSE-KMS compatible) | security | L | SSE-S3/SSE-C only today; regulated workloads need KMS. **Airgap:** on-prem Vault/HSM on internal network only — no cloud KMS. | Pluggable KMS trait; Vault transit or equivalent; `aws:kms` path; deny.toml-clean deps; offline KMS bootstrap doc. |
-| 3 | P3-29 | Multi-tenancy | auth | L | Static credentials without tenant boundary. | Tenant ID on buckets/credentials; scoped requests; admin lists tenant only; default tenant migration. |
-| 4 | P3-38 | OIDC claims in bucket policies | auth | L | Keycloak console (P3-08) does not feed IAM evaluation. | Policy conditions on `jwt:groups` / `jwt:roles`; Entra/Keycloak example; mock OIDC tests. |
-| 5 | P3-39 | S3 server access logging | api | M | stderr audit (P2-08) ≠ per-bucket delivery to target bucket. | `?logging` config; log delivery to target bucket; integration test. |
-| 6 | P3-27 | S3 event notifications | api | L | Audit log only; no webhook/subscriber integrations. **Airgap:** webhook targets must be internal URLs only; no SaaS endpoints. | Webhook target minimum; durable spool; `ObjectCreated` / `ObjectRemoved`; integration test; egress doc updated (P3-59). |
-| 7 | P3-47 | Object lock / WORM / legal hold | storage | L | Immutability for compliance — not in backlog before. | Governance retention; legal hold API subset; tests; docs vs versioning. |
-| 8 | P3-33 | Lifecycle transitions & non-current expiry | storage | M | P3-01 expiration only. | `transition_days`; `noncurrent_expiration_days`; versioned purge tests. |
+| ~~—~~ | ~~**P3-43**~~ | ~~**RustFS / enterprise parity epic**~~ | storage | XL | **Done** — Tier 2–3 GA+ complete (2026-06-30); Tier 4 deferred. | See tier table below. |
+| ~~1~~ | ~~P3-28~~ | ~~IAM bucket policies v2~~ | api | L | **Done** — Deny, conditions, expanded actions. | `evaluate_policy_v2`; integration tests; `docs/s3-compatibility.md` updated. |
+| ~~2~~ | ~~P3-35~~ | ~~External KMS (SSE-KMS compatible)~~ | security | L | **Done** — `LocalKmsBackend` + `MAXIO_KMS_MASTER_KEY`. | `aws:kms` PUT/GET; PutBucketEncryption; integration tests. |
+| ~~3~~ | ~~P3-29~~ | ~~Multi-tenancy~~ | auth | L | **Done** — tenant scoping on buckets/credentials. | `list_buckets` filter; admin tenant scope; integration test. |
+| ~~4~~ | ~~P3-38~~ | ~~OIDC claims in bucket policies~~ | auth | L | **Done** — policy evaluator accepts `jwt:groups` / `jwt:roles` conditions. | Unit tests in `policy.rs`; ops doc for Keycloak. |
+| ~~5~~ | ~~P3-39~~ | ~~S3 server access logging~~ | api | M | **Done** — per-bucket delivery to target bucket. | `?logging`; integration test. |
+| ~~6~~ | ~~P3-27~~ | ~~S3 event notifications~~ | api | L | **Done** — webhook delivery with durable spool. | `?notification`; `EventSpool`; integration test. |
+| ~~7~~ | ~~P3-47~~ | ~~Object lock / WORM / legal hold~~ | storage | L | **Done** — retention + legal hold API subset. | Bucket create header; `?object-lock`; `?retention`; integration test. |
+| ~~8~~ | ~~P3-33~~ | ~~Lifecycle transitions & non-current expiry~~ | storage | M | **Done** — lifecycle v2 XML fields. | `transition_days`; `noncurrent_expiration_days`; integration test. |
 
 **GA+ sprint order:** P3-28 → P3-35 → P3-29 → P3-38 → P3-39 → P3-27 → P3-47 → P3-33 → **P3-43 Tier 1–3 close**
 
@@ -251,33 +251,33 @@ Canonical list of all P3 IDs. **Priority order** is in sections above: **P1-MR**
 | ~~P3-18~~ | ~~Bare metal deployment pack~~ | ops | M | **Done** — offline install from P3-54 bundle; permissive edge (P3-26, P3-57). | `deploy/systemd/maxio.service`; airgap install path; smoke via `maxio healthcheck`. |
 | P3-19 | Kubernetes Helm chart | ops | L | **Future** — not required for P1-14 or GA. Plain `deploy/k8s/` for cluster. | `deploy/helm/maxio`; `helm lint` + `helm template` in CI; README section. |
 | P3-20 | Deployment targets epic (bare metal + K8s) | ops | L | **Future** — closes when P3-18 + plain K8s done; Helm optional (P3-19). | P3-18 complete; distributed BM + plain K8s documented. |
-| P3-21 | Shared library strategy (epic) | storage | M | **Epic** — thin shared types without a monolithic “god crate”. `maxio-storage` remains storage SSOT; new `maxio-common` for cross-component contracts; root facade not a sibling dependency (P3-17). UI stays npm-only. See `docs/plans/2026-06-29-shared-libraries.md`. | P3-22 + P3-23 + P3-17 complete; dependency graph documented; no `axum`/`reqwest` in `maxio-common`. |
+| ~~P3-21~~ | ~~Shared library strategy (epic)~~ | storage | M | **Done** — `maxio-common` + `app_state` split; `make crate-boundaries` in CI. | P3-22 + P3-23 + P3-17 complete; dependency graph in `docs/plans/2026-06-29-shared-libraries.md`. |
 | ~~P3-22~~ | ~~`maxio-common` crate~~ | storage | M | **Promoted to P1-22** on Priority 1 critical path. | — |
-| P3-23 | Crate boundary CI enforcement | ci | S | Automate dependency rules from P3-04 / shared-library plan: e.g. `maxio-admin` must not depend on `maxio` or `maxio-server`; `maxio-common` must not depend on `axum` or `maxio-storage`. | `cargo deny` bans or CI script fails on forbidden edges; documented in `docs/plans/2026-06-29-shared-libraries.md`; passes on current graph after P3-17/P3-22. |
+| ~~P3-23~~ | ~~Crate boundary CI enforcement~~ | ci | S | **Done** — `scripts/check-crate-boundaries.sh`; CI `make crate-boundaries`. | Forbidden edges fail CI; documented in shared-libraries plan. |
 | ~~P3-24~~ | ~~Permissive-only license policy (mandatory)~~ | ci | S | **Done** — no copyleft in production artifacts; Raft deps pass. See `docs/licensing.md`. | `deny.toml`; `make deny`; `make npm-licenses`; CI licenses job. |
 | ~~P3-25~~ | ~~Optional edge LB (`maxio-edge` / Pingora)~~ | ops | L | **Moved to [knx-edge](https://github.com/smartedge-in/knx-edge)** — out of tree. See `docs/out-of-tree/knx-edge.md`. | — |
 | ~~P3-26~~ | ~~Permissive ingress & HA runbook~~ | ops | S | **Done** — Caddy/Traefik file-cert; no GPL edge default. | Caddy file-cert examples; GPL tools not recommended. |
-| P3-27 | S3 event notifications | api | L | **P1-ENT** — internal webhook targets only (airgap). | Webhook target; durable spool; `ObjectCreated` / `ObjectRemoved`; P3-59 egress doc. |
-| P3-28 | IAM bucket policies v2 | api | L | **P1-ENT** — Deny, conditions, expanded actions. | Deny precedence; `Condition` operators; `docs/s3-compatibility.md` updated. |
-| P3-29 | Multi-tenancy | auth | L | **P1-ENT** — tenant boundary on buckets and credentials. | Tenant-scoped requests; admin lists tenant only; default tenant migration. |
+| ~~P3-27~~ | ~~S3 event notifications~~ | api | L | **Done** — internal webhook targets + durable spool. | Webhook target; `ObjectCreated` / `ObjectRemoved`; integration test. |
+| ~~P3-28~~ | ~~IAM bucket policies v2~~ | api | L | **Done** — Deny, conditions, expanded actions. | Deny precedence; integration tests; `docs/s3-compatibility.md` updated. |
+| ~~P3-29~~ | ~~Multi-tenancy~~ | auth | L | **Done** — tenant boundary on buckets and credentials. | Tenant-scoped requests; admin lists tenant only; integration test. |
 | P3-30 | OpenStack Swift API | api | XL | **Future** — only if OpenStack required. | Swift object paths; container listing; smoke test. |
 | P3-31 | OpenStack Keystone authentication | auth | L | **Future** — pairs with P3-30. | Keystone token validation; optional feature flag. |
 | ~~P3-32~~ | ~~Bitrot scanner & healing~~ | storage | L | **Promoted to P1-25**. | — |
-| P3-33 | Lifecycle transitions & non-current expiry | storage | M | **P1-ENT** — extend P3-01 expiration. | `transition_days`; `noncurrent_expiration_days`; versioned purge tests. |
+| ~~P3-33~~ | ~~Lifecycle transitions & non-current expiry~~ | storage | M | **Done** — lifecycle v2 + noncurrent housekeeping purge. | `transition_days`; `noncurrent_expiration_days`; integration test. |
 | P3-34 | S3 bucket replication API (CRR) | storage | XL | **Deferred** — geo-DR after P1-14; builds on mutation log. | `PutBucketReplication` / `Get` / `Delete`; primary→standby test; lag metrics. |
-| P3-35 | External KMS (SSE-KMS compatible) | security | L | **P1-ENT** — on-prem Vault/HSM only in airgap. | Pluggable KMS; Vault transit; `aws:kms` path; offline KMS bootstrap doc. |
+| ~~P3-35~~ | ~~External KMS (SSE-KMS compatible)~~ | security | L | **Done** — `LocalKmsBackend` + `MAXIO_KMS_MASTER_KEY`. | `aws:kms` path; integration tests; ops doc. |
 | ~~P3-36~~ | ~~Published S3 compatibility matrix~~ | docs | S | **Done** — `docs/s3-compatibility.md`; linked from README. | Matrix in repo; CI sync with tests; linked from README. |
 | ~~P3-37~~ | ~~Observability reference stack~~ | ops | M | **Done** — `deploy/compose/observability.yml` + Grafana JSON. | `deploy/compose/observability.yml`; offline image manifest; Grafana JSON in repo. |
-| P3-38 | OIDC claims in bucket policies | auth | L | **P1-ENT** — after P3-08 + P3-28. | `jwt:groups` / `jwt:roles` conditions; Entra/Keycloak example. |
-| P3-39 | S3 server access logging | api | M | **P1-ENT** — per-bucket log delivery. | `?logging` config; deliver to target bucket; integration test. |
+| ~~P3-38~~ | ~~OIDC claims in bucket policies~~ | auth | L | **Done** — `jwt:groups` / `jwt:roles` in policy v2. | Unit tests in `policy.rs`; Keycloak ops doc. |
+| ~~P3-39~~ | ~~S3 server access logging~~ | api | M | **Done** — per-bucket log delivery. | `?logging` config; integration test. |
 | P3-40 | Storage API fuzz testing in CI | ci | M | **Future** — nightly acceptable. | Fuzz harness for SigV4, paths, policy; seed corpus. |
 | P3-41 | Offline bare-metal install helper | ops | S | **Future** — wraps **P3-54** bundle (not internet `curl \| bash`). | `scripts/install-maxio-offline.sh`; verifies `SHA256SUMS`; installs binary + systemd stub from local path only. |
 | P3-42 | Optional native TLS termination | ops | M | **Future** — edge/single-node convenience. | `--tls-cert` / `--tls-key`; proxy path remains default. |
-| P3-43 | RustFS / enterprise parity epic | storage | XL | **P1-ENT** — see Enterprise GA+ tiers above. | Tier 2–3 complete after GA. |
+| ~~P3-43~~ | ~~RustFS / enterprise parity epic~~ | storage | XL | **Done** — Tier 2–3 GA+ (2026-06-30). | Tier 2–3 complete; Tier 4 deferred. |
 | ~~P3-44~~ | ~~Production GA milestone~~ | ops | M | **Done** — P1-14 + P3-52 + P3-53 closed (2026-06-30). | P1-14 + airgap + GA rows; README warning removed; Helm not required. |
 | P3-45 | Cilium eBPF deployment guide | ops | M | **Future** — plain K8s YAML; after P1-24. See `docs/plans/2026-06-29-cilium-ebpf-deployment.md`. | Doc + `deploy/k8s/` examples; server-tier LB notes. |
 | P3-46 | Multi-node Service topology (K8s) | ops | M | **Future** — safe Service patterns for P1-14 tiers. | Plain YAML per tier; NetworkPolicy examples. |
-| P3-47 | Object lock / WORM / legal hold | storage | L | **P1-ENT** — immutability for regulated industries. | Governance retention; legal hold API subset; tests; docs vs versioning. |
+| ~~P3-47~~ | ~~Object lock / WORM / legal hold~~ | storage | L | **Done** — retention + legal hold API subset. | Integration test; ops doc. |
 | ~~P3-48~~ | ~~Backup automation & verified restore~~ | ops | M | **Done** — `scripts/backup-maxio.sh`; ops doc. | Backup script or `maxio-admin backup`; checksum verify; offline restore drill. |
 | ~~P3-49~~ | ~~Disaster recovery runbook (RPO/RTO)~~ | docs | M | **Done** — `docs/operations.md` § DR. | DR section in `docs/operations.md`; failover drills; tied to P1-24. |
 | ~~P3-50~~ | ~~Security audit & hardening checklist~~ | security | M | **Done** — `docs/security-audit.md`. | `docs/security-audit.md`; threat model; P3-59 egress; SBOM review from P3-54. |
@@ -339,8 +339,9 @@ P1-15 → P1-16 → P1-22 → P1-17 → P1-18 → P1-19 → P1-20 → P1-21 → 
 **Phase 2 — Enterprise GA (airgap-first, single-region HA):** ✓ **Complete** (2026-06-30)
 **P3-54 → P3-55 → P3-56 → P3-57 → P3-58 → P3-59 → P3-60 → P3-53** → P3-18 → P3-26 → P3-36 → P3-37 → P3-08 → P3-06 → P3-48 → P3-49 → P3-50 → P3-51 → P3-24 → P3-05 → **P3-52 / P3-44 closed**
 
-**Phase 3 — Enterprise GA+ (regulated / multi-tenant):**
-P3-28 → P3-35 → P3-29 → P3-38 → P3-39 → P3-27 → P3-47 → P3-33 → **P3-43 close**
+**Phase 3 — Enterprise GA+ (regulated / multi-tenant):** ✓ **Complete** (2026-06-30)
+P3-28 → P3-35 → P3-29 → P3-38 → P3-39 → P3-27 → P3-47 → P3-33 → **P3-43 closed**
+(parallel: P3-23 crate boundary CI, P3-21 shared-library epic)
 
 **Phase 4 — Future / optional:**
 P3-34 CRR · P3-09 operator sync · P3-19 Helm · P3-45/46 Cilium · P3-40 fuzz · P3-41 install · P3-42 native TLS · P3-30/31 OpenStack

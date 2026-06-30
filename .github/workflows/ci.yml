@@ -35,6 +35,9 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      - name: crate-boundaries
+        run: make crate-boundaries
+
       - name: test
         run: cargo test --workspace --all-features
 

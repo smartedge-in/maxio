@@ -14,9 +14,9 @@ pub mod routing;
 pub mod server;
 pub mod storage;
 
+pub use client::StorageRaftClient;
 pub use ec::EcShardMap;
 pub use ec::bitrot::{BitrotMetrics, BitrotScannerConfig};
-pub use client::StorageRaftClient;
 pub use harness::ClusterHarness;
 pub use metadata::{ClusterMetadataStorage, wrap_cluster_storage};
 pub use routing::{

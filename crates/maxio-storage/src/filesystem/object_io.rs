@@ -25,6 +25,7 @@ impl FilesystemStorage {
     ) -> Result<PutResult, StorageError> {
         validate_bucket_name(bucket)?;
         validate_key(key)?;
+        self.ensure_can_overwrite(bucket, key).await?;
         self.check_upload_start(declared_size)?;
         let mut body = self.wrap_upload_reader(body);
 
@@ -181,6 +182,7 @@ impl FilesystemStorage {
 
         // Fold the sidecar MAC into the encryption metadata now that every
         // immutable field (size/etag/version_id/etc.) is final.
+        let default_lock = self.resolve_default_object_lock(bucket).await?;
         let mut meta = ObjectMeta {
             key: key.to_string(),
             size,
@@ -195,7 +197,11 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: None,
             encryption: enc_meta_opt.take(),
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
+        Self::apply_object_lock(&mut meta, default_lock);
         if meta.encryption.is_some() {
             if let Some(em) = meta.encryption.as_mut() {
                 em.sidecar_mac.clear();
@@ -362,6 +368,9 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: None,
             encryption: None,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
 
         let meta_path = self.meta_path(bucket, key);
@@ -594,6 +603,9 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: None,
             encryption: Some(enc_meta),
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
         if let Some(em) = meta.encryption.as_mut() {
             em.sidecar_mac.clear();
@@ -932,6 +944,10 @@ impl FilesystemStorage {
                 version_id: None,
                 is_delete_marker: false,
             });
+        }
+        if fs::try_exists(&meta_path).await? {
+            let meta = self.read_object_meta(bucket, key).await?;
+            self.ensure_can_delete_meta(&meta).await?;
         }
         remove_file_if_exists(&obj_path).await?;
         remove_file_if_exists(&meta_path).await?;

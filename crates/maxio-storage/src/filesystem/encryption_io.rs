@@ -19,10 +19,31 @@ impl FilesystemStorage {
                     algorithm: "AES256".to_string(),
                     mode: EncryptionMode::SseS3,
                     key_id: Some(key_id),
+                    kms_key_id: None,
                     wrapped_dek: Some(b64.encode(&wrapped_dek)),
                     wrap_nonce: Some(b64.encode(wrap_nonce)),
                     customer_key_md5: None,
                     nonce_prefix: b64.encode(nonce_prefix),
+                    chunk_size: FRAME_CHUNK_SIZE as u32,
+                    sidecar_mac: String::new(),
+                })
+            }
+            EncryptionMode::SseKms => {
+                let kms = self.kms.as_ref().ok_or_else(|| {
+                    StorageError::EncryptionError("SSE-KMS requires MAXIO_KMS_MASTER_KEY".into())
+                })?;
+                let generated = kms
+                    .generate_data_key(req.kms_key_id.as_deref())
+                    .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
+                Ok(EncryptionMeta {
+                    algorithm: "AES256".into(),
+                    mode: EncryptionMode::SseKms,
+                    key_id: None,
+                    kms_key_id: Some(generated.kms_key_id),
+                    wrapped_dek: Some(b64.encode(&generated.ciphertext)),
+                    wrap_nonce: Some(b64.encode(generated.wrap_nonce)),
+                    customer_key_md5: None,
+                    nonce_prefix: b64.encode(Keyring::generate_nonce_prefix8()),
                     chunk_size: FRAME_CHUNK_SIZE as u32,
                     sidecar_mac: String::new(),
                 })
@@ -46,6 +67,7 @@ impl FilesystemStorage {
                     algorithm: "AES256".to_string(),
                     mode: EncryptionMode::SseC,
                     key_id: None,
+                    kms_key_id: None,
                     wrapped_dek: Some(b64.encode(&wrapped_dek)),
                     wrap_nonce: Some(b64.encode(wrap_nonce)),
                     customer_key_md5: Some(b64.encode(md5)),
@@ -108,6 +130,36 @@ impl FilesystemStorage {
                 nonce_arr.copy_from_slice(&nonce_bytes);
                 self.keyring
                     .unwrap_dek(kid, &wrapped, &nonce_arr)
+                    .map_err(|e| StorageError::EncryptionError(e.to_string()))
+            }
+            EncryptionMode::SseKms => {
+                let kms = self.kms.as_ref().ok_or_else(|| {
+                    StorageError::EncryptionError("SSE-KMS not configured".into())
+                })?;
+                let kms_key_id = spec
+                    .kms_key_id
+                    .as_ref()
+                    .ok_or_else(|| StorageError::EncryptionError("missing kms_key_id".into()))?;
+                let wrapped_b64 = spec.upload_dek_wrapped.as_ref().ok_or_else(|| {
+                    StorageError::EncryptionError("missing upload_dek_wrapped".into())
+                })?;
+                let nonce_b64 = spec.upload_dek_wrap_nonce.as_ref().ok_or_else(|| {
+                    StorageError::EncryptionError("missing upload_dek_wrap_nonce".into())
+                })?;
+                let wrapped = b64.decode(wrapped_b64).map_err(|_| {
+                    StorageError::EncryptionError("bad upload_dek_wrapped base64".into())
+                })?;
+                let nonce_bytes = b64.decode(nonce_b64).map_err(|_| {
+                    StorageError::EncryptionError("bad upload_dek_wrap_nonce base64".into())
+                })?;
+                if nonce_bytes.len() != 12 {
+                    return Err(StorageError::EncryptionError(
+                        "upload_dek_wrap_nonce must be 12 bytes".into(),
+                    ));
+                }
+                let mut nonce_arr = [0u8; 12];
+                nonce_arr.copy_from_slice(&nonce_bytes);
+                kms.decrypt_data_key(kms_key_id, &wrapped, &nonce_arr)
                     .map_err(|e| StorageError::EncryptionError(e.to_string()))
             }
         }
@@ -194,6 +246,38 @@ impl FilesystemStorage {
                     .unwrap_dek(key_id, &wrapped_bytes, &nonce_arr)
                     .map_err(|e| StorageError::DecryptionError(e.to_string()))
             }
+            EncryptionMode::SseKms => {
+                let kms = self.kms.as_ref().ok_or_else(|| {
+                    StorageError::DecryptionError("SSE-KMS not configured".into())
+                })?;
+                let kms_key_id = enc_meta
+                    .kms_key_id
+                    .as_ref()
+                    .ok_or_else(|| StorageError::DecryptionError("missing kms_key_id".into()))?;
+                let wrapped = enc_meta
+                    .wrapped_dek
+                    .as_ref()
+                    .ok_or_else(|| StorageError::DecryptionError("missing wrapped_dek".into()))?;
+                let wrap_nonce = enc_meta
+                    .wrap_nonce
+                    .as_ref()
+                    .ok_or_else(|| StorageError::DecryptionError("missing wrap_nonce".into()))?;
+                let wrapped_bytes = b64
+                    .decode(wrapped)
+                    .map_err(|_| StorageError::DecryptionError("bad wrapped_dek base64".into()))?;
+                let nonce_bytes = b64
+                    .decode(wrap_nonce)
+                    .map_err(|_| StorageError::DecryptionError("bad wrap_nonce base64".into()))?;
+                if nonce_bytes.len() != 12 {
+                    return Err(StorageError::DecryptionError(
+                        "wrap_nonce must be 12 bytes".into(),
+                    ));
+                }
+                let mut nonce_arr = [0u8; 12];
+                nonce_arr.copy_from_slice(&nonce_bytes);
+                kms.decrypt_data_key(kms_key_id, &wrapped_bytes, &nonce_arr)
+                    .map_err(|e| StorageError::DecryptionError(e.to_string()))
+            }
         }
     }
 
@@ -277,6 +361,9 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: None,
             encryption: None,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
 
         let ver_dir = self.versions_dir(bucket, key);

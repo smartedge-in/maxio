@@ -31,6 +31,19 @@ ignore = false
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
+deny = [
+    # P3-17 / P3-23: admin CLI must not depend on server facade crates
+    { crate = "maxio-admin", deny = [
+        { crate = "maxio" },
+        { crate = "maxio-server" },
+    ]},
+    # P3-22 / P3-23: keep maxio-common thin
+    { crate = "maxio-common", deny = [
+        { crate = "axum" },
+        { crate = "reqwest" },
+        { crate = "maxio-storage" },
+    ]},
+]
 
 [advisories]
 # Full graph check: make deny-all. CI / make deny use `licenses` only.

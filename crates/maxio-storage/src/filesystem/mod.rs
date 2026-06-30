@@ -1,13 +1,14 @@
 use super::chunk_reader::VerifiedChunkReader;
 use super::crypto::{AadBuilder, FRAME_CHUNK_SIZE, FrameDecryptor};
 use super::keys::Keyring;
+use super::kms::KmsBackend;
 use super::metadata_index::MetadataIndex;
 use super::quota::{QuotaLimits, QuotaReader, map_read_quota_error};
 use super::{
-    BucketEncryptionConfig, BucketMeta, ByteStream, ChecksumAlgorithm, ChunkInfo, ChunkKind,
-    ChunkManifest, DeleteResult, EncryptionMeta, EncryptionMode, EncryptionRequest, LifecycleRule,
-    MultipartUploadMeta, ObjectMeta, PartMeta, PutResult, StorageError, UploadEncryptionSpec,
-    validate_bucket_name,
+    BucketEncryptionConfig, BucketMeta, BucketNotificationConfig, ByteStream, ChecksumAlgorithm,
+    ChunkInfo, ChunkKind, ChunkManifest, DeleteResult, EncryptionMeta, EncryptionMode,
+    EncryptionRequest, LifecycleRule, MultipartUploadMeta, ObjectMeta, PartMeta, PutResult,
+    StorageError, UploadEncryptionSpec, validate_bucket_name,
 };
 use aes_gcm::{
     Aes256Gcm, Key, Nonce,
@@ -28,6 +29,7 @@ type HmacSha256 = Hmac<Sha256>;
 const IO_BUFFER_SIZE: usize = 256 * 1024;
 const SMALL_OBJECT_THRESHOLD: u64 = 256 * 1024;
 
+mod access_logging;
 mod common;
 #[cfg(test)]
 mod ec_policy_tests;
@@ -38,8 +40,11 @@ mod index_parity_tests;
 mod listing;
 mod multipart;
 mod object_io;
+mod object_lock;
 
 use common::*;
+
+pub use access_logging::AccessLogEntry;
 
 enum ChecksumHasher {
     Crc32(crc32fast::Hasher),
@@ -85,6 +90,7 @@ pub struct FilesystemStorage {
     pub(super) chunk_size: u64,
     pub(super) parity_shards: u32,
     pub(super) keyring: Arc<Keyring>,
+    pub(super) kms: Option<Arc<dyn KmsBackend>>,
     pub(super) quota: QuotaLimits,
     pub(super) metadata_index: Option<Arc<MetadataIndex>>,
 }
@@ -96,6 +102,7 @@ impl FilesystemStorage {
         chunk_size: u64,
         parity_shards: u32,
         keyring: Arc<Keyring>,
+        kms: Option<Arc<dyn KmsBackend>>,
         quota: QuotaLimits,
         metadata_index_enabled: bool,
     ) -> Result<Self, anyhow::Error> {
@@ -114,6 +121,7 @@ impl FilesystemStorage {
             chunk_size,
             parity_shards,
             keyring,
+            kms,
             quota,
             metadata_index,
         };
@@ -170,6 +178,10 @@ impl FilesystemStorage {
         Ok(meta.erasure_coding.unwrap_or(true))
     }
 
+    pub async fn get_bucket_meta(&self, bucket: &str) -> Result<BucketMeta, StorageError> {
+        self.read_bucket_meta(bucket).await
+    }
+
     pub(super) async fn read_bucket_meta(&self, bucket: &str) -> Result<BucketMeta, StorageError> {
         validate_bucket_name(bucket)?;
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
@@ -217,7 +229,7 @@ impl FilesystemStorage {
                     "lifecycle rule id must not be empty".into(),
                 ));
             }
-            if rule.expiration_days == 0 {
+            if rule.expiration_days == Some(0) {
                 return Err(StorageError::InvalidKey(
                     "lifecycle rule expiration_days must be > 0".into(),
                 ));
@@ -248,6 +260,10 @@ impl FilesystemStorage {
 
     pub fn data_root(&self) -> &Path {
         &self.data_root
+    }
+
+    pub fn kms_backend(&self) -> Option<&Arc<dyn KmsBackend>> {
+        self.kms.as_ref()
     }
 
     pub fn keyring(&self) -> &Arc<Keyring> {
@@ -564,8 +580,14 @@ impl FilesystemStorage {
 
     pub async fn put_bucket_policy(&self, bucket: &str, policy: &str) -> Result<(), StorageError> {
         validate_bucket_name(bucket)?;
-        let effects =
-            crate::policy::evaluate_v1_policy(bucket, policy).map_err(StorageError::InvalidKey)?;
+        let effects = match crate::policy::evaluate_v1_policy(bucket, policy) {
+            Ok(effects) => effects,
+            Err(_) => {
+                crate::policy::validate_policy_v2(bucket, policy)
+                    .map_err(StorageError::InvalidKey)?;
+                crate::policy::PolicyEffects::default()
+            }
+        };
         let meta_path = self.buckets_dir.join(bucket).join(".bucket.json");
         let data = fs::read_to_string(&meta_path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {

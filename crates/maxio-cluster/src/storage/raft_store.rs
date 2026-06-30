@@ -103,6 +103,12 @@ impl StorageRaftStore {
                     bucket_policy: None,
                     lifecycle_rules: None,
                     erasure_coding: None,
+                    tenant_id: None,
+                    logging_target_bucket: None,
+                    logging_target_prefix: None,
+                    notification_config: None,
+                    object_lock_enabled: false,
+                    object_lock_config: None,
                 };
                 self.fs
                     .create_bucket(&meta)

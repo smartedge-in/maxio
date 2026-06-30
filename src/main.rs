@@ -189,12 +189,19 @@ async fn main() -> anyhow::Result<()> {
         config.max_object_bytes,
         config.min_free_disk_bytes,
     );
+    let kms = storage::kms::load_from_env()
+        .map_err(|e| anyhow::anyhow!("failed to load KMS from MAXIO_KMS_MASTER_KEY: {e}"))?;
+    if kms.is_some() {
+        tracing::info!("SSE-KMS enabled via MAXIO_KMS_MASTER_KEY");
+    }
+
     let fs_storage = storage::filesystem::FilesystemStorage::new(
         &config.data_dir,
         config.erasure_coding,
         config.chunk_size,
         config.parity_shards,
         keyring.clone(),
+        kms,
         quota,
         config.metadata_index,
     )
@@ -205,9 +212,7 @@ async fn main() -> anyhow::Result<()> {
         let peers = maxio_cluster::routing::parse_storage_peers(&config.storage_endpoints)?;
         let raft = maxio_cluster::StorageRaftClient::new(peers);
         storage = maxio_cluster::wrap_cluster_storage(storage, raft);
-        tracing::info!(
-            "cluster mode: bucket metadata mutations route to storage Raft leader"
-        );
+        tracing::info!("cluster mode: bucket metadata mutations route to storage Raft leader");
     }
     storage::provision_default_buckets(storage.as_ref(), &config.default_buckets, &config.region)
         .await;

@@ -244,14 +244,38 @@ pub struct LifecycleRuleXml {
     pub prefix: String,
     #[serde(rename = "Status")]
     pub status: String,
-    #[serde(rename = "Expiration")]
-    pub expiration: LifecycleExpirationXml,
+    #[serde(
+        rename = "Expiration",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub expiration: Option<LifecycleExpirationXml>,
+    #[serde(
+        rename = "Transition",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub transition: Option<LifecycleTransitionXml>,
+    #[serde(
+        rename = "NoncurrentVersionExpiration",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub noncurrent_version_expiration: Option<LifecycleExpirationXml>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LifecycleExpirationXml {
     #[serde(rename = "Days")]
     pub days: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LifecycleTransitionXml {
+    #[serde(rename = "Days")]
+    pub days: u32,
+    #[serde(rename = "StorageClass", default)]
+    pub storage_class: String,
 }
 
 #[derive(Serialize)]
@@ -269,8 +293,15 @@ pub struct LifecycleRuleOut {
     pub prefix: String,
     #[serde(rename = "Status")]
     pub status: String,
-    #[serde(rename = "Expiration")]
-    pub expiration: LifecycleExpirationXml,
+    #[serde(rename = "Expiration", skip_serializing_if = "Option::is_none")]
+    pub expiration: Option<LifecycleExpirationXml>,
+    #[serde(rename = "Transition", skip_serializing_if = "Option::is_none")]
+    pub transition: Option<LifecycleTransitionXml>,
+    #[serde(
+        rename = "NoncurrentVersionExpiration",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub noncurrent_version_expiration: Option<LifecycleExpirationXml>,
 }
 
 #[derive(Serialize)]
@@ -351,4 +382,47 @@ pub struct CorsRuleXml {
     pub expose_headers: Vec<String>,
     #[serde(rename = "MaxAgeSeconds", skip_serializing_if = "Option::is_none")]
     pub max_age_seconds: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename = "ObjectLockConfiguration")]
+pub struct ObjectLockConfiguration {
+    #[serde(rename = "ObjectLockEnabled", skip_serializing_if = "Option::is_none")]
+    pub object_lock_enabled: Option<String>,
+    #[serde(rename = "Rule", skip_serializing_if = "Option::is_none")]
+    pub rule: Option<ObjectLockRuleXml>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ObjectLockRuleXml {
+    #[serde(rename = "DefaultRetention", skip_serializing_if = "Option::is_none")]
+    pub default_retention: Option<DefaultRetentionXml>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DefaultRetentionXml {
+    #[serde(rename = "Mode")]
+    pub mode: String,
+    #[serde(rename = "Days", skip_serializing_if = "Option::is_none")]
+    pub days: Option<u32>,
+    #[serde(rename = "Years", skip_serializing_if = "Option::is_none")]
+    pub years: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename = "Retention")]
+pub struct RetentionXml {
+    #[serde(rename = "Mode")]
+    pub mode: String,
+    #[serde(rename = "RetainUntilDate", skip_serializing_if = "Option::is_none")]
+    pub retain_until_date: Option<String>,
+    #[serde(rename = "Days", skip_serializing_if = "Option::is_none")]
+    pub days: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename = "LegalHold")]
+pub struct LegalHoldXml {
+    #[serde(rename = "Status")]
+    pub status: String,
 }

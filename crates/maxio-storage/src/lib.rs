@@ -9,6 +9,7 @@ pub mod chunk_reader;
 pub mod crypto;
 pub mod filesystem;
 pub mod keys;
+pub mod kms;
 pub mod metadata_index;
 pub mod policy;
 pub mod quota;
@@ -76,18 +77,74 @@ fn is_false(v: &bool) -> bool {
     !*v
 }
 
-/// Prefix-based object expiration rule (P3-01 v1 subset).
+/// Prefix-based object expiration rule (P3-01 / P3-33 subset).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LifecycleRule {
     pub id: String,
     pub prefix: String,
-    pub expiration_days: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiration_days: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_days: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noncurrent_expiration_days: Option<u32>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
 
 fn default_enabled() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ObjectLockMode {
+    Governance,
+    Compliance,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum LegalHoldStatus {
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObjectLockConfig {
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_retention_mode: Option<ObjectLockMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_retention_days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObjectLockRetention {
+    pub mode: ObjectLockMode,
+    pub retain_until_date: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BucketNotificationConfig {
+    pub webhook_url: String,
+    #[serde(default)]
+    pub events: Vec<String>,
+}
+
+/// True when retention is active or legal hold is ON.
+pub fn is_object_protected(meta: &ObjectMeta) -> bool {
+    if meta.legal_hold_status == Some(LegalHoldStatus::On) {
+        return true;
+    }
+    if let Some(ref until) = meta.retain_until_date {
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(until) {
+            if chrono::Utc::now() < dt.with_timezone(&chrono::Utc) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,11 +176,22 @@ pub struct BucketMeta {
     pub public_list: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bucket_policy: Option<String>,
-    /// Per-bucket erasure coding override (`None` = inherit server default when EC enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub erasure_coding: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle_rules: Option<Vec<LifecycleRule>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logging_target_bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logging_target_prefix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_config: Option<BucketNotificationConfig>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub object_lock_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_lock_config: Option<ObjectLockConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +217,12 @@ pub struct ObjectMeta {
     pub part_sizes: Option<Vec<u64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encryption: Option<EncryptionMeta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object_lock_mode: Option<ObjectLockMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retain_until_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legal_hold_status: Option<LegalHoldStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,17 +242,14 @@ pub struct MultipartUploadMeta {
 pub struct PartMeta {
     pub part_number: u32,
     pub etag: String,
-    /// Plaintext byte length of the part (what the client uploaded).
     pub size: u64,
     pub last_modified: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checksum_algorithm: Option<ChecksumAlgorithm>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checksum_value: Option<String>,
-    /// `true` when the on-disk part file is encrypted with an upload-scoped DEK.
     #[serde(default, skip_serializing_if = "is_false")]
     pub encrypted: bool,
-    /// Disk size of the part including nonce + GCM tag overhead (encrypted only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ciphertext_size: Option<u64>,
 }
@@ -201,8 +272,6 @@ impl ChunkKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkManifest {
     pub version: u32,
-    /// Bytes the on-disk chunks stream. Ciphertext total when the companion
-    /// ObjectMeta carries an `encryption` block, plaintext total otherwise.
     pub total_size: u64,
     pub chunk_size: u64,
     pub chunk_count: u32,
@@ -211,7 +280,6 @@ pub struct ChunkManifest {
     pub parity_shards: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shard_size: Option<u64>,
-    /// Plaintext byte count for encrypted-EC objects; absent for plaintext.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plaintext_size: Option<u64>,
 }
@@ -225,50 +293,38 @@ pub struct ChunkInfo {
     pub kind: ChunkKind,
 }
 
-/// Encryption mode for server-side encryption.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EncryptionMode {
     SseS3,
     SseC,
+    SseKms,
 }
 
-/// Encryption metadata stored per-object in the `.meta.json` sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionMeta {
-    /// "AES256"
     pub algorithm: String,
     pub mode: EncryptionMode,
-    /// Master key ID used to wrap the DEK (SSE-S3)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_id: Option<String>,
-    /// Base64-encoded wrapped (encrypted) DEK — absent for SSE-C
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kms_key_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapped_dek: Option<String>,
-    /// Base64-encoded 12-byte nonce used when wrapping the DEK
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrap_nonce: Option<String>,
-    /// Base64-encoded MD5 of the customer-supplied key (SSE-C only)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub customer_key_md5: Option<String>,
-    /// Base64-encoded 4-byte per-object nonce prefix (informational)
     pub nonce_prefix: String,
-    /// Plaintext bytes per frame (always FRAME_CHUNK_SIZE = 65536 in v1)
     pub chunk_size: u32,
-    /// Hex-encoded HMAC-SHA256 of the immutable portion of `ObjectMeta` keyed
-    /// by the DEK. Binds the sidecar to the object; tampering with `size`,
-    /// `wrapped_dek`, `nonce_prefix`, `key`, etc. yields a MAC mismatch on GET.
     #[serde(default)]
     pub sidecar_mac: String,
 }
 
-/// Ephemeral encryption specification supplied by the API handler for a PUT.
-/// The customer key (SSE-C) is held in a `Zeroizing` wrapper so it is scrubbed
-/// from memory when the request is dropped.
 pub struct EncryptionRequest {
     pub mode: EncryptionMode,
-    /// Customer-supplied key (SSE-C only); never persisted, zeroed on drop.
     pub customer_key: Option<zeroize::Zeroizing<[u8; 32]>>,
+    pub kms_key_id: Option<String>,
 }
 
 impl EncryptionRequest {
@@ -276,48 +332,48 @@ impl EncryptionRequest {
         Self {
             mode: EncryptionMode::SseS3,
             customer_key: None,
+            kms_key_id: None,
         }
     }
     pub fn sse_c(key: [u8; 32]) -> Self {
         Self {
             mode: EncryptionMode::SseC,
             customer_key: Some(zeroize::Zeroizing::new(key)),
+            kms_key_id: None,
+        }
+    }
+    pub fn sse_kms(kms_key_id: Option<String>) -> Self {
+        Self {
+            mode: EncryptionMode::SseKms,
+            customer_key: None,
+            kms_key_id,
         }
     }
 }
 
-/// Bucket-level default encryption configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BucketEncryptionConfig {
-    /// Always "AES256"
     pub sse_algorithm: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kms_key_id: Option<String>,
 }
 
-/// Compact encryption specification stored in `MultipartUploadMeta` so that
-/// `upload_part` and `complete_multipart_upload` can encrypt/decrypt parts
-/// with an upload-scoped DEK.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UploadEncryptionSpec {
     pub mode: EncryptionMode,
-    /// SSE-C: base64 MD5 of customer key (for validation only; key not stored).
-    /// Every `UploadPart` call must present a key that matches this MD5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub customer_key_md5: Option<String>,
-    /// SSE-S3: base64-encoded DEK wrapped by the active master, used to encrypt
-    /// every part of this upload. `None` for SSE-C.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload_dek_wrapped: Option<String>,
-    /// Base64 12-byte GCM nonce used when wrapping the upload DEK.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload_dek_wrap_nonce: Option<String>,
-    /// ID of the master key that wrapped the upload DEK.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload_dek_key_id: Option<String>,
-    /// Base64 4-byte nonce prefix used for all frames across every part.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kms_key_id: Option<String>,
     pub upload_nonce_prefix: String,
 }
 
-/// Returns `true` if `name` is a valid S3 bucket name.
 pub fn is_valid_bucket_name(name: &str) -> bool {
     if name.len() < 3 || name.len() > 63 {
         return false;
@@ -328,27 +384,21 @@ pub fn is_valid_bucket_name(name: &str) -> bool {
     {
         return false;
     }
-
     let bytes = name.as_bytes();
     let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
     if !first.is_ascii_alphanumeric() || !last.is_ascii_alphanumeric() {
         return false;
     }
-
     if name.contains("..") || name.contains(".-") || name.contains("-.") {
         return false;
     }
-
     let parts: Vec<&str> = name.split('.').collect();
     if parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok()) {
         return false;
     }
-
     true
 }
 
-/// Create each bucket in `default_buckets` (comma-separated) if it does not
-/// already exist. Invalid S3 names are logged and skipped; errors are non-fatal.
 pub async fn provision_default_buckets(
     storage: &dyn backend::StorageBackend,
     default_buckets: &str,
@@ -380,6 +430,12 @@ pub async fn provision_default_buckets(
             bucket_policy: None,
             erasure_coding: None,
             lifecycle_rules: None,
+            tenant_id: None,
+            logging_target_bucket: None,
+            logging_target_prefix: None,
+            notification_config: None,
+            object_lock_enabled: false,
+            object_lock_config: None,
         };
         match storage.create_bucket(&meta).await {
             Ok(true) => tracing::info!("Created default bucket: {}", bucket_name),
@@ -417,6 +473,8 @@ pub enum StorageError {
     ObjectTooLarge { max: u64 },
     #[error("insufficient storage: {0}")]
     InsufficientStorage(String),
+    #[error("object locked: {0}")]
+    ObjectLocked(String),
 }
 
 #[cfg(test)]
@@ -454,7 +512,6 @@ mod crate_boundary_tests {
 
     #[test]
     fn public_api_has_no_http_types() {
-        // Storage crate must remain usable without axum/http (compile-time boundary).
         assert!(is_valid_bucket_name("logs-2026"));
     }
 }

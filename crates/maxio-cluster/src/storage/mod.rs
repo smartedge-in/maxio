@@ -86,6 +86,7 @@ impl StorageCluster {
                     chunk_size,
                     parity_shards,
                     keyring,
+                    None,
                     QuotaLimits::from_config(0, 0),
                     false,
                 )

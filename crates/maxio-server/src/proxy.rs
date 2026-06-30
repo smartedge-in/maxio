@@ -133,6 +133,17 @@ fn parse_network(spec: &str) -> Option<Network> {
     }
 }
 
+pub fn client_ip_from_headers(headers: &axum::http::HeaderMap, trusted: &TrustedProxies) -> String {
+    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        let client = forwarded.split(',').next().unwrap_or("").trim();
+        if !client.is_empty() {
+            return client.to_string();
+        }
+    }
+    let _ = trusted;
+    "unknown".to_string()
+}
+
 pub fn client_ip_from_request(
     request: &axum::extract::Request,
     trusted: &TrustedProxies,

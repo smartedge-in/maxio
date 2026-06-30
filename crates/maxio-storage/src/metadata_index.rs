@@ -218,6 +218,9 @@ mod tests {
             tags: None,
             part_sizes: None,
             encryption: None,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         }
     }
 

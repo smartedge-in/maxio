@@ -2,11 +2,12 @@
 
 use async_trait::async_trait;
 use maxio_storage::backend::{DynStorage, StorageBackend};
+use maxio_storage::filesystem::AccessLogEntry;
 use maxio_storage::raft::StorageMutation;
 use maxio_storage::{
-    BucketMeta, ByteStream, ChecksumAlgorithm, CorsRule, DeleteResult, EncryptionRequest,
-    LifecycleRule, MultipartUploadMeta, ObjectMeta, PartMeta, PutResult, StorageError,
-    UploadEncryptionSpec,
+    BucketMeta, BucketNotificationConfig, ByteStream, ChecksumAlgorithm, CorsRule, DeleteResult,
+    EncryptionRequest, LegalHoldStatus, LifecycleRule, MultipartUploadMeta, ObjectLockConfig,
+    ObjectLockRetention, ObjectMeta, PartMeta, PutResult, StorageError, UploadEncryptionSpec,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -59,6 +60,10 @@ impl StorageBackend for ClusterMetadataStorage {
         self.inner.keyring()
     }
 
+    fn kms(&self) -> Option<&Arc<dyn maxio_storage::kms::KmsBackend>> {
+        self.inner.kms()
+    }
+
     fn check_upload_start(&self, declared_size: Option<u64>) -> Result<(), StorageError> {
         self.inner.check_upload_start(declared_size)
     }
@@ -98,6 +103,10 @@ impl StorageBackend for ClusterMetadataStorage {
 
     async fn head_bucket(&self, name: &str) -> Result<bool, StorageError> {
         self.inner.head_bucket(name).await
+    }
+
+    async fn get_bucket_meta(&self, bucket: &str) -> Result<BucketMeta, StorageError> {
+        self.inner.get_bucket_meta(bucket).await
     }
 
     async fn delete_bucket(&self, name: &str) -> Result<bool, StorageError> {
@@ -209,6 +218,112 @@ impl StorageBackend for ClusterMetadataStorage {
         self.inner.delete_bucket_lifecycle(bucket).await
     }
 
+    async fn get_bucket_logging(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<(String, String)>, StorageError> {
+        self.inner.get_bucket_logging(bucket).await
+    }
+
+    async fn put_bucket_logging(
+        &self,
+        bucket: &str,
+        target_bucket: &str,
+        target_prefix: &str,
+    ) -> Result<(), StorageError> {
+        self.inner
+            .put_bucket_logging(bucket, target_bucket, target_prefix)
+            .await
+    }
+
+    async fn delete_bucket_logging(&self, bucket: &str) -> Result<(), StorageError> {
+        self.inner.delete_bucket_logging(bucket).await
+    }
+
+    async fn get_bucket_notification(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<BucketNotificationConfig>, StorageError> {
+        self.inner.get_bucket_notification(bucket).await
+    }
+
+    async fn put_bucket_notification(
+        &self,
+        bucket: &str,
+        config: BucketNotificationConfig,
+    ) -> Result<(), StorageError> {
+        self.inner.put_bucket_notification(bucket, config).await
+    }
+
+    async fn delete_bucket_notification(&self, bucket: &str) -> Result<(), StorageError> {
+        self.inner.delete_bucket_notification(bucket).await
+    }
+
+    async fn deliver_access_log(&self, entry: &AccessLogEntry) -> Result<(), StorageError> {
+        self.inner.deliver_access_log(entry).await
+    }
+
+    async fn put_bucket_object_lock(
+        &self,
+        bucket: &str,
+        config: ObjectLockConfig,
+    ) -> Result<(), StorageError> {
+        self.inner.put_bucket_object_lock(bucket, config).await
+    }
+
+    async fn get_bucket_object_lock(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<ObjectLockConfig>, StorageError> {
+        self.inner.get_bucket_object_lock(bucket).await
+    }
+
+    async fn put_object_retention(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        retention: ObjectLockRetention,
+    ) -> Result<(), StorageError> {
+        self.inner
+            .put_object_retention(bucket, key, version_id, retention)
+            .await
+    }
+
+    async fn get_object_retention(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<ObjectLockRetention, StorageError> {
+        self.inner
+            .get_object_retention(bucket, key, version_id)
+            .await
+    }
+
+    async fn put_object_legal_hold(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        status: LegalHoldStatus,
+    ) -> Result<(), StorageError> {
+        self.inner
+            .put_object_legal_hold(bucket, key, version_id, status)
+            .await
+    }
+
+    async fn get_object_legal_hold(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<LegalHoldStatus, StorageError> {
+        self.inner
+            .get_object_legal_hold(bucket, key, version_id)
+            .await
+    }
+
     async fn put_object(
         &self,
         bucket: &str,
@@ -301,7 +416,9 @@ impl StorageBackend for ClusterMetadataStorage {
         key: &str,
         version_id: &str,
     ) -> Result<ObjectMeta, StorageError> {
-        self.inner.head_object_version(bucket, key, version_id).await
+        self.inner
+            .head_object_version(bucket, key, version_id)
+            .await
     }
 
     async fn delete_object_version(
@@ -340,7 +457,13 @@ impl StorageBackend for ClusterMetadataStorage {
         encryption_spec: Option<UploadEncryptionSpec>,
     ) -> Result<MultipartUploadMeta, StorageError> {
         self.inner
-            .create_multipart_upload(bucket, key, content_type, checksum_algorithm, encryption_spec)
+            .create_multipart_upload(
+                bucket,
+                key,
+                content_type,
+                checksum_algorithm,
+                encryption_spec,
+            )
             .await
     }
 

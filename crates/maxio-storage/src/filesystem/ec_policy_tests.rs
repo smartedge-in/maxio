@@ -17,6 +17,7 @@ mod tests {
             1024,
             0,
             keyring,
+            None,
             QuotaLimits::from_config(0, 0),
             false,
         )
@@ -38,6 +39,12 @@ mod tests {
                 bucket_policy: None,
                 erasure_coding: ec,
                 lifecycle_rules: None,
+                tenant_id: None,
+                logging_target_bucket: None,
+                logging_target_prefix: None,
+                notification_config: None,
+                object_lock_enabled: false,
+                object_lock_config: None,
             })
             .await
             .unwrap();

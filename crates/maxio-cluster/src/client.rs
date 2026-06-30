@@ -67,7 +67,10 @@ impl StorageRaftClient {
             }
         }
 
-        anyhow::bail!("no storage raft leader found among {} peer(s)", self.peers.len())
+        anyhow::bail!(
+            "no storage raft leader found among {} peer(s)",
+            self.peers.len()
+        )
     }
 
     /// Submit a metadata mutation to the current storage Raft leader.

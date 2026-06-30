@@ -70,7 +70,7 @@ Configure virtual-hosted requests with `MAXIO_SERVER_HOST` / `--server-host`. Si
 | Object tagging (`PutObjectTagging`, etc.) | Supported | aws-cli |
 | Object versioning (list versions, delete version) | Supported (non-current delete) | aws-cli |
 | Object ACLs / canned ACL grants | Not supported | — |
-| Object Lock / legal hold | Not supported | — |
+| Object Lock / legal hold | Supported (subset) | integration |
 
 ## Encryption
 
@@ -81,7 +81,7 @@ Configure virtual-hosted requests with `MAXIO_SERVER_HOST` / `--server-host`. Si
 | SSE-C + range reads | Supported | aws-cli |
 | SSE-C → SSE-S3 re-encryption on copy | Supported | aws-cli |
 | Bucket default encryption | Supported | aws-cli |
-| SSE-KMS (`aws:kms`) | Not supported (P3-35 planned) | — |
+| SSE-KMS (`aws:kms`) | Supported when `MAXIO_KMS_MASTER_KEY` set | integration |
 
 ## Bucket policies (v1)
 
@@ -92,7 +92,7 @@ JSON policies via `?policy` with a restricted subset:
 | `Effect: Allow` only | Supported | integration |
 | `Principal: *` | Supported | integration |
 | `s3:GetObject`, `s3:ListBucket` | Supported | integration |
-| `Effect: Deny`, conditions, IAM principals | Not supported (P3-28) | — |
+| `Effect: Deny`, conditions, IAM principals | Supported (v2 evaluator) | integration |
 
 See [bucket policy evaluation](plans/2026-06-28-bucket-policy-evaluation.md).
 
@@ -109,7 +109,11 @@ See [bucket policy evaluation](plans/2026-06-28-bucket-policy-evaluation.md).
 
 | Feature | Status | Backlog |
 |---------|--------|---------|
-| S3 event notifications (webhooks) | Not supported | P3-27 |
+| S3 event notifications (webhooks) | Supported (internal URLs) | integration |
+| S3 server access logging | Supported (`?logging`) | integration |
+| Multi-tenancy (`tenant_id` on buckets/credentials) | Supported | integration |
+| Object lock / retention / legal hold | Supported (subset) | integration |
+| Lifecycle transitions & non-current expiry | Supported (v2 fields) | integration |
 | IAM users / roles / STS | Not supported | — |
 | Replication / CRR | Not supported | P3-09+ (deferred) |
 | S3 Select / Glacier tiers | Not supported | — |

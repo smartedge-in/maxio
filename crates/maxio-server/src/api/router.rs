@@ -6,7 +6,7 @@ use axum::{
 };
 use http::StatusCode;
 
-use crate::server::AppState;
+use crate::app_state::AppState;
 
 use super::{bucket, list, object};
 

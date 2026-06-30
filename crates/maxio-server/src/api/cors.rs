@@ -1,7 +1,7 @@
 use axum::{body::Body, extract::Request, middleware::Next, response::Response};
 use http::{HeaderMap, HeaderValue, Method, StatusCode};
 
-use crate::{server::AppState, storage::CorsRule};
+use crate::{app_state::AppState, storage::CorsRule};
 
 /// Extract bucket name from the request path.
 /// Returns None for /api/*, /ui/*, and root /.
@@ -82,39 +82,44 @@ pub async fn cors_middleware(
     request: Request,
     next: Next,
 ) -> Response {
-    // If no Origin header, not a CORS request — pass through.
+    with_bucket_cors(&state, request, |req| next.run(req)).await
+}
+
+/// Run `handler` with bucket CORS preflight handling and response headers.
+pub async fn with_bucket_cors<F, Fut>(state: &AppState, request: Request, handler: F) -> Response
+where
+    F: FnOnce(Request) -> Fut,
+    Fut: std::future::Future<Output = Response>,
+{
     let origin = match request
         .headers()
         .get("origin")
         .and_then(|v| v.to_str().ok())
     {
         Some(o) => o.to_string(),
-        None => return next.run(request).await,
+        None => return handler(request).await,
     };
 
     let path = request.uri().path().to_string();
     let bucket = match extract_bucket_from_path(&path) {
         Some(b) => b.to_string(),
-        None => return next.run(request).await,
+        None => return handler(request).await,
     };
 
-    // Load CORS rules for this bucket.
     let rules = match state.storage.get_bucket_cors(&bucket).await {
         Ok(Some(rules)) => rules,
         _ => {
-            // No CORS config or storage error — deny preflight, pass through for normal requests.
             if request.method() == Method::OPTIONS {
                 return Response::builder()
                     .status(StatusCode::FORBIDDEN)
                     .body(Body::empty())
                     .unwrap();
             }
-            return next.run(request).await;
+            return handler(request).await;
         }
     };
 
     if request.method() == Method::OPTIONS {
-        // Preflight request: check Access-Control-Request-Method + Origin.
         let request_method = request
             .headers()
             .get("access-control-request-method")
@@ -123,7 +128,6 @@ pub async fn cors_middleware(
             .to_string();
 
         if let Some(rule) = find_matching_rule(&rules, &origin, &request_method) {
-            // Validate Access-Control-Request-Headers if present.
             let request_headers_ok = request
                 .headers()
                 .get("access-control-request-headers")
@@ -151,16 +155,12 @@ pub async fn cors_middleware(
             .unwrap();
     }
 
-    // Normal request: find matching rule for actual method.
     let method_str = request.method().as_str().to_string();
     let rule_match = find_matching_rule(&rules, &origin, &method_str).cloned();
-
-    let mut response = next.run(request).await;
-
+    let mut response = handler(request).await;
     if let Some(rule) = rule_match {
         apply_cors_headers(response.headers_mut(), &rule, &origin);
     }
-
     response
 }
 

@@ -1,18 +1,18 @@
 use std::collections::{BTreeSet, HashMap};
 
 use axum::{
-    Extension,
     body::Body,
     extract::{Path, Query, State},
     response::Response,
 };
 use http::{HeaderMap, StatusCode};
 
-use super::virtual_host::{VirtualHostContext, resolve_bucket, virtual_host_object_key};
+use super::request_context::S3RequestContext;
+use super::virtual_host::{resolve_bucket, virtual_host_object_key};
 
 use super::multipart;
+use crate::app_state::AppState;
 use crate::error::S3Error;
-use crate::server::AppState;
 use crate::storage::ObjectMeta;
 use crate::xml::{response::to_xml, types::*};
 
@@ -20,21 +20,23 @@ pub async fn handle_bucket_get(
     State(state): State<AppState>,
     Path(path_bucket): Path<String>,
     Query(params): Query<HashMap<String, String>>,
-    vhost: Option<Extension<VirtualHostContext>>,
+    ctx: S3RequestContext,
     headers: HeaderMap,
 ) -> Result<Response<Body>, S3Error> {
-    if let Some(key) = virtual_host_object_key(&params, vhost.as_ref()) {
-        let bucket = resolve_bucket(vhost.as_ref().map(|Extension(c)| c), &path_bucket);
+    let vhost_ref = ctx.vhost.as_ref();
+    if let Some(key) = virtual_host_object_key(&params, vhost_ref) {
+        let bucket = resolve_bucket(vhost_ref, &path_bucket);
         return super::object::get_object(
             State(state),
             Path((bucket, key)),
             Query(HashMap::new()),
             headers,
+            ctx,
         )
         .await;
     }
 
-    let bucket = resolve_bucket(vhost.as_ref().map(|Extension(c)| c), &path_bucket);
+    let bucket = resolve_bucket(vhost_ref, &path_bucket);
 
     tracing::debug!("GET /{} params={:?}", bucket, params);
 
@@ -68,8 +70,20 @@ pub async fn handle_bucket_get(
         return super::bucket::get_bucket_lifecycle(state, bucket).await;
     }
 
+    if params.contains_key("object-lock") {
+        return super::bucket::get_bucket_object_lock(state, bucket).await;
+    }
+
     if params.contains_key("erasure") {
         return super::bucket::get_bucket_erasure(state, bucket).await;
+    }
+
+    if params.contains_key("logging") {
+        return super::bucket::get_bucket_logging(state, bucket).await;
+    }
+
+    if params.contains_key("notification") {
+        return super::bucket::get_bucket_notification(state, bucket).await;
     }
 
     if params.contains_key("versions") {

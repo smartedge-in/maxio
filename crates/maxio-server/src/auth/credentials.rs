@@ -1,5 +1,6 @@
 //! Multi-credential store for S3 authentication (P1-10 phase 1).
 
+use crate::auth::tenant::configured_default_tenant;
 use crate::config::Config;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,10 +18,24 @@ pub struct CredentialEntry {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    /// Keycloak/OIDC `groups` claims for bucket policy `jwt:groups` conditions (P3-38).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jwt_groups: Vec<String>,
+    /// Keycloak/OIDC `roles` claims for bucket policy `jwt:roles` conditions (P3-38).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jwt_roles: Vec<String>,
 }
 
 fn default_enabled() -> bool {
     true
+}
+
+fn assign_default_tenant(entry: &mut CredentialEntry, default_tenant: &str) {
+    if entry.tenant_id.as_deref().is_none_or(str::is_empty) {
+        entry.tenant_id = Some(default_tenant.to_string());
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -38,25 +53,29 @@ impl CredentialStore {
     /// Bootstrap from server config and optional on-disk credential file.
     pub async fn load(data_dir: &str, config: &Config) -> anyhow::Result<Self> {
         let mut by_access_key = HashMap::new();
+        let default_tenant = configured_default_tenant(config).to_string();
 
-        by_access_key.insert(
-            config.access_key.clone(),
-            CredentialEntry {
-                access_key: config.access_key.clone(),
-                secret_key: config.secret_key.clone(),
-                enabled: true,
-                description: Some("server bootstrap credential".into()),
-            },
-        );
+        let mut bootstrap = CredentialEntry {
+            access_key: config.access_key.clone(),
+            secret_key: config.secret_key.clone(),
+            enabled: true,
+            description: Some("server bootstrap credential".into()),
+            tenant_id: None,
+            jwt_groups: Vec::new(),
+            jwt_roles: Vec::new(),
+        };
+        assign_default_tenant(&mut bootstrap, &default_tenant);
+        by_access_key.insert(config.access_key.clone(), bootstrap);
 
         let path = format!("{data_dir}/{CREDENTIALS_FILE}");
         if let Ok(raw) = fs::read_to_string(&path).await {
             let file: CredentialsFile =
                 serde_json::from_str(&raw).map_err(|e| anyhow::anyhow!("parse {path}: {e}"))?;
-            for entry in file.credentials {
+            for mut entry in file.credentials {
                 if entry.access_key.is_empty() || entry.secret_key.is_empty() {
                     continue;
                 }
+                assign_default_tenant(&mut entry, &default_tenant);
                 by_access_key.insert(entry.access_key.clone(), entry);
             }
         }
@@ -94,6 +113,9 @@ impl CredentialStore {
                 secret_key: secret_key.to_string(),
                 enabled: true,
                 description: None,
+                tenant_id: Some(crate::auth::tenant::DEFAULT_TENANT.to_string()),
+                jwt_groups: Vec::new(),
+                jwt_roles: Vec::new(),
             },
         );
         Self { by_access_key }
@@ -103,6 +125,7 @@ impl CredentialStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::tenant::credential_tenant_id;
     use tempfile::TempDir;
 
     fn test_config() -> Config {
@@ -149,6 +172,8 @@ mod tests {
             keycloak_skip_tls_verify: false,
             keycloak_jwks_url: None,
             keycloak_issuer: None,
+            default_tenant: "default".into(),
+            allow_external_webhooks: false,
         }
     }
 
@@ -169,6 +194,40 @@ mod tests {
         assert!(store.lookup("user2").is_some());
         assert!(!store.is_empty());
         assert_eq!(store.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn assigns_default_tenant_to_bootstrap_and_file_credentials() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        fs::write(
+            format!("{dir}/{CREDENTIALS_FILE}"),
+            r#"{"credentials":[{"access_key":"tenant-user","secret_key":"secret","enabled":true}]}"#,
+        )
+        .await
+        .unwrap();
+
+        let store = CredentialStore::load(dir, &test_config()).await.unwrap();
+        let bootstrap = store.lookup("primary").unwrap();
+        assert_eq!(credential_tenant_id(bootstrap, "default"), "default");
+        let file_cred = store.lookup("tenant-user").unwrap();
+        assert_eq!(credential_tenant_id(file_cred, "default"), "default");
+    }
+
+    #[tokio::test]
+    async fn preserves_explicit_tenant_on_file_credentials() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        fs::write(
+            format!("{dir}/{CREDENTIALS_FILE}"),
+            r#"{"credentials":[{"access_key":"acme","secret_key":"secret","enabled":true,"tenant_id":"acme-corp"}]}"#,
+        )
+        .await
+        .unwrap();
+
+        let store = CredentialStore::load(dir, &test_config()).await.unwrap();
+        let cred = store.lookup("acme").unwrap();
+        assert_eq!(cred.tenant_id.as_deref(), Some("acme-corp"));
     }
 
     #[tokio::test]
@@ -218,6 +277,29 @@ mod tests {
             .await
             .unwrap();
         assert!(CredentialStore::load(dir, &test_config()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn credentials_file_parses_jwt_claims_for_policy() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        fs::write(
+            format!("{dir}/{CREDENTIALS_FILE}"),
+            r#"{"credentials":[{
+                "access_key":"oidc-user",
+                "secret_key":"secret",
+                "enabled":true,
+                "jwt_groups":["storage-admins"],
+                "jwt_roles":["maxio-write"]
+            }]}"#,
+        )
+        .await
+        .unwrap();
+
+        let store = CredentialStore::load(dir, &test_config()).await.unwrap();
+        let cred = store.lookup("oidc-user").expect("credential");
+        assert_eq!(cred.jwt_groups, vec!["storage-admins"]);
+        assert_eq!(cred.jwt_roles, vec!["maxio-write"]);
     }
 
     #[tokio::test]

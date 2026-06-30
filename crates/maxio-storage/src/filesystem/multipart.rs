@@ -153,6 +153,9 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: Some(part_sizes),
             encryption: None,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
 
         let meta_path = self.meta_path(bucket, key);
@@ -228,6 +231,7 @@ impl FilesystemStorage {
                 })?;
                 EncryptionRequest::sse_c(ck)
             }
+            EncryptionMode::SseKms => EncryptionRequest::sse_kms(upload_spec.kms_key_id.clone()),
         };
         let enc_meta = self
             .prepare_encryption(&req)
@@ -413,6 +417,9 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: Some(part_sizes),
             encryption: Some(enc_meta),
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
         if let Some(em) = object_meta.encryption.as_mut() {
             em.sidecar_mac.clear();
@@ -482,6 +489,9 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: None,
             encryption: None,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
 
         let meta_path = folder_dir.join(".folder.meta.json");
@@ -530,6 +540,16 @@ impl FilesystemStorage {
                 spec.upload_dek_wrapped = Some(b64.encode(&wrapped));
                 spec.upload_dek_wrap_nonce = Some(b64.encode(wrap_nonce));
                 spec.upload_dek_key_id = Some(kid);
+            } else if matches!(spec.mode, EncryptionMode::SseKms) {
+                let kms = self.kms.as_ref().ok_or_else(|| {
+                    StorageError::EncryptionError("SSE-KMS not configured".into())
+                })?;
+                let generated = kms
+                    .generate_data_key(spec.kms_key_id.as_deref())
+                    .map_err(|e| StorageError::EncryptionError(e.to_string()))?;
+                spec.upload_dek_wrapped = Some(b64.encode(&generated.ciphertext));
+                spec.upload_dek_wrap_nonce = Some(b64.encode(generated.wrap_nonce));
+                spec.kms_key_id = Some(generated.kms_key_id);
             }
             Some(spec)
         } else {
@@ -849,6 +869,7 @@ impl FilesystemStorage {
                         })?;
                         EncryptionRequest::sse_c(ck)
                     }
+                    EncryptionMode::SseKms => EncryptionRequest::sse_kms(spec.kms_key_id.clone()),
                 };
                 Some(
                     self.prepare_encryption(&req)
@@ -1019,6 +1040,9 @@ impl FilesystemStorage {
             tags: None,
             part_sizes: Some(part_sizes),
             encryption: enc_meta_opt,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         };
         if object_meta.encryption.is_some() {
             if let Some(em) = object_meta.encryption.as_mut() {

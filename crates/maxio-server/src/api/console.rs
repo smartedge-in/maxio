@@ -13,10 +13,10 @@ use futures::TryStreamExt;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
+use crate::app_state::AppState;
 use crate::audit::audit_middleware;
 use crate::auth::keycloak::{KeycloakError, KeycloakTokenResponse};
 use crate::auth::signature_v4;
-use crate::server::AppState;
 use crate::storage::backend::StorageBackend;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -534,6 +534,12 @@ pub async fn create_bucket(
         bucket_policy: None,
         erasure_coding: None,
         lifecycle_rules: None,
+        tenant_id: None,
+        logging_target_bucket: None,
+        logging_target_prefix: None,
+        notification_config: None,
+        object_lock_enabled: false,
+        object_lock_config: None,
     };
 
     match state.storage.create_bucket(&meta).await {
@@ -1121,6 +1127,7 @@ pub async fn set_encryption(
     let result = if body.enabled {
         let cfg = crate::storage::BucketEncryptionConfig {
             sse_algorithm: "AES256".to_string(),
+            kms_key_id: None,
         };
         state.storage.put_bucket_encryption(&bucket, cfg).await
     } else {
@@ -1357,10 +1364,17 @@ mod tests {
     async fn test_storage(data_dir: &str) -> Result<FilesystemStorage, Box<dyn std::error::Error>> {
         let keyring = Arc::new(Keyring::load(data_dir, None).await?);
         let quota = QuotaLimits::from_config(0, 0);
-        Ok(
-            FilesystemStorage::new(data_dir, false, 10 * 1024 * 1024, 0, keyring, quota, false)
-                .await?,
+        Ok(FilesystemStorage::new(
+            data_dir,
+            false,
+            10 * 1024 * 1024,
+            0,
+            keyring,
+            None,
+            quota,
+            false,
         )
+        .await?)
     }
 
     async fn create_test_bucket(storage: &FilesystemStorage, bucket: &str) {
@@ -1377,6 +1391,12 @@ mod tests {
                 bucket_policy: None,
                 erasure_coding: None,
                 lifecycle_rules: None,
+                tenant_id: None,
+                logging_target_bucket: None,
+                logging_target_prefix: None,
+                notification_config: None,
+                object_lock_enabled: false,
+                object_lock_config: None,
             })
             .await
             .unwrap();

@@ -1,6 +1,6 @@
 //! Authenticated admin HTTP API (P2-13).
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -13,10 +13,11 @@ use maxio_common::admin::{
 use serde::Serialize;
 use serde_json::json;
 
+use crate::app_state::AppState;
 use crate::auth::principal::AuthPrincipal;
+use crate::auth::tenant::{ensure_bucket_access, filter_buckets_for_access};
 use crate::config::Config;
 use crate::proxy::client_ip_from_request;
-use crate::server::AppState;
 use crate::storage::BucketMeta;
 use crate::storage::keys;
 use crate::storage::quota::disk_space_bytes;
@@ -258,9 +259,16 @@ struct BucketsResponse {
 
 async fn list_buckets(
     State(state): State<AppState>,
+    Extension(principal): Extension<AuthPrincipal>,
 ) -> Result<Json<BucketsResponse>, AdminApiError> {
     let mut buckets = Vec::new();
-    for meta in state.storage.list_buckets().await? {
+    let metas = filter_buckets_for_access(
+        state.storage.list_buckets().await?,
+        &principal.access_key,
+        &state.credentials,
+        &state.config,
+    );
+    for meta in metas {
         let object_count = state.storage.count_bucket_objects(&meta.name).await?;
         buckets.push(BucketSummary {
             name: meta.name,
@@ -280,15 +288,23 @@ struct BucketDetailResponse {
 
 async fn head_bucket(
     State(state): State<AppState>,
+    Extension(principal): Extension<AuthPrincipal>,
     Path(name): Path<String>,
 ) -> Result<Json<BucketDetailResponse>, AdminApiError> {
-    let buckets = state.storage.list_buckets().await?;
-    let meta = buckets
-        .into_iter()
-        .find(|b| b.name == name)
-        .ok_or(AdminApiError::NotFound(format!(
-            "bucket '{name}' not found"
-        )))?;
+    let meta = match ensure_bucket_access(&state, &principal.access_key, &name).await {
+        Ok(meta) => meta,
+        Err(e)
+            if matches!(
+                e.code,
+                crate::error::S3ErrorCode::AccessDenied | crate::error::S3ErrorCode::NoSuchBucket
+            ) =>
+        {
+            return Err(AdminApiError::NotFound(format!(
+                "bucket '{name}' not found"
+            )));
+        }
+        Err(e) => return Err(AdminApiError::Internal(anyhow::anyhow!("{}", e.message))),
+    };
     let object_count = state.storage.count_bucket_objects(&name).await?;
     Ok(Json(BucketDetailResponse {
         bucket: meta,
@@ -415,6 +431,8 @@ mod tests {
             keycloak_skip_tls_verify: false,
             keycloak_jwks_url: None,
             keycloak_issuer: None,
+            default_tenant: "default".into(),
+            allow_external_webhooks: false,
         }
     }
 

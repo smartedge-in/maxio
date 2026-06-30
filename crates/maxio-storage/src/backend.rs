@@ -8,12 +8,14 @@ use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::filesystem::AccessLogEntry;
 use crate::filesystem::FilesystemStorage;
 use crate::keys::Keyring;
+use crate::kms::KmsBackend;
 use crate::{
-    BucketMeta, ByteStream, ChecksumAlgorithm, CorsRule, DeleteResult, EncryptionRequest,
-    LifecycleRule, MultipartUploadMeta, ObjectMeta, PartMeta, PutResult, StorageError,
-    UploadEncryptionSpec,
+    BucketMeta, BucketNotificationConfig, ByteStream, ChecksumAlgorithm, CorsRule, DeleteResult,
+    EncryptionRequest, LegalHoldStatus, LifecycleRule, MultipartUploadMeta, ObjectLockConfig,
+    ObjectLockRetention, ObjectMeta, PartMeta, PutResult, StorageError, UploadEncryptionSpec,
 };
 
 /// Shared handle to a storage backend (filesystem today; Raft in P1-17+).
@@ -31,6 +33,7 @@ pub trait StorageBackend: Send + Sync {
 
     fn data_root(&self) -> &Path;
     fn keyring(&self) -> &Arc<Keyring>;
+    fn kms(&self) -> Option<&Arc<dyn KmsBackend>>;
     fn check_upload_start(&self, declared_size: Option<u64>) -> Result<(), StorageError>;
 
     async fn check_readiness(&self) -> Result<(), String>;
@@ -44,6 +47,7 @@ pub trait StorageBackend: Send + Sync {
     async fn list_buckets(&self) -> Result<Vec<BucketMeta>, StorageError>;
     async fn create_bucket(&self, meta: &BucketMeta) -> Result<bool, StorageError>;
     async fn head_bucket(&self, name: &str) -> Result<bool, StorageError>;
+    async fn get_bucket_meta(&self, bucket: &str) -> Result<BucketMeta, StorageError>;
     async fn delete_bucket(&self, name: &str) -> Result<bool, StorageError>;
     async fn is_versioned(&self, bucket: &str) -> Result<bool, StorageError>;
     async fn set_versioning(&self, bucket: &str, enabled: bool) -> Result<(), StorageError>;
@@ -87,6 +91,63 @@ pub trait StorageBackend: Send + Sync {
         bucket: &str,
     ) -> Result<Option<Vec<LifecycleRule>>, StorageError>;
     async fn delete_bucket_lifecycle(&self, bucket: &str) -> Result<(), StorageError>;
+    async fn get_bucket_logging(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<(String, String)>, StorageError>;
+    async fn put_bucket_logging(
+        &self,
+        bucket: &str,
+        target_bucket: &str,
+        target_prefix: &str,
+    ) -> Result<(), StorageError>;
+    async fn delete_bucket_logging(&self, bucket: &str) -> Result<(), StorageError>;
+    async fn get_bucket_notification(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<BucketNotificationConfig>, StorageError>;
+    async fn put_bucket_notification(
+        &self,
+        bucket: &str,
+        config: BucketNotificationConfig,
+    ) -> Result<(), StorageError>;
+    async fn delete_bucket_notification(&self, bucket: &str) -> Result<(), StorageError>;
+    async fn deliver_access_log(&self, entry: &AccessLogEntry) -> Result<(), StorageError>;
+    async fn put_bucket_object_lock(
+        &self,
+        bucket: &str,
+        config: ObjectLockConfig,
+    ) -> Result<(), StorageError>;
+    async fn get_bucket_object_lock(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<ObjectLockConfig>, StorageError>;
+    async fn put_object_retention(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        retention: ObjectLockRetention,
+    ) -> Result<(), StorageError>;
+    async fn get_object_retention(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<ObjectLockRetention, StorageError>;
+    async fn put_object_legal_hold(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        status: LegalHoldStatus,
+    ) -> Result<(), StorageError>;
+    async fn get_object_legal_hold(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<LegalHoldStatus, StorageError>;
 
     // --- Objects ---
 
@@ -220,6 +281,10 @@ impl StorageBackend for FilesystemStorage {
         self.keyring()
     }
 
+    fn kms(&self) -> Option<&Arc<dyn KmsBackend>> {
+        self.kms_backend()
+    }
+
     fn check_upload_start(&self, declared_size: Option<u64>) -> Result<(), StorageError> {
         self.check_upload_start(declared_size)
     }
@@ -254,6 +319,10 @@ impl StorageBackend for FilesystemStorage {
 
     async fn head_bucket(&self, name: &str) -> Result<bool, StorageError> {
         self.head_bucket(name).await
+    }
+
+    async fn get_bucket_meta(&self, bucket: &str) -> Result<BucketMeta, StorageError> {
+        self.get_bucket_meta(bucket).await
     }
 
     async fn delete_bucket(&self, name: &str) -> Result<bool, StorageError> {
@@ -358,6 +427,105 @@ impl StorageBackend for FilesystemStorage {
 
     async fn delete_bucket_lifecycle(&self, bucket: &str) -> Result<(), StorageError> {
         self.delete_bucket_lifecycle(bucket).await
+    }
+
+    async fn get_bucket_logging(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<(String, String)>, StorageError> {
+        self.get_bucket_logging(bucket).await
+    }
+
+    async fn put_bucket_logging(
+        &self,
+        bucket: &str,
+        target_bucket: &str,
+        target_prefix: &str,
+    ) -> Result<(), StorageError> {
+        self.put_bucket_logging(bucket, target_bucket, target_prefix)
+            .await
+    }
+
+    async fn delete_bucket_logging(&self, bucket: &str) -> Result<(), StorageError> {
+        self.delete_bucket_logging(bucket).await
+    }
+
+    async fn get_bucket_notification(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<BucketNotificationConfig>, StorageError> {
+        self.get_bucket_notification(bucket).await
+    }
+
+    async fn put_bucket_notification(
+        &self,
+        bucket: &str,
+        config: BucketNotificationConfig,
+    ) -> Result<(), StorageError> {
+        self.put_bucket_notification(bucket, config).await
+    }
+
+    async fn delete_bucket_notification(&self, bucket: &str) -> Result<(), StorageError> {
+        self.delete_bucket_notification(bucket).await
+    }
+
+    async fn deliver_access_log(&self, entry: &AccessLogEntry) -> Result<(), StorageError> {
+        self.deliver_access_log(entry).await
+    }
+
+    async fn put_bucket_object_lock(
+        &self,
+        bucket: &str,
+        config: ObjectLockConfig,
+    ) -> Result<(), StorageError> {
+        self.put_bucket_object_lock(bucket, config).await
+    }
+
+    async fn get_bucket_object_lock(
+        &self,
+        bucket: &str,
+    ) -> Result<Option<ObjectLockConfig>, StorageError> {
+        self.get_bucket_object_lock(bucket).await
+    }
+
+    async fn put_object_retention(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        retention: ObjectLockRetention,
+    ) -> Result<(), StorageError> {
+        self.put_object_retention(bucket, key, version_id, retention)
+            .await
+    }
+
+    async fn get_object_retention(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<ObjectLockRetention, StorageError> {
+        self.get_object_retention(bucket, key, version_id).await
+    }
+
+    async fn put_object_legal_hold(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        status: LegalHoldStatus,
+    ) -> Result<(), StorageError> {
+        self.put_object_legal_hold(bucket, key, version_id, status)
+            .await
+    }
+
+    async fn get_object_legal_hold(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<LegalHoldStatus, StorageError> {
+        self.get_object_legal_hold(bucket, key, version_id).await
     }
 
     async fn put_object(
@@ -572,6 +740,7 @@ mod tests {
             1024 * 1024,
             0,
             keyring,
+            None,
             QuotaLimits::from_config(0, 0),
             false,
         )

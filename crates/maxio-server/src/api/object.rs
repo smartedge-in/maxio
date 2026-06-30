@@ -9,15 +9,17 @@ use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio_util::io::ReaderStream;
 
+use crate::api::request_context::S3RequestContext;
+use crate::app_state::AppState;
 use crate::error::S3Error;
-use crate::server::AppState;
+use crate::proxy::client_ip_from_headers;
 use crate::storage::{
-    BucketEncryptionConfig, ChecksumAlgorithm, EncryptionMode, EncryptionRequest, StorageError,
-    UploadEncryptionSpec,
+    BucketEncryptionConfig, ChecksumAlgorithm, EncryptionMode, EncryptionRequest, LegalHoldStatus,
+    ObjectLockMode, ObjectLockRetention, StorageError, UploadEncryptionSpec,
 };
 use crate::xml::{
     response::to_xml,
-    types::{CopyObjectResult, CopyPartResult, Tag, TagSet, Tagging},
+    types::{CopyObjectResult, CopyPartResult, LegalHoldXml, RetentionXml, Tag, TagSet, Tagging},
 };
 
 use super::multipart;
@@ -93,6 +95,13 @@ pub(crate) fn extract_sse_request(
     {
         return match sse {
             "AES256" => Ok(Some(EncryptionRequest::sse_s3())),
+            "aws:kms" => {
+                let kms_key_id = headers
+                    .get("x-amz-server-side-encryption-aws-kms-key-id")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                Ok(Some(EncryptionRequest::sse_kms(kms_key_id)))
+            }
             _ => Err(S3Error::invalid_encryption_algorithm()),
         };
     }
@@ -166,8 +175,12 @@ pub(crate) fn extract_customer_key(headers: &HeaderMap) -> Result<Option<[u8; 32
 }
 
 /// Build an EncryptionRequest from a bucket-level default encryption config.
-pub(crate) fn encryption_from_bucket_default(_cfg: &BucketEncryptionConfig) -> EncryptionRequest {
-    EncryptionRequest::sse_s3()
+pub(crate) fn encryption_from_bucket_default(cfg: &BucketEncryptionConfig) -> EncryptionRequest {
+    if cfg.sse_algorithm == "aws:kms" {
+        EncryptionRequest::sse_kms(cfg.kms_key_id.clone())
+    } else {
+        EncryptionRequest::sse_s3()
+    }
 }
 
 /// Convert an EncryptionRequest into the compact UploadEncryptionSpec that is
@@ -184,6 +197,7 @@ pub(crate) fn spec_from_request(req: &EncryptionRequest) -> UploadEncryptionSpec
         upload_dek_wrapped: None,
         upload_dek_wrap_nonce: None,
         upload_dek_key_id: None,
+        kms_key_id: req.kms_key_id.clone(),
         // Populated inside `create_multipart_upload` alongside the wrapped DEK.
         upload_nonce_prefix: String::new(),
     }
@@ -208,6 +222,9 @@ pub(crate) fn add_sse_headers(
                         md5.as_str(),
                     );
                 }
+            }
+            EncryptionMode::SseKms => {
+                builder = builder.header("x-amz-server-side-encryption", "aws:kms");
             }
         }
     }
@@ -254,8 +271,16 @@ pub async fn put_object(
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
+    ctx: S3RequestContext,
     body: Body,
 ) -> Result<Response<Body>, S3Error> {
+    if params.contains_key("retention") {
+        return put_object_retention(State(state), Path((bucket, key)), Query(params), body).await;
+    }
+    if params.contains_key("legal-hold") {
+        return put_object_legal_hold(State(state), Path((bucket, key)), Query(params), body).await;
+    }
+
     if params.contains_key("uploadId") && headers.contains_key("x-amz-copy-source") {
         return upload_part_copy(State(state), Path((bucket, key)), Query(params), headers).await;
     }
@@ -284,6 +309,19 @@ pub async fn put_object(
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
         Err(e) => return Err(S3Error::internal(e)),
     }
+
+    let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+    super::request_context::enforce_s3_bucket_gates(
+        &state,
+        &ctx,
+        "PUT",
+        &bucket,
+        Some(&key),
+        &params,
+        &headers,
+        &client_ip,
+    )
+    .await?;
 
     let content_type = headers
         .get("content-type")
@@ -350,6 +388,8 @@ pub async fn put_object(
         .await
         .map_err(crate::error::map_storage_upload_error)?;
 
+    crate::events::emit_object_created(&state, &bucket, &key, result.size, &result.etag).await;
+
     if state.config.metrics_enabled {
         state.metrics.record_upload_bytes(result.size);
     }
@@ -374,6 +414,9 @@ pub async fn put_object(
             if let Some(md5) = applied_ck_md5 {
                 builder = builder.header("x-amz-server-side-encryption-customer-key-md5", md5);
             }
+        }
+        Some(EncryptionMode::SseKms) => {
+            builder = builder.header("x-amz-server-side-encryption", "aws:kms");
         }
         None => {}
     }
@@ -782,7 +825,28 @@ pub async fn get_object(
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
+    ctx: S3RequestContext,
 ) -> Result<Response<Body>, S3Error> {
+    let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+    super::request_context::enforce_s3_bucket_gates(
+        &state,
+        &ctx,
+        "GET",
+        &bucket,
+        Some(&key),
+        &params,
+        &headers,
+        &client_ip,
+    )
+    .await?;
+
+    if params.contains_key("retention") {
+        return get_object_retention(State(state), Path((bucket, key)), Query(params)).await;
+    }
+    if params.contains_key("legal-hold") {
+        return get_object_legal_hold(State(state), Path((bucket, key)), Query(params)).await;
+    }
+
     if params.contains_key("tagging") {
         return get_object_tagging(State(state), Path((bucket, key))).await;
     }
@@ -937,7 +1001,21 @@ pub async fn head_object(
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
+    ctx: S3RequestContext,
 ) -> Result<Response<Body>, S3Error> {
+    let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+    super::request_context::enforce_s3_bucket_gates(
+        &state,
+        &ctx,
+        "HEAD",
+        &bucket,
+        Some(&key),
+        &params,
+        &headers,
+        &client_ip,
+    )
+    .await?;
+
     let meta = if let Some(version_id) = params.get("versionId") {
         state
             .storage
@@ -1022,6 +1100,8 @@ pub async fn delete_object(
     State(state): State<AppState>,
     Path((bucket, key)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    ctx: S3RequestContext,
 ) -> Result<Response<Body>, S3Error> {
     if params.contains_key("tagging") {
         return delete_object_tagging(State(state), Path((bucket, key))).await;
@@ -1037,6 +1117,19 @@ pub async fn delete_object(
         Ok(false) => return Err(S3Error::no_such_bucket(&bucket)),
         Err(e) => return Err(S3Error::internal(e)),
     }
+
+    let client_ip = client_ip_from_headers(&headers, &state.trusted_proxies);
+    super::request_context::enforce_s3_bucket_gates(
+        &state,
+        &ctx,
+        "DELETE",
+        &bucket,
+        Some(&key),
+        &params,
+        &headers,
+        &client_ip,
+    )
+    .await?;
 
     // Permanent version deletion
     if let Some(version_id) = params.get("versionId") {
@@ -1061,7 +1154,9 @@ pub async fn delete_object(
         .storage
         .delete_object(&bucket, &key)
         .await
-        .map_err(S3Error::internal)?;
+        .map_err(crate::error::map_storage_object_error)?;
+
+    crate::events::emit_object_removed(&state, &bucket, &key).await;
 
     let mut builder = Response::builder().status(StatusCode::NO_CONTENT);
     if let Some(vid) = &result.version_id {
@@ -1378,6 +1473,153 @@ pub async fn delete_object_tagging(
         .unwrap())
 }
 
+fn parse_lock_mode(raw: &str) -> Result<ObjectLockMode, S3Error> {
+    match raw.to_ascii_uppercase().as_str() {
+        "GOVERNANCE" => Ok(ObjectLockMode::Governance),
+        "COMPLIANCE" => Ok(ObjectLockMode::Compliance),
+        _ => Err(S3Error::invalid_argument(
+            "invalid ObjectLock retention Mode",
+        )),
+    }
+}
+
+fn retention_from_xml(xml: &RetentionXml) -> Result<ObjectLockRetention, S3Error> {
+    let mode = parse_lock_mode(&xml.mode)?;
+    let retain_until_date = if let Some(ref until) = xml.retain_until_date {
+        until.clone()
+    } else if let Some(days) = xml.days {
+        let until = chrono::Utc::now() + chrono::Duration::days(days as i64);
+        until.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    } else {
+        return Err(S3Error::invalid_argument(
+            "Retention must specify RetainUntilDate or Days",
+        ));
+    };
+    Ok(ObjectLockRetention {
+        mode,
+        retain_until_date,
+    })
+}
+
+async fn put_object_retention(
+    State(state): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+    body: Body,
+) -> Result<Response<Body>, S3Error> {
+    let body_bytes = axum::body::to_bytes(body, 64 * 1024)
+        .await
+        .map_err(S3Error::internal)?;
+    let retention_xml: RetentionXml =
+        quick_xml::de::from_str(&String::from_utf8_lossy(&body_bytes))
+            .map_err(|_| S3Error::malformed_xml())?;
+    let retention = retention_from_xml(&retention_xml)?;
+    let version_id = params.get("versionId").map(|s| s.as_str());
+
+    state
+        .storage
+        .put_object_retention(&bucket, &key, version_id, retention)
+        .await
+        .map_err(crate::error::map_storage_object_error)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .unwrap())
+}
+
+async fn get_object_retention(
+    State(state): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, S3Error> {
+    let version_id = params.get("versionId").map(|s| s.as_str());
+    let retention = state
+        .storage
+        .get_object_retention(&bucket, &key, version_id)
+        .await
+        .map_err(crate::error::map_storage_object_error)?;
+
+    let mode = match retention.mode {
+        ObjectLockMode::Governance => "GOVERNANCE",
+        ObjectLockMode::Compliance => "COMPLIANCE",
+    };
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+         <Retention><Mode>{mode}</Mode>\
+         <RetainUntilDate>{}</RetainUntilDate></Retention>",
+        retention.retain_until_date
+    );
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/xml")
+        .body(Body::from(xml))
+        .unwrap())
+}
+
+async fn put_object_legal_hold(
+    State(state): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+    body: Body,
+) -> Result<Response<Body>, S3Error> {
+    let body_bytes = axum::body::to_bytes(body, 64 * 1024)
+        .await
+        .map_err(S3Error::internal)?;
+    let hold: LegalHoldXml = quick_xml::de::from_str(&String::from_utf8_lossy(&body_bytes))
+        .map_err(|_| S3Error::malformed_xml())?;
+    let status = match hold.status.to_ascii_uppercase().as_str() {
+        "ON" => LegalHoldStatus::On,
+        "OFF" => LegalHoldStatus::Off,
+        _ => {
+            return Err(S3Error::invalid_argument(
+                "LegalHold Status must be ON or OFF",
+            ));
+        }
+    };
+    let version_id = params.get("versionId").map(|s| s.as_str());
+
+    state
+        .storage
+        .put_object_legal_hold(&bucket, &key, version_id, status)
+        .await
+        .map_err(crate::error::map_storage_object_error)?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .unwrap())
+}
+
+async fn get_object_legal_hold(
+    State(state): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, S3Error> {
+    let version_id = params.get("versionId").map(|s| s.as_str());
+    let status = state
+        .storage
+        .get_object_legal_hold(&bucket, &key, version_id)
+        .await
+        .map_err(crate::error::map_storage_object_error)?;
+
+    let status_str = match status {
+        LegalHoldStatus::On => "ON",
+        LegalHoldStatus::Off => "OFF",
+    };
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+         <LegalHold><Status>{status_str}</Status></LegalHold>"
+    );
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/xml")
+        .body(Body::from(xml))
+        .unwrap())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1398,6 +1640,9 @@ mod tests {
             tags: None,
             part_sizes: None,
             encryption: None,
+            object_lock_mode: None,
+            retain_until_date: None,
+            legal_hold_status: None,
         }
     }
 

@@ -196,6 +196,14 @@ pub struct Config {
     /// Override OIDC issuer URL (default: `{base_url}/realms/{realm}`).
     #[arg(long, env = "MAXIO_KEYCLOAK_ISSUER")]
     pub keycloak_issuer: Option<String>,
+
+    /// Default tenant for credentials and buckets without an explicit `tenant_id`.
+    #[arg(long, env = "MAXIO_DEFAULT_TENANT", default_value = "default")]
+    pub default_tenant: String,
+
+    /// Allow event notification webhooks to target non-RFC1918 / public URLs.
+    #[arg(long, env = "MAXIO_ALLOW_EXTERNAL_WEBHOOKS", default_value = "false")]
+    pub allow_external_webhooks: bool,
 }
 
 impl Config {

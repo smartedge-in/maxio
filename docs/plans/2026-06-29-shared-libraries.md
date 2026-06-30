@@ -2,7 +2,7 @@
 
 ## Status
 
-**In progress (P1-22).** `crates/maxio-common` ships `VERSION`, admin API DTOs, and cluster routing types. `maxio-server`, `maxio-storage`, and `maxio-admin` import shared types. Crate-boundary CI (P3-23) and full `maxio-admin` decoupling (P3-17) remain open.
+**Done (P3-21 / P3-23).** `crates/maxio-common` ships `VERSION`, admin API DTOs, and cluster routing types. `maxio-server`, `maxio-storage`, and `maxio-admin` import shared types. `AppState` lives in `maxio-server/src/app_state.rs` (extracted from `server.rs` to break circular deps). `scripts/check-crate-boundaries.sh` runs in CI via `make crate-boundaries`. `maxio-admin` depends on `maxio-common` + `maxio-storage` only (P3-17).
 
 ## Principle
 
@@ -56,6 +56,8 @@ maxio-ui      — static assets only (P3-16); no Rust shared lib with server
 
 ## Crate boundary enforcement (P3-23)
 
+**CI:** `make crate-boundaries` runs `scripts/check-crate-boundaries.sh` before tests. The same rules are duplicated in `deny.toml` `[bans].deny` for `cargo deny check bans`.
+
 CI policy (cargo-deny `bans` or custom script):
 
 | Rule | Rationale |
@@ -80,5 +82,5 @@ CI policy (cargo-deny `bans` or custom script):
 - [x] `maxio-common` published in workspace with documented allow/deny deps
 - [x] Admin API types shared between server and `maxio-admin` (no JSON shape drift)
 - [ ] `maxio-admin` depends on `common` + `storage` only
-- [ ] CI fails on forbidden crate edges
+- [x] CI fails on forbidden crate edges (`make crate-boundaries`, `deny.toml` bans)
 - [ ] No requirement for UI, server, and storage to share one Rust library beyond this split

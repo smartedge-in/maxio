@@ -6,7 +6,7 @@ use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use http::header;
 
-use crate::server::AppState;
+use crate::app_state::AppState;
 use crate::storage::quota::disk_space_bytes;
 
 const METHODS: [&str; 7] = ["GET", "PUT", "POST", "DELETE", "HEAD", "OPTIONS", "OTHER"];

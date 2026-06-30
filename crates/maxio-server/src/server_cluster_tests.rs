@@ -19,7 +19,7 @@ mod tests {
     use crate::storage::keys::Keyring;
     use crate::storage::quota::QuotaLimits;
 
-    async fn cluster_app_state(tmp: &TempDir, quorum_ok: bool) -> crate::server::AppState {
+    async fn cluster_app_state(tmp: &TempDir, quorum_ok: bool) -> crate::app_state::AppState {
         let data_dir = tmp.path().to_str().unwrap().to_string();
         let keyring = Arc::new(Keyring::load(&data_dir, None).await.unwrap());
         let fs = FilesystemStorage::new(
@@ -28,6 +28,7 @@ mod tests {
             1024 * 1024,
             0,
             keyring,
+            None,
             QuotaLimits::from_config(0, 0),
             false,
         )
@@ -76,6 +77,8 @@ mod tests {
             keycloak_skip_tls_verify: false,
             keycloak_jwks_url: None,
             keycloak_issuer: None,
+            default_tenant: "default".into(),
+            allow_external_webhooks: false,
         };
         let config = Arc::new(config);
         let credentials = Arc::new(
@@ -183,14 +186,14 @@ mod tests {
             1024 * 1024,
             0,
             keyring,
+            None,
             QuotaLimits::from_config(0, 0),
             false,
         )
         .await
         .unwrap();
         let inner = dyn_storage(fs);
-        let peers =
-            parse_storage_peers(&format!("1@{}", addr)).expect("parse mock storage peer");
+        let peers = parse_storage_peers(&format!("1@{}", addr)).expect("parse mock storage peer");
         let cluster_storage = wrap_cluster_storage(inner, StorageRaftClient::new(peers));
 
         let created = cluster_storage
@@ -206,6 +209,12 @@ mod tests {
                 bucket_policy: None,
                 lifecycle_rules: None,
                 erasure_coding: None,
+                tenant_id: None,
+                logging_target_bucket: None,
+                logging_target_prefix: None,
+                notification_config: None,
+                object_lock_enabled: false,
+                object_lock_config: None,
             })
             .await
             .expect("create_bucket");

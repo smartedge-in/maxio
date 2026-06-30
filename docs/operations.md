@@ -72,7 +72,57 @@ Beyond the bootstrap pair, add keys in `<data-dir>/.maxio-credentials.json`:
 }
 ```
 
-Restrict file permissions (`chmod 600`). All enabled keys authenticate to the same global namespace (no per-key IAM scopes in v1). See `docs/plans/2026-06-28-multi-user-credentials.md`.
+Restrict file permissions (`chmod 600`). See `docs/plans/2026-06-28-multi-user-credentials.md`.
+
+## Multi-tenancy
+
+MaxIO supports **static tenant boundaries** on buckets and credentials (P3-29). Each credential belongs to a tenant; S3 and admin APIs only expose buckets in that tenant unless the caller is the **bootstrap admin** (`MAXIO_ACCESS_KEY`) or uses the **admin bearer token** (`MAXIO_ADMIN_TOKEN`), which see all tenants.
+
+### Default tenant
+
+```bash
+export MAXIO_DEFAULT_TENANT="default"   # default if unset
+```
+
+On startup, credentials without `tenant_id` in `.maxio-credentials.json` (including the bootstrap pair) are assigned this tenant. Buckets persisted without `tenant_id` in `.bucket.json` are treated as belonging to the default tenant (migration-safe).
+
+### Per-credential tenant
+
+```json
+{
+  "credentials": [
+    {
+      "access_key": "acme-uploader",
+      "secret_key": "…",
+      "enabled": true,
+      "tenant_id": "acme-corp"
+    }
+  ]
+}
+```
+
+New buckets created by a credential inherit its tenant. `ListBuckets` and object/bucket operations return **only buckets in the same tenant**. Cross-tenant bucket access returns S3 **AccessDenied** (HTTP 403).
+
+### OIDC claims in bucket policies (P3-38)
+
+S3 SigV4 principals do not carry live JWTs. For `jwt:groups` / `jwt:roles` conditions in bucket policies v2, provision matching claim values on the credential record (typically copied from Keycloak at user onboarding):
+
+```json
+{
+  "access_key": "acme-uploader",
+  "secret_key": "…",
+  "enabled": true,
+  "tenant_id": "acme-corp",
+  "jwt_groups": ["storage-admins"],
+  "jwt_roles": ["maxio-write"]
+}
+```
+
+Policy evaluation reads these fields when the access key authenticates the request.
+
+### Admin API
+
+`GET /api/admin/v1/buckets` lists buckets for the authenticated admin credential’s tenant. Bootstrap access key / bearer admin token list **all** buckets.
 
 ## Virtual-hosted-style URLs
 
@@ -864,12 +914,31 @@ export MAXIO_KEYCLOAK_REALM=production
 export MAXIO_KEYCLOAK_CLIENT_ID=maxio-ui
 maxio serve --data-dir /data --port 9000
 ```
-| MaxIO → webhook targets | Optional (P3-27) | Outbound to **internal** URLs | Event notifications (future) |
-| MaxIO → Vault/KMS | Optional (P3-35) | Outbound to **internal** HSM/Vault | SSE-KMS (future) |
+| MaxIO → webhook targets | Optional (P3-27) | Outbound to **internal** URLs only (RFC1918/localhost); set `MAXIO_ALLOW_EXTERNAL_WEBHOOKS=1` to override | S3 event notifications (`ObjectCreated` / `ObjectRemoved`); durable spool in `<data-dir>/.maxio-event-spool/` |
+| MaxIO → Vault/KMS | Optional (P3-35) | Outbound to **internal** HSM/Vault in regulated deployments | SSE-KMS via `MAXIO_KMS_MASTER_KEY` (airgap) or future Vault transit |
 | Build host → crates.io / bun registry | Build-time only | Outbound | **Not on production hosts** |
 | Telemetry / license phone-home | **None** | — | Not implemented |
 
 **Verification:** deploy with egress deny-all; confirm PUT/GET/LIST and `/readyz` succeed. Packet-capture staging clusters to prove no undocumented outbound TCP from MaxIO processes.
+
+## External KMS (SSE-KMS, P3-35)
+
+MaxIO supports S3-compatible **SSE-KMS** (`x-amz-server-side-encryption: aws:kms`) with a pluggable KMS backend. v1 ships **LocalKmsBackend** for airgapped deployments:
+
+```bash
+# 32-byte master key, base64-encoded (generate with: openssl rand -base64 32)
+export MAXIO_KMS_MASTER_KEY="..."
+maxio serve --data-dir /data --port 9000
+```
+
+- Optional per-request key id: `x-amz-server-side-encryption-aws-kms-key-id`
+- Default key id when omitted: `maxio-local-kms`
+- Per-object metadata stores `kms_key_id` + KMS-wrapped DEK in the object encryption sidecar
+- **PutBucketEncryption** accepts `aws:kms` when KMS is configured
+
+**Airgap / on-prem:** replace LocalKmsBackend with HashiCorp **Vault transit** or an HSM integration on your internal network — never cloud KMS endpoints in classified environments. Bootstrap KMS master material offline; back up key material with the same rigor as `.maxio-keys.json`.
+
+**S3 server access logging (P3-39):** configure per-bucket delivery with `PUT /{bucket}?logging` (XML `LoggingEnabled` with `TargetBucket` + `TargetPrefix`). Access lines append to `{prefix}{source_bucket}/YYYY-MM-DD.log` in the target bucket.
 
 ## Disaster recovery runbook (P3-49)
 

@@ -6,64 +6,27 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Deserialize;
 use serde::Serialize;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::Instant;
+use std::sync::atomic::Ordering;
 
 use crate::api::console::console_router;
 use crate::api::cors::cors_middleware;
 use crate::api::router::s3_router;
-use crate::api::virtual_host::virtual_host_middleware;
 use crate::audit::audit_middleware;
-use crate::auth::credentials::CredentialStore;
-use crate::auth::keycloak::KeycloakAuth;
 use crate::auth::middleware::auth_middleware;
-use crate::cluster::ClusterState;
-use crate::config::Config;
 use crate::embedded::ui_handler;
 use crate::metrics::{metrics_handler, metrics_middleware};
-use crate::proxy::TrustedProxies;
-use crate::rate_limit::{AdminRateLimiter, LoginRateLimiter, S3RateLimiter};
-use crate::storage::backend::DynStorage;
 use crate::storage::quota::disk_space_bytes;
+
+pub use crate::app_state::{AppState, new_app_state};
 
 pub const HOUSEKEEPING_INTERVAL_SECS: u64 = 3600;
 
 /// Content-Security-Policy for all HTTP responses.
-///
-/// Scripts are loaded only from `'self'` (bundled assets under `/ui/`). Svelte
-/// component styles may be injected inline, so `style-src` retains `'unsafe-inline'`.
 pub const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'";
 
-#[derive(Clone)]
-pub struct AppState {
-    pub storage: DynStorage,
-    pub config: Arc<Config>,
-    pub login_rate_limiter: Arc<LoginRateLimiter>,
-    pub s3_rate_limiter: Arc<S3RateLimiter>,
-    pub admin_rate_limiter: Arc<AdminRateLimiter>,
-    pub trusted_proxies: Arc<TrustedProxies>,
-    pub started_at: Instant,
-    pub last_housekeeping_at: Arc<AtomicI64>,
-    pub credentials: Arc<CredentialStore>,
-    pub keycloak: Option<Arc<KeycloakAuth>>,
-    pub server_host: String,
-    pub metrics: Arc<crate::metrics::Metrics>,
-    pub cluster: Option<ClusterState>,
-}
-
 pub fn build_router(state: AppState) -> Router {
-    // CORS outermost so OPTIONS preflight is answered before SigV4 auth.
-    // Audit runs after auth on each route group so `AuthPrincipal` is populated.
+    // Request order: cors → auth (virtual-host, tenant, policy, access-log, audit) → handler.
     let s3_routes = s3_router()
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            virtual_host_middleware,
-        ))
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            audit_middleware,
-        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -259,37 +222,4 @@ async fn security_headers_middleware(
             "camera=(), microphone=(), geolocation=()",
         ));
     response
-}
-
-pub fn new_app_state(
-    storage: DynStorage,
-    config: Arc<Config>,
-    login_rate_limiter: Arc<LoginRateLimiter>,
-    credentials: Arc<CredentialStore>,
-    keycloak: Option<Arc<KeycloakAuth>>,
-    listen_port: Option<u16>,
-) -> AppState {
-    AppState {
-        storage,
-        config: config.clone(),
-        login_rate_limiter,
-        s3_rate_limiter: Arc::new(S3RateLimiter::from_config(
-            config.s3_rate_auth_max,
-            config.s3_rate_auth_window_secs,
-            config.s3_rate_put_max,
-            config.s3_rate_put_window_secs,
-        )),
-        admin_rate_limiter: Arc::new(AdminRateLimiter::from_config(
-            config.admin_rate_max,
-            config.admin_rate_window_secs,
-        )),
-        trusted_proxies: Arc::new(TrustedProxies::parse(&config.trusted_proxies)),
-        started_at: Instant::now(),
-        last_housekeeping_at: Arc::new(AtomicI64::new(0)),
-        credentials,
-        keycloak,
-        server_host: crate::api::virtual_host::effective_server_host(&config, listen_port),
-        metrics: Arc::new(crate::metrics::Metrics::default()),
-        cluster: config.cluster_mode.then(ClusterState::new),
-    }
 }

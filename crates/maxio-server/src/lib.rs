@@ -1,4 +1,6 @@
+pub mod access_log;
 pub mod api;
+pub mod app_state;
 pub mod audit;
 pub mod auth;
 pub mod cluster;
@@ -6,6 +8,7 @@ pub mod cluster_sync;
 pub mod config;
 pub mod embedded;
 pub mod error;
+pub mod events;
 pub mod metrics;
 pub mod proxy;
 pub mod rate_limit;

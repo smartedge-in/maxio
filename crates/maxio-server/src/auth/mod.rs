@@ -1,6 +1,9 @@
+pub mod bucket_policy;
 pub mod credentials;
 pub mod hmac;
 pub mod keycloak;
 pub mod middleware;
 pub mod principal;
 pub mod signature_v4;
+pub mod tenant;
+pub mod tenant_middleware;

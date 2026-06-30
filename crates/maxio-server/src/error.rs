@@ -404,6 +404,17 @@ pub fn map_storage_upload_error(err: maxio_storage::StorageError) -> S3Error {
         maxio_storage::StorageError::ChecksumMismatch(_) => S3Error::bad_checksum("x-amz-checksum"),
         maxio_storage::StorageError::EncryptionError(msg) => S3Error::invalid_argument(&msg),
         maxio_storage::StorageError::IntegrityError(msg) => S3Error::invalid_argument(&msg),
+        other => map_storage_object_error(other),
+    }
+}
+
+/// Map storage failures from object mutation paths (delete, retention, legal hold).
+pub fn map_storage_object_error(err: maxio_storage::StorageError) -> S3Error {
+    match err {
+        maxio_storage::StorageError::ObjectLocked(msg) => S3Error::access_denied(&msg),
+        maxio_storage::StorageError::NotFound(key) => S3Error::no_such_key(&key),
+        maxio_storage::StorageError::VersionNotFound(id) => S3Error::no_such_version(&id),
+        maxio_storage::StorageError::InvalidKey(msg) => S3Error::invalid_argument(&msg),
         other => S3Error::internal(other),
     }
 }

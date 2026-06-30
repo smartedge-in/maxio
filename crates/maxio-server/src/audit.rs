@@ -1,14 +1,15 @@
 use std::sync::{Mutex, OnceLock};
 
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::{Method, Uri};
 use axum::response::Response;
 use chrono::Utc;
 use serde::Serialize;
 
+use crate::api::virtual_host::{VirtualHostContext, extract_virtual_bucket, host_header_value};
+use crate::app_state::AppState;
 use crate::auth::principal::AuthPrincipal;
 use crate::proxy::client_ip_from_request;
-use crate::server::AppState;
 
 static AUDIT_CAPTURE: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 
@@ -42,6 +43,62 @@ pub struct AuditRecord {
     pub client_ip: String,
     pub status: u16,
     pub outcome: &'static str,
+}
+
+pub fn apply_virtual_host(state: &AppState, request: Request) -> Request {
+    let Some(host) = host_header_value(request.headers()) else {
+        return request;
+    };
+    let Some(bucket) = extract_virtual_bucket(&host, &state.server_host) else {
+        return request;
+    };
+    let signature_path = request.uri().path().to_string();
+    let (mut parts, body) = request.into_parts();
+    parts.extensions.insert(VirtualHostContext {
+        bucket,
+        signature_path,
+    });
+    Request::from_parts(parts, body)
+}
+
+/// Audit hook invoked from S3 auth middleware after handlers run.
+pub fn finish_s3_request_audit(
+    state: &AppState,
+    method: &Method,
+    uri: &Uri,
+    principal: Option<String>,
+    client_ip: &str,
+    response: &Response,
+) {
+    if !state.config.audit_log || !is_mutating(method) {
+        return;
+    }
+    let path = uri.path().to_string();
+    let principal = principal.unwrap_or_else(|| infer_principal(&path));
+    let (source, bucket, key, action) = parse_audit_target(method, uri);
+    let status = response.status().as_u16();
+    let outcome = if status < 400 { "success" } else { "failure" };
+    let record = AuditRecord {
+        timestamp: Utc::now().to_rfc3339(),
+        source,
+        action,
+        method: method.to_string(),
+        path,
+        bucket,
+        key,
+        principal,
+        client_ip: client_ip.to_string(),
+        status,
+        outcome,
+    };
+    if let Ok(line) = serde_json::to_string(&record) {
+        if let Some(lock) = AUDIT_CAPTURE.get()
+            && let Ok(mut lines) = lock.lock()
+        {
+            lines.push(line.clone());
+        }
+        tracing::info!(target: "maxio_audit", "{line}");
+    }
 }
 
 pub async fn audit_middleware(
