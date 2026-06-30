@@ -43,6 +43,7 @@ pub struct BucketPolicyTarget {
 }
 
 /// Policy gate for handlers that already extracted path/query/headers (avoids `Request` extractor).
+#[allow(clippy::too_many_arguments)] // policy gate: method, path, query, headers, vhost, principal, IP
 pub async fn enforce_bucket_policy_for_parts(
     state: &AppState,
     method: &str,
@@ -128,7 +129,7 @@ async fn enforce_policy_target(
     };
 
     let decision = maxio_storage::policy::evaluate_policy_v2(&policy, &req, &ctx)
-        .map_err(|e| S3Error::malformed_policy(e))?;
+        .map_err(S3Error::malformed_policy)?;
 
     match decision {
         PolicyDecision::Allow => Ok(()),
@@ -205,12 +206,12 @@ fn extract_bucket_and_key(
     signature_path: Option<&str>,
     state: &AppState,
 ) -> Option<(String, Option<String>)> {
-    if let Some(host) = host {
-        if let Some(bucket) = extract_virtual_bucket(host, &state.server_host) {
-            let object_path = signature_path.unwrap_or(path);
-            let key = object_key_from_signature_path(object_path).map(str::to_string);
-            return Some((bucket, key));
-        }
+    if let Some(host) = host
+        && let Some(bucket) = extract_virtual_bucket(host, &state.server_host)
+    {
+        let object_path = signature_path.unwrap_or(path);
+        let key = object_key_from_signature_path(object_path).map(str::to_string);
+        return Some((bucket, key));
     }
 
     let trimmed = path.trim_start_matches('/');

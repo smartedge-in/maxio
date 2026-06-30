@@ -96,6 +96,7 @@ pub struct FilesystemStorage {
 }
 
 impl FilesystemStorage {
+    #[allow(clippy::too_many_arguments)] // storage bootstrap: paths, EC, keyring, KMS, quota, index
     pub async fn new(
         data_dir: &str,
         erasure_coding: bool,

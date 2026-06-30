@@ -121,10 +121,9 @@ async fn console_tenant_middleware(
     if let (Some(principal), Some(bucket)) = (
         principal.as_ref(),
         bucket_from_console_path(request.uri().path()),
-    ) {
-        if let Some(resp) = console_bucket_gate(&state, principal, &bucket).await {
-            return resp;
-        }
+    ) && let Some(resp) = console_bucket_gate(&state, principal, &bucket).await
+    {
+        return resp;
     }
     next.run(request).await
 }

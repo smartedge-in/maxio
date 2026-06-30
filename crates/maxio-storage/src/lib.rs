@@ -137,12 +137,11 @@ pub fn is_object_protected(meta: &ObjectMeta) -> bool {
     if meta.legal_hold_status == Some(LegalHoldStatus::On) {
         return true;
     }
-    if let Some(ref until) = meta.retain_until_date {
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(until) {
-            if chrono::Utc::now() < dt.with_timezone(&chrono::Utc) {
-                return true;
-            }
-        }
+    if let Some(ref until) = meta.retain_until_date
+        && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(until)
+        && chrono::Utc::now() < dt.with_timezone(&chrono::Utc)
+    {
+        return true;
     }
     false
 }

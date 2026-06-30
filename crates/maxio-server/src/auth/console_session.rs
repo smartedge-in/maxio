@@ -112,16 +112,16 @@ pub async fn resolve_console_principal(state: &AppState, token: &str) -> Option<
         let access_key = resolve_legacy_console_access_key(&state.credentials, token)?;
         return Some(ConsolePrincipal { access_key });
     }
-    if let Some(keycloak) = &state.keycloak {
-        if keycloak.validate_access_token(token).await.is_ok() {
-            let access_key = state.config.keycloak_console_access_key.trim().to_string();
-            let access_key = if access_key.is_empty() {
-                state.config.access_key.clone()
-            } else {
-                access_key
-            };
-            return Some(ConsolePrincipal { access_key });
-        }
+    if let Some(keycloak) = &state.keycloak
+        && keycloak.validate_access_token(token).await.is_ok()
+    {
+        let access_key = state.config.keycloak_console_access_key.trim().to_string();
+        let access_key = if access_key.is_empty() {
+            state.config.access_key.clone()
+        } else {
+            access_key
+        };
+        return Some(ConsolePrincipal { access_key });
     }
     None
 }

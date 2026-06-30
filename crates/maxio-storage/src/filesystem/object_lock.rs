@@ -123,7 +123,7 @@ impl FilesystemStorage {
     ) -> Result<(), StorageError> {
         let json = serde_json::to_string_pretty(meta)?;
         match version_id {
-            Some(vid) if vid == "null" => fs::write(self.meta_path(bucket, key), json).await?,
+            Some("null") => fs::write(self.meta_path(bucket, key), json).await?,
             Some(vid) => fs::write(self.version_meta_path(bucket, key, vid), json).await?,
             None => fs::write(self.meta_path(bucket, key), json).await?,
         }

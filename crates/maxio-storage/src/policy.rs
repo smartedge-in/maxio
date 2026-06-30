@@ -262,10 +262,10 @@ fn statement_matches_request(
     if !resource_matches_request(&stmt.resource, req, bucket_arn, object_arn) {
         return false;
     }
-    if let Some(cond) = &stmt.condition {
-        if !conditions_match(cond, req, ctx) {
-            return false;
-        }
+    if let Some(cond) = &stmt.condition
+        && !conditions_match(cond, req, ctx)
+    {
+        return false;
     }
     true
 }
@@ -402,10 +402,10 @@ fn principal_arns(principal: &Value) -> impl Iterator<Item = String> + '_ {
                 }
             } else if let Some(Value::Array(arr)) = map.get("AWS") {
                 for v in arr {
-                    if let Some(s) = v.as_str() {
-                        if s != "*" {
-                            arns.push(s.to_string());
-                        }
+                    if let Some(s) = v.as_str()
+                        && s != "*"
+                    {
+                        arns.push(s.to_string());
                     }
                 }
             }
@@ -1024,8 +1024,10 @@ mod tests {
                 "Condition": {"IpAddress": {"aws:SourceIp": "203.0.113.0/24"}}
             }]
         }"#;
-        let mut ctx = PolicyContext::default();
-        ctx.source_ip = Some("203.0.113.50".into());
+        let mut ctx = PolicyContext {
+            source_ip: Some("203.0.113.50".into()),
+            ..Default::default()
+        };
         assert_eq!(
             evaluate_policy_v2(raw, &put_req("net", "a"), &ctx).unwrap(),
             PolicyDecision::Allow

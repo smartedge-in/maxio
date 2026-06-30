@@ -50,6 +50,7 @@ fn query_string(params: &HashMap<String, String>) -> String {
 }
 
 /// Tenant + bucket-policy gates for object/bucket handlers (P3-28, P3-29).
+#[allow(clippy::too_many_arguments)] // gate surface: state, ctx, method, bucket, key, params, headers, IP
 pub async fn enforce_s3_bucket_gates(
     state: &AppState,
     ctx: &S3RequestContext,

@@ -68,10 +68,10 @@ pub async fn enforce_tenant_scope(
 
 fn resolve_bucket_name(state: &AppState, request: &Request, path: &str) -> Option<String> {
     let host = host_header_value(request.headers());
-    if let Some(host) = host.as_deref() {
-        if let Some(bucket) = extract_virtual_bucket(host, &state.server_host) {
-            return Some(bucket);
-        }
+    if let Some(host) = host.as_deref()
+        && let Some(bucket) = extract_virtual_bucket(host, &state.server_host)
+    {
+        return Some(bucket);
     }
     if let Some(ctx) = request.extensions().get::<VirtualHostContext>() {
         return Some(ctx.bucket.clone());
