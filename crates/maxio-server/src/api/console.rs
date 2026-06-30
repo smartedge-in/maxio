@@ -52,13 +52,9 @@ async fn console_bucket_gate(
             )
                 .into_response(),
         ),
-        Err(_) => Some(
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Internal error"})),
-            )
-                .into_response(),
-        ),
+        // Bucket metadata unreadable — let the handler surface a specific error
+        // (e.g. corrupt `.bucket.json` → "failed to read bucket encryption").
+        Err(_) => None,
     }
 }
 
