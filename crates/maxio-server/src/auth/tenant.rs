@@ -62,11 +62,13 @@ pub async fn find_bucket_meta(
     match state.storage.head_bucket(bucket_name).await {
         Ok(false) => return Ok(None),
         Ok(true) => {}
+        Err(crate::storage::StorageError::InvalidKey(_)) => return Ok(None),
         Err(e) => return Err(S3Error::internal(e)),
     }
     match state.storage.get_bucket_meta(bucket_name).await {
         Ok(meta) => Ok(Some(meta)),
-        Err(crate::storage::StorageError::NotFound(_)) => Ok(None),
+        Err(crate::storage::StorageError::NotFound(_))
+        | Err(crate::storage::StorageError::InvalidKey(_)) => Ok(None),
         Err(e) => Err(S3Error::internal(e)),
     }
 }

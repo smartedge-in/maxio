@@ -8104,7 +8104,8 @@ async fn test_bucket_policy_malformed_rejected() {
     let (base_url, _tmp) = start_server().await;
     s3_request("PUT", &format!("{base_url}/bad-pol"), vec![]).await;
 
-    let policy = r#"{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bad-pol/*"}]}"#;
+    // v2 accepts Effect=Deny; use an unsupported action to trigger MalformedPolicy.
+    let policy = r#"{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:NotARealAction","Resource":"arn:aws:s3:::bad-pol/*"}]}"#;
     assert_eq!(
         put_bucket_policy_signed(&base_url, "bad-pol", policy).await,
         400
