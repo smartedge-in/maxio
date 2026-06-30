@@ -8386,6 +8386,7 @@ async fn test_metrics_dedicated_port() {
 
 #[tokio::test]
 async fn test_audit_log_captures_s3_principal_and_object() {
+    let _audit_guard = maxio::audit::lock_audit_tests().await;
     maxio::audit::enable_audit_capture();
     let _ = maxio::audit::drain_audit_capture();
 
@@ -8409,19 +8410,9 @@ async fn test_audit_log_captures_s3_principal_and_object() {
     .await;
     assert_eq!(resp.status(), 200);
 
-    let lines: Vec<serde_json::Value> = maxio::audit::drain_audit_capture()
-        .into_iter()
-        .filter_map(|line| serde_json::from_str(&line).ok())
-        .filter(|record: &serde_json::Value| {
-            record["bucket"] == "audit-bucket" && record["key"] == "tracked.txt"
-        })
-        .collect();
-    assert_eq!(
-        lines.len(),
-        1,
-        "expected one object PUT audit line for tracked.txt"
-    );
-    let record = &lines[0];
+    let lines = maxio::audit::drain_audit_capture();
+    assert_eq!(lines.len(), 1, "expected one object PUT audit line");
+    let record: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
     assert_eq!(record["source"], "s3");
     assert_eq!(record["principal"], ACCESS_KEY);
     assert_eq!(record["bucket"], "audit-bucket");
@@ -8432,6 +8423,7 @@ async fn test_audit_log_captures_s3_principal_and_object() {
 
 #[tokio::test]
 async fn test_audit_log_skips_get_requests() {
+    let _audit_guard = maxio::audit::lock_audit_tests().await;
     maxio::audit::enable_audit_capture();
     let _ = maxio::audit::drain_audit_capture();
 
