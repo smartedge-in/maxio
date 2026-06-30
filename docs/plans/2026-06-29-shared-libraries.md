@@ -56,9 +56,9 @@ maxio-ui      — static assets only (P3-16); no Rust shared lib with server
 
 ## Crate boundary enforcement (P3-23)
 
-**CI:** `make crate-boundaries` runs `scripts/check-crate-boundaries.sh` before tests. The same rules are duplicated in `deny.toml` `[bans].deny` for `cargo deny check bans`.
+**CI:** `make crate-boundaries` runs `scripts/check-crate-boundaries.sh` before tests.
 
-CI policy (cargo-deny `bans` or custom script):
+CI policy (`check-crate-boundaries.sh`):
 
 | Rule | Rationale |
 |------|-----------|
@@ -82,5 +82,5 @@ CI policy (cargo-deny `bans` or custom script):
 - [x] `maxio-common` published in workspace with documented allow/deny deps
 - [x] Admin API types shared between server and `maxio-admin` (no JSON shape drift)
 - [ ] `maxio-admin` depends on `common` + `storage` only
-- [x] CI fails on forbidden crate edges (`make crate-boundaries`, `deny.toml` bans)
+- [x] CI fails on forbidden crate edges (`make crate-boundaries`)
 - [ ] No requirement for UI, server, and storage to share one Rust library beyond this split
